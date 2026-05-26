@@ -338,3 +338,64 @@ def test_deploy_statemachine_and_opensearch_domain():
             break
         time.sleep(0.5)
     assert "cfntest-flow" not in [m["name"] for m in sfn.list_state_machines()["stateMachines"]]
+
+
+@pytest.mark.skipif(not (_moto_up() and _sfn_up()), reason="moto + DynamoDB Local + Step Functions not running")
+def test_deploy_all_resource_types_one_stack():
+    """One stack provisioning every supported type into its real engine at once.
+
+    Covers the resource types whose engines run in the CI integration tier
+    (S3Proxy, DynamoDB Local, Step Functions Local, moto). OpenSearch::Domain is
+    exercised separately (it needs the OpenSearch container) in the test above.
+    """
+    from oblako_ml.services import StepFunctionsService
+
+    cfn = boto3.client("cloudformation", endpoint_url=start_in_thread(), **CREDS)
+    s3 = S3ProxyService().get_client()
+    ddb = DynamoDBService(host_port=8001).get_client()
+    sfn = StepFunctionsService().get_client()
+    lam, iam, rs, rds_, apigw = (_moto_client(s) for s in
+                                 ("lambda", "iam", "redshift", "rds", "apigateway"))
+    asl = json.dumps({"StartAt": "Done", "States": {"Done": {"Type": "Pass", "End": True}}})
+
+    template = json.dumps({
+        "Transform": "AWS::Serverless-2016-10-31",
+        "Resources": {
+            "Bucket": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": "cfnall-bucket"}},
+            "Table": {"Type": "AWS::DynamoDB::Table", "Properties": {
+                "TableName": "cfnall-table",
+                "AttributeDefinitions": [{"AttributeName": "id", "AttributeType": "S"}],
+                "KeySchema": [{"AttributeName": "id", "KeyType": "HASH"}]}},
+            "Flow": {"Type": "AWS::StepFunctions::StateMachine", "Properties": {
+                "StateMachineName": "cfnall-flow", "DefinitionString": asl,
+                "RoleArn": "arn:aws:iam::012345678901:role/DummyRole"}},
+            "Warehouse": {"Type": "AWS::Redshift::Cluster", "Properties": {
+                "ClusterIdentifier": "cfnall-dw", "NodeType": "ra3.xlplus",
+                "MasterUsername": "oblako", "MasterUserPassword": "Oblako123"}},
+            "Database": {"Type": "AWS::RDS::DBInstance", "Properties": {
+                "DBInstanceIdentifier": "cfnall-db", "Engine": "postgres",
+                "MasterUsername": "oblako", "MasterUserPassword": "Oblako123"}},
+            "Worker": {"Type": "AWS::Serverless::Function", "Properties": {
+                "FunctionName": "cfnall-fn", "Handler": "app.handler", "Runtime": "python3.12",
+                "Events": {"Get": {"Type": "Api", "Properties": {"Path": "/x", "Method": "get"}}}}},
+        },
+    })
+    cfn.create_change_set(StackName="cfnall", TemplateBody=template, ChangeSetName="cs", ChangeSetType="CREATE")
+    cfn.execute_change_set(StackName="cfnall", ChangeSetName="cs")
+    cfn.get_waiter("stack_create_complete").wait(StackName="cfnall")
+
+    try:
+        assert "cfnall-bucket" in [b["Name"] for b in s3.list_buckets()["Buckets"]]
+        assert "cfnall-table" in ddb.list_tables()["TableNames"]
+        assert "cfnall-flow" in [m["name"] for m in sfn.list_state_machines()["stateMachines"]]
+        assert "cfnall-dw" in [c["ClusterIdentifier"] for c in rs.describe_clusters()["Clusters"]]
+        assert "cfnall-db" in [d["DBInstanceIdentifier"] for d in rds_.describe_db_instances()["DBInstances"]]
+        assert "cfnall-fn" in [f["FunctionName"] for f in lam.list_functions()["Functions"]]
+        assert any("Worker" in r["RoleName"] for r in iam.list_roles()["Roles"])
+        assert "ServerlessRestApi" in [a["name"] for a in apigw.get_rest_apis()["items"]]
+    finally:
+        cfn.delete_stack(StackName="cfnall")
+        cfn.get_waiter("stack_delete_complete").wait(StackName="cfnall")
+
+    assert "cfnall-bucket" not in [b["Name"] for b in s3.list_buckets()["Buckets"]]
+    assert "cfnall-db" not in [d["DBInstanceIdentifier"] for d in rds_.describe_db_instances()["DBInstances"]]
