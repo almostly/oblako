@@ -1,5 +1,7 @@
 # oblako-ml
 
+[![CI](https://github.com/almostly/oblako/actions/workflows/ci.yml/badge.svg)](https://github.com/almostly/oblako/actions/workflows/ci.yml)
+
 Local AWS ML platform. Run Bedrock, SageMaker, Step Functions, and more on your laptop, no cloud required.
 
 Unlike LocalStack, oblako-ml wires together **real local modes** of AWS services and open-source alternatives:
