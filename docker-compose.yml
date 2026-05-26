@@ -1,0 +1,85 @@
+services:
+  # Bedrock, powered by the Ollama engine.
+  bedrock:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  opensearch:
+    image: opensearchproject/opensearch:2
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=admin
+    volumes:
+      - opensearch_data:/usr/share/opensearch/data
+
+  redshift:
+    image: hearthsim/pgredshift:latest
+    ports:
+      - "5439:5432"
+    environment:
+      POSTGRES_USER: oblako
+      POSTGRES_PASSWORD: oblako
+      POSTGRES_DB: oblako
+    volumes:
+      - redshift_data:/var/lib/postgresql/data
+
+  # RDS / Aurora data-plane engine (control plane is moto's 'rds' API).
+  rds:
+    image: postgres:16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: oblako
+      POSTGRES_PASSWORD: oblako
+      POSTGRES_DB: oblako
+    volumes:
+      - rds_data:/var/lib/postgresql/data
+
+  # Control plane (Redshift clusters, RDS/Aurora instances+clusters) via moto.
+  moto:
+    image: motoserver/moto:latest
+    ports:
+      - "5500:5000"
+
+  s3proxy:
+    image: andrewgaul/s3proxy:latest
+    ports:
+      - "9000:80"
+    environment:
+      JCLOUDS_FILESYSTEM_BASEDIR: /data
+      S3PROXY_AUTHORIZATION: none
+    volumes:
+      - s3_data:/data
+
+  dynamodb:
+    image: amazon/dynamodb-local:latest
+    # -sharedDb -dbPath makes dynamodb-local actually persist to the volume;
+    # user: root so it can write to the root-owned named volume.
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath ./data"
+    working_dir: /home/dynamodblocal
+    user: root
+    ports:
+      - "8001:8000"
+    volumes:
+      - dynamodb_data:/home/dynamodblocal/data
+
+  stepfunctions:
+    image: amazon/aws-stepfunctions-local:latest
+    ports:
+      - "8083:8083"
+    environment:
+      - LAMBDA_ENDPOINT=http://host.docker.internal:3001
+
+volumes:
+  ollama_data:
+  opensearch_data:
+  redshift_data:
+  rds_data:
+  s3_data:
+  dynamodb_data:

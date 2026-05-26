@@ -1,0 +1,63 @@
+{
+  "Comment": "SageMaker hyperparameter tuning + save best model + batch transform - oblako-ml local version.",
+  "StartAt": "GenerateDataset",
+  "States": {
+    "GenerateDataset": {
+      "Type": "Pass",
+      "Result": {
+        "train_uri": "s3://oblako-ml/csv/train.csv",
+        "validation_uri": "s3://oblako-ml/csv/validation.csv",
+        "test_uri": "s3://oblako-ml/csv/test.csv"
+      },
+      "Next": "HyperparameterTuning"
+    },
+    "HyperparameterTuning": {
+      "Type": "Pass",
+      "Comment": "Simulates SageMaker createHyperParameterTuningJob.sync with Bayesian strategy",
+      "Result": {
+        "BestTrainingJob": {
+          "TrainingJobName": "xgboost-hpo-best-002",
+          "FinalHyperParameterTuningJobObjectiveMetric": {
+            "MetricName": "validation:rmse",
+            "Value": 0.189
+          },
+          "TunedHyperParameters": {
+            "alpha": "12.45",
+            "gamma": "0.87",
+            "max_delta_step": "3",
+            "max_depth": "6"
+          }
+        },
+        "HyperParameterTuningJobStatus": "Completed",
+        "TrainingJobStatusCounters": {
+          "Completed": 2,
+          "InProgress": 0,
+          "NonRetryableError": 0
+        }
+      },
+      "Next": "SaveBestModel"
+    },
+    "SaveBestModel": {
+      "Type": "Pass",
+      "Comment": "Simulates SageMaker createModel from best HPO result",
+      "Parameters": {
+        "ModelName.$": "$.BestTrainingJob.TrainingJobName",
+        "ModelDataUrl": "s3://oblako-ml/models/xgboost-hpo-best-002/output/model.tar.gz",
+        "BestMetric.$": "$.BestTrainingJob.FinalHyperParameterTuningJobObjectiveMetric",
+        "status": "Created"
+      },
+      "Next": "BatchTransform"
+    },
+    "BatchTransform": {
+      "Type": "Pass",
+      "Comment": "Simulates SageMaker createTransformJob.sync using best model",
+      "Parameters": {
+        "ModelName.$": "$.ModelName",
+        "input_uri": "s3://oblako-ml/csv/test.csv",
+        "output_uri": "s3://oblako-ml/output/test.csv.out",
+        "status": "Completed"
+      },
+      "End": true
+    }
+  }
+}

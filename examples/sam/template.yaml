@@ -1,0 +1,34 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: oblako + SAM local — a Lambda that uses oblako's S3 (S3Proxy) and DynamoDB Local.
+
+Resources:
+  OblakoFn:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: oblako-sam-demo
+      CodeUri: ./
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Timeout: 30
+      Environment:
+        Variables:
+          # oblako services run on the host; the Lambda container reaches them
+          # via host.docker.internal. Point boto3 at oblako's ports.
+          S3_ENDPOINT: http://host.docker.internal:9000
+          DDB_ENDPOINT: http://host.docker.internal:8001
+      Events:
+        # `sam local start-api` turns these into a local API Gateway on :3000.
+        PutItem:
+          Type: Api
+          Properties:
+            Path: /items/{id}
+            Method: put
+        GetItem:
+          Type: Api
+          Properties:
+            Path: /items/{id}
+            Method: get
+    Metadata:
+      # Build dependencies with uv instead of pip (SAM beta feature).
+      BuildMethod: python-uv

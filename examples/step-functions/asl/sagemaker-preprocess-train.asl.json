@@ -1,0 +1,45 @@
+{
+  "Comment": "SageMaker preprocess + train - oblako-ml local version. Simulates: Lambda generates data -> processing job (standardization) -> training job (XGBoost).",
+  "StartAt": "GenerateDataset",
+  "States": {
+    "GenerateDataset": {
+      "Type": "Pass",
+      "Result": {
+        "dataset_location": "s3://oblako-ml/input/raw.csv",
+        "num_samples": 1000,
+        "num_features": 10
+      },
+      "Next": "Standardize"
+    },
+    "Standardize": {
+      "Type": "Pass",
+      "Comment": "Simulates SageMaker Processing Job: x' = (x - mean) / std",
+      "Parameters": {
+        "input_location.$": "$.dataset_location",
+        "output_location": "s3://oblako-ml/train/standardized.csv",
+        "processing_job": "standardization",
+        "status": "Completed"
+      },
+      "Next": "TrainXGBoost"
+    },
+    "TrainXGBoost": {
+      "Type": "Pass",
+      "Comment": "Simulates SageMaker Training Job with XGBoost",
+      "Result": {
+        "training_job": "xgboost-training",
+        "model_artifact": "s3://oblako-ml/models/xgboost/model.tar.gz",
+        "hyperparameters": {
+          "objective": "reg:logistic",
+          "eval_metric": "rmse",
+          "num_round": "5"
+        },
+        "metrics": {
+          "train_rmse": 0.234,
+          "validation_rmse": 0.267
+        },
+        "status": "Completed"
+      },
+      "End": true
+    }
+  }
+}

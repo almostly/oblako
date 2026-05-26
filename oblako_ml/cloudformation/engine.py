@@ -1,0 +1,286 @@
+"""Local CloudFormation engine: parse a template, resolve intrinsics, and
+provision resources into oblako's real engines via the provider registry.
+"""
+
+from __future__ import annotations
+
+import datetime
+import json
+import threading
+import uuid
+
+import yaml
+
+from .providers import PROVIDERS
+from .transform import is_sam, transform_sam
+
+REGION = "us-east-1"
+ACCOUNT = "000000000000"
+
+
+class StackNotFound(Exception):
+    pass
+
+
+# CloudFormation-flavored YAML (handles !Ref, !GetAtt, !Sub, … short tags)
+class _CfnLoader(yaml.SafeLoader):
+    pass
+
+
+def _multi(loader, tag_suffix, node):
+    tag = tag_suffix  # e.g. "Ref", "GetAtt", "Sub", "Join"
+    if isinstance(node, yaml.ScalarNode):
+        value = loader.construct_scalar(node)
+    elif isinstance(node, yaml.SequenceNode):
+        value = loader.construct_sequence(node, deep=True)
+    else:
+        value = loader.construct_mapping(node, deep=True)
+    if tag == "Ref":
+        return {"Ref": value}
+    if tag == "Condition":
+        return {"Condition": value}
+    if tag == "GetAtt" and isinstance(value, str):
+        return {"Fn::GetAtt": value.split(".", 1)}
+    return {f"Fn::{tag}": value}
+
+
+_CfnLoader.add_multi_constructor("!", _multi)
+
+
+def parse_template(body: str) -> dict:
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        return yaml.load(body, Loader=_CfnLoader)
+
+
+# Intrinsic resolution
+def _resolve(node, ctx):
+    if isinstance(node, dict):
+        if len(node) == 1:
+            (k, v), = node.items()
+            if k == "Ref":
+                return _ref(v, ctx)
+            if k == "Fn::GetAtt":
+                if isinstance(v, list):
+                    logical, attr = v[0], (v[1] if len(v) > 1 else None)
+                else:
+                    logical, _, attr = v.partition(".")
+                    attr = attr or None
+                attrs = ctx.get("attrs", {}).get(logical, {})
+                if attr in attrs:
+                    return attrs[attr]
+                return ctx["physical"].get(logical, logical)
+            if k == "Fn::Sub":
+                tmpl = v[0] if isinstance(v, list) else v
+                return _sub(tmpl, ctx)
+            if k == "Fn::Join":
+                delim, parts = v
+                return delim.join(str(_resolve(p, ctx)) for p in parts)
+        return {k: _resolve(val, ctx) for k, val in node.items()}
+    if isinstance(node, list):
+        return [_resolve(x, ctx) for x in node]
+    return node
+
+
+def _ref(name, ctx):
+    pseudo = {"AWS::Region": REGION, "AWS::AccountId": ACCOUNT, "AWS::StackName": ctx["stack"],
+              "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com", "AWS::NoValue": None}
+    if name in pseudo:
+        return pseudo[name]
+    if name in ctx["params"]:
+        return ctx["params"][name]
+    if name in ctx["physical"]:
+        return ctx["physical"][name]
+    return name
+
+
+def _sub(template, ctx):
+    import re
+
+    def repl(m):
+        return str(_ref(m.group(1).strip(), ctx))
+
+    return re.sub(r"\$\{([^}]+)\}", repl, template)
+
+
+def _resource_deps(resource):
+    """Logical ids this resource references (for ordering)."""
+    deps = set(resource.get("DependsOn", []) if isinstance(resource.get("DependsOn"), list)
+               else ([resource["DependsOn"]] if "DependsOn" in resource else []))
+
+    def walk(node):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if k == "Ref" and isinstance(v, str):
+                    deps.add(v)
+                elif k == "Fn::GetAtt":
+                    deps.add(v[0] if isinstance(v, list) else v.split(".")[0])
+                else:
+                    walk(v)
+        elif isinstance(node, list):
+            for x in node:
+                walk(x)
+
+    walk(resource.get("Properties", {}))
+    return deps
+
+
+def _ordered(resources):
+    """Topologically order resources by intra-template references (best effort)."""
+    ids = list(resources)
+    deps = {rid: _resource_deps(r) & set(ids) for rid, r in resources.items()}
+    ordered, seen = [], set()
+
+    def visit(rid, stack):
+        if rid in seen or rid in stack:
+            return
+        stack.add(rid)
+        for d in deps[rid]:
+            visit(d, stack)
+        stack.discard(rid)
+        seen.add(rid)
+        ordered.append(rid)
+
+    for rid in ids:
+        visit(rid, set())
+    return ordered
+
+
+class StackStore:
+    def __init__(self):
+        self._stacks: dict[str, dict] = {}
+        self._lock = threading.Lock()
+
+    def get(self, name):
+        stack = self._stacks.get(name)
+        if stack is None:
+            raise StackNotFound(f"Stack with id {name} does not exist")
+        return stack
+
+    def exists(self, name):
+        return name in self._stacks
+
+    def all(self):
+        return list(self._stacks.values())
+
+    def describe_stack_resources(self, name):
+        stack = self.get(name)
+        status = stack["StackStatus"] if stack["StackStatus"].endswith(("COMPLETE", "FAILED")) else "CREATE_COMPLETE"
+        return [{"LogicalResourceId": rid, "PhysicalResourceId": r["PhysicalId"],
+                 "ResourceType": r["Type"], "ResourceStatus": status}
+                for rid, r in stack["resources"].items()]
+
+    def _new_stack(self, name, template, params):
+        return {
+            "StackId": f"arn:aws:cloudformation:{REGION}:{ACCOUNT}:stack/{name}/{uuid.uuid4()}",
+            "StackName": name,
+            "StackStatus": "REVIEW_IN_PROGRESS",
+            "CreationTime": datetime.datetime.now(datetime.timezone.utc),
+            "template": template,
+            "params": params,
+            "resources": {},
+            "Outputs": [],
+            "events": [],
+            "change_sets": {},
+        }
+
+    def create_change_set(self, name, template_body, params, cs_name, cs_type):
+        template = parse_template(template_body or "{}")
+        if is_sam(template):
+            template = transform_sam(template)  # expand SAM to base CFN resources
+        with self._lock:
+            if name not in self._stacks:
+                self._stacks[name] = self._new_stack(name, template, params)
+                # a stack-level event so describe_stack_events is never empty
+                # (sam deploy reads StackEvents[0] right after CreateChangeSet)
+                self._stacks[name]["events"].append(
+                    _event(self._stacks[name], name, "AWS::CloudFormation::Stack", name, "REVIEW_IN_PROGRESS"))
+            stack = self._stacks[name]
+            stack["template"] = template
+            stack["params"] = params
+            cs_id = f"arn:aws:cloudformation:{REGION}:{ACCOUNT}:changeSet/{cs_name}/{uuid.uuid4()}"
+            changes = [
+                {"Action": "Add", "LogicalResourceId": rid, "ResourceType": r["Type"]}
+                for rid, r in template.get("Resources", {}).items()
+            ]
+            stack["change_sets"][cs_name] = {"id": cs_id, "changes": changes, "type": cs_type}
+            return {"Id": cs_id, "StackId": stack["StackId"]}
+
+    def _find_cs(self, stack, ref):
+        """Resolve a change set by its name or its full Id (ARN)."""
+        css = stack["change_sets"]
+        if ref in css:
+            return ref, css[ref]
+        for cs_name, cs in css.items():
+            if cs["id"] == ref:
+                return cs_name, cs
+        raise StackNotFound(f"ChangeSet [{ref}] does not exist")
+
+    def describe_change_set(self, name, cs_ref):
+        stack = self.get(name)
+        cs_name, cs = self._find_cs(stack, cs_ref)
+        return {"ChangeSetName": cs_name, "ChangeSetId": cs["id"], "StackId": stack["StackId"],
+                "StackName": name, "Status": "CREATE_COMPLETE", "ExecutionStatus": "AVAILABLE",
+                "Changes": cs["changes"]}
+
+    def execute_change_set(self, name, cs_ref):
+        stack = self.get(name)
+        self._find_cs(stack, cs_ref)  # validate the change set exists
+        template = stack["template"]
+        # Template defaults first, then overlay any parameters the client passed.
+        params = {p: spec["Default"] for p, spec in template.get("Parameters", {}).items()
+                  if "Default" in spec}
+        params.update(stack["params"])
+        ctx = {"stack": name, "params": params, "physical": {}, "attrs": {}}
+        resources = template.get("Resources", {})
+        try:
+            for rid in _ordered(resources):
+                r = resources[rid]
+                rtype = r["Type"]
+                if rtype not in PROVIDERS:
+                    raise ValueError(f"unsupported resource type {rtype} (oblako CFN supports {sorted(PROVIDERS)})")
+                props = _resolve(r.get("Properties", {}), ctx)
+                result = PROVIDERS[rtype][0](rid, props, ctx)
+                # a provider returns a physical id, or {"PhysicalId", "Attributes"}
+                if isinstance(result, dict):
+                    physical, attrs = result["PhysicalId"], result.get("Attributes", {})
+                else:
+                    physical, attrs = result, {}
+                ctx["physical"][rid] = physical
+                ctx["attrs"][rid] = attrs
+                stack["resources"][rid] = {"Type": rtype, "PhysicalId": physical,
+                                           "Properties": props, "Attributes": attrs}
+                stack["events"].append(_event(stack, rid, rtype, physical, "CREATE_COMPLETE"))
+            stack["Outputs"] = [
+                {"OutputKey": k, "OutputValue": str(_resolve(o.get("Value"), ctx)),
+                 **({"Description": o["Description"]} if "Description" in o else {})}
+                for k, o in template.get("Outputs", {}).items()
+            ]
+            stack["StackStatus"] = "CREATE_COMPLETE"
+            stack["events"].append(_event(stack, name, "AWS::CloudFormation::Stack", name, "CREATE_COMPLETE"))
+        except Exception as e:  # noqa: BLE001
+            stack["StackStatus"] = "CREATE_FAILED"
+            stack["StackStatusReason"] = str(e)
+            stack["events"].append(_event(stack, name, "AWS::CloudFormation::Stack", name, "CREATE_FAILED", str(e)))
+            raise
+
+    def delete_stack(self, name):
+        with self._lock:
+            stack = self._stacks.get(name)
+            if not stack:
+                return
+            for rid, res in reversed(list(stack["resources"].items())):
+                PROVIDERS[res["Type"]][1](res["PhysicalId"], res["Properties"])
+            stack["StackStatus"] = "DELETE_COMPLETE"
+            self._stacks.pop(name, None)
+
+    def describe_stack_events(self, name):
+        return self.get(name)["events"]
+
+
+def _event(stack, logical, rtype, physical, status, reason=None):
+    return {"StackId": stack["StackId"], "EventId": uuid.uuid4().hex, "StackName": stack["StackName"],
+            "LogicalResourceId": logical, "PhysicalResourceId": physical, "ResourceType": rtype,
+            "Timestamp": datetime.datetime.now(datetime.timezone.utc), "ResourceStatus": status,
+            **({"ResourceStatusReason": reason} if reason else {})}

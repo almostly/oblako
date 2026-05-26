@@ -1,0 +1,47 @@
+{
+  "Comment": "SageMaker train + save model + batch transform - oblako-ml local version. Simulates: Lambda generates data -> training -> save model -> batch inference.",
+  "StartAt": "GenerateDataset",
+  "States": {
+    "GenerateDataset": {
+      "Type": "Pass",
+      "Result": {
+        "train_uri": "s3://oblako-ml/csv/train.csv",
+        "test_uri": "s3://oblako-ml/csv/test.csv"
+      },
+      "Next": "TrainXGBoost"
+    },
+    "TrainXGBoost": {
+      "Type": "Pass",
+      "Comment": "Simulates SageMaker createTrainingJob.sync",
+      "Result": {
+        "TrainingJobName": "xgboost-train-001",
+        "ModelArtifacts": {
+          "S3ModelArtifacts": "s3://oblako-ml/models/xgboost-train-001/output/model.tar.gz"
+        },
+        "status": "Completed"
+      },
+      "Next": "SaveModel"
+    },
+    "SaveModel": {
+      "Type": "Pass",
+      "Comment": "Simulates SageMaker createModel",
+      "Parameters": {
+        "ModelName.$": "$.TrainingJobName",
+        "ModelDataUrl.$": "$.ModelArtifacts.S3ModelArtifacts",
+        "status": "Created"
+      },
+      "Next": "BatchTransform"
+    },
+    "BatchTransform": {
+      "Type": "Pass",
+      "Comment": "Simulates SageMaker createTransformJob.sync",
+      "Parameters": {
+        "ModelName.$": "$.ModelName",
+        "input_uri": "s3://oblako-ml/csv/test.csv",
+        "output_uri": "s3://oblako-ml/output/test.csv.out",
+        "status": "Completed"
+      },
+      "End": true
+    }
+  }
+}

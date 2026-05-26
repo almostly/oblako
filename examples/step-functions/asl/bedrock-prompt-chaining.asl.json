@@ -1,0 +1,58 @@
+{
+  "Comment": "Bedrock prompt chaining - oblako-ml local version. Three prompts chained sequentially, each building on the previous response.",
+  "StartAt": "Prompt1",
+  "States": {
+    "Prompt1": {
+      "Type": "Pass",
+      "Result": {
+        "prompt": "What is credit risk?",
+        "response": "Credit risk is the possibility of loss from a borrower failing to repay a loan or meet contractual obligations.",
+        "model": "ollama/llama3.2"
+      },
+      "ResultPath": "$.turn1",
+      "Next": "Prompt2"
+    },
+    "Prompt2": {
+      "Type": "Pass",
+      "Result": {
+        "prompt": "How do you measure it?",
+        "response": "Credit risk is measured using probability of default (PD), loss given default (LGD), and exposure at default (EAD). Credit scorecards assign numerical scores based on borrower characteristics.",
+        "model": "ollama/llama3.2"
+      },
+      "ResultPath": "$.turn2",
+      "Next": "Prompt3"
+    },
+    "Prompt3": {
+      "Type": "Pass",
+      "Result": {
+        "prompt": "What role does machine learning play?",
+        "response": "Machine learning improves credit risk modeling through better feature engineering, non-linear patterns in default prediction, and automated scorecard development using gradient boosting and neural networks.",
+        "model": "ollama/llama3.2"
+      },
+      "ResultPath": "$.turn3",
+      "Next": "FormatResult"
+    },
+    "FormatResult": {
+      "Type": "Pass",
+      "Parameters": {
+        "turns": [
+          {
+            "prompt.$": "$.turn1.prompt",
+            "response.$": "$.turn1.response"
+          },
+          {
+            "prompt.$": "$.turn2.prompt",
+            "response.$": "$.turn2.response"
+          },
+          {
+            "prompt.$": "$.turn3.prompt",
+            "response.$": "$.turn3.response"
+          }
+        ],
+        "total_turns": 3,
+        "status": "completed"
+      },
+      "End": true
+    }
+  }
+}

@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+/dist/
+.eggs/
+
+# Virtual envs
+.venv/
+venv/
+.python-version
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Node (dashboard UI) — note: dashboard/ui/dist is committed (served by the app)
+node_modules/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# SAM build artifacts
+.aws-sam/
+
+# Local env files
+.env
+.env.*
