@@ -5,7 +5,7 @@ on:
   pull_request:
 
 jobs:
-  test:
+  unit:
     name: lint + unit tests
     runs-on: ubuntu-latest
     steps:
@@ -19,10 +19,7 @@ jobs:
       - name: Lint (ruff)
         run: uv run --python 3.12 --extra dev ruff check oblako_ml tests
 
-      # Docker-free subset. The other tests/ files are integration tests that need
-      # live services (pgredshift, S3Proxy, DynamoDB Local, moto, Step Functions,
-      # SageMaker local); their service checks skip them when nothing is running,
-      # so they're left out of CI rather than relied on to skip.
+      # Docker-free subset (parsing, inference math, in-process servers).
       - name: Unit tests
         run: >
           uv run --python 3.12 --extra dev python -m pytest -v
@@ -30,4 +27,40 @@ jobs:
           tests/test_bedrock_backends.py
           tests/test_services.py
           tests/test_redshift_ml_unit.py
+          tests/test_cloudformation.py
+
+  integration:
+    name: integration tests (Docker services)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Start the lightweight oblako services and wait for readiness (up to 120s
+      # each, for image pulls + DB init). Heavier tiers — Ollama/Bedrock,
+      # SageMaker local, OpenSearch — are intentionally not run here (see
+      # NEXT_STEPS): they need large pulls / extra deps / model downloads.
+      - name: Start services
+        run: >
+          uv run --python 3.12 --extra dev python -c "from oblako_ml.services import Oblako as O; import sys;
+          o = O(); svcs = [o.s3, o.dynamodb, o.moto, o.stepfunctions, o.redshift, o.rds];
+          [s.start() for s in svcs];
+          r = {s.name: s.wait_ready(timeout=120) for s in svcs};
+          print('ready:', r); sys.exit(0 if all(r.values()) else 1)"
+
+      # MySQL (test_rds_data mysql cases) and OpenSearch are not started, so those
+      # tests skip; the Step Functions tests use Pass-only state machines (no Lambda).
+      - name: Integration tests
+        run: >
+          uv run --python 3.12 --extra dev python -m pytest -v
+          tests/test_s3proxy.py
+          tests/test_stepfunctions.py
+          tests/test_redshift.py
+          tests/test_redshift_data.py
+          tests/test_rds.py
+          tests/test_rds_data.py
           tests/test_cloudformation.py
