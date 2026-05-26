@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: lint + unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Lint (ruff)
+        run: uv run --python 3.12 --extra dev ruff check oblako_ml tests
+
+      # Docker-free subset. The other tests/ files are integration tests that need
+      # live services (pgredshift, S3Proxy, DynamoDB Local, moto, Step Functions,
+      # SageMaker local); their service checks skip them when nothing is running,
+      # so they're left out of CI rather than relied on to skip.
+      - name: Unit tests
+        run: >
+          uv run --python 3.12 --extra dev python -m pytest -v
+          tests/test_bedrock_adapter.py
+          tests/test_bedrock_backends.py
+          tests/test_services.py
+          tests/test_redshift_ml_unit.py
+          tests/test_cloudformation.py
