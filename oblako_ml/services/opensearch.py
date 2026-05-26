@@ -28,7 +28,9 @@ class OpenSearchService(Service):
         try:
             resp = httpx.get(f"{self.url}/_cluster/health", timeout=3.0)
             return resp.status_code == 200
-        except (httpx.ConnectError, httpx.TimeoutException):
+        except httpx.HTTPError:
+            # a starting OpenSearch may accept then reset the connection
+            # (httpx.ReadError), not just refuse it — any transport error = not ready
             return False
 
     def create_knn_index(self, index_name: str, dimension: int = 1536) -> dict:
