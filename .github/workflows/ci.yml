@@ -32,6 +32,7 @@ jobs:
           tests/test_sfn_templates.py
           tests/test_config.py
           tests/test_iam_evaluator.py
+          tests/test_backends.py
 
   integration:
     name: integration tests (Docker services)

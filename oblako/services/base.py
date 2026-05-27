@@ -1,4 +1,4 @@
-"""Base service class using docker-py."""
+"""Base service class: container lifecycle over a pluggable ContainerBackend."""
 
 from __future__ import annotations
 
@@ -6,8 +6,7 @@ import time
 from dataclasses import dataclass, field
 from enum import Enum
 
-import docker
-from docker.errors import NotFound, APIError, DockerException
+from .backends import ABSENT, RUNNING, ContainerBackend, DockerBackend, get_backend
 
 
 class ServiceStatus(str, Enum):
@@ -41,18 +40,23 @@ class Service:
     command: str | list[str] | None = None
     working_dir: str | None = None
     container_user: str | None = None  # OS user inside the container (not a DB user)
-    _client: docker.DockerClient | None = field(default=None, repr=False)
+    backend: ContainerBackend = field(default_factory=get_backend, repr=False)
+    _client: object = field(default=None, repr=False)
 
     @property
-    def client(self) -> docker.DockerClient:
-        """Return (or lazily create) the Docker client."""
-        if self._client is None:
-            self._client = docker.from_env()
-        return self._client
+    def client(self):
+        """A docker-py client for Docker-native helpers (e.g. SageMaker local mode)."""
+        if self._client is not None:
+            return self._client
+        if isinstance(self.backend, DockerBackend):
+            return self.backend.client
+        import docker
+
+        return docker.from_env()
 
     @property
     def container_name(self) -> str:
-        """Return the Docker container name for this service."""
+        """Return the container name for this service."""
         return f"oblako-ml-{self.name}"
 
     def _port_bindings(self) -> dict:
@@ -61,74 +65,41 @@ class Service:
     def _exposed_ports(self) -> list:
         return [f"{p.container_port}/{p.protocol}" for p in self.ports]
 
-    # -----------------------------------------------------------------------------------------------
     # Lifecycle
-    # -----------------------------------------------------------------------------------------------
     def start(self) -> None:
-        """Pull image if needed and start the container."""
-        try:
-            self.client.images.get(self.image)
-        except NotFound:
-            print(f"Pulling {self.image}...")
-            self.client.images.pull(self.image)
-
-        # Remove existing container if stopped
-        try:
-            existing = self.client.containers.get(self.container_name)
-            if existing.status != "running":
-                existing.remove(force=True)
-            else:
-                print(f"{self.name} is already running")
-                return
-        except NotFound:
-            pass
-
+        """Pull the image if needed and start the container (idempotent)."""
+        self.backend.ensure_image(self.image)
+        status = self.backend.status(self.container_name)
+        if status == RUNNING:
+            print(f"{self.name} is already running")
+            return
+        if status != ABSENT:  # stopped leftover — clear it before recreating
+            self.backend.remove(self.container_name)
         print(f"Starting {self.name}...")
-        self.client.containers.run(
-            self.image,
-            name=self.container_name,
-            detach=True,
-            ports=self._port_bindings(),
-            environment=self.environment,
-            volumes=self.volumes,
-            extra_hosts=self.extra_hosts,
-            command=self.command,
-            working_dir=self.working_dir,
-            user=self.container_user,
+        self.backend.run(
+            name=self.container_name, image=self.image, ports=self._port_bindings(),
+            environment=self.environment, volumes=self.volumes, extra_hosts=self.extra_hosts,
+            command=self.command, working_dir=self.working_dir, user=self.container_user,
         )
 
     def stop(self) -> None:
         """Stop and remove the container."""
-        try:
-            container = self.client.containers.get(self.container_name)
-            container.stop(timeout=10)
-            container.remove()
+        if self.backend.status(self.container_name) != ABSENT:
+            self.backend.stop(self.container_name)
             print(f"{self.name} stopped")
-        except NotFound:
-            pass
 
-    # -----------------------------------------------------------------------------------------------
-    # Status and Health
-    # -----------------------------------------------------------------------------------------------
+    # Status and health
     def status(self) -> ServiceStatus:
         """Get current service status."""
         try:
-            container = self.client.containers.get(self.container_name)
-            if container.status == "running":
-                return ServiceStatus.RUNNING
-            return ServiceStatus.STOPPED
-        except NotFound:
-            return ServiceStatus.STOPPED
-        except (APIError, DockerException):
+            return ServiceStatus.RUNNING if self.backend.status(self.container_name) == RUNNING \
+                else ServiceStatus.STOPPED
+        except Exception:  # noqa: BLE001 - backend/daemon unreachable
             return ServiceStatus.ERROR
 
     def logs(self, tail: int = 50) -> str:
         """Get recent container logs."""
-        try:
-            container = self.client.containers.get(self.container_name)
-            return container.logs(tail=tail).decode("utf-8")
-        except NotFound:
-            return ""
+        return self.backend.logs(self.container_name, tail=tail)
 
     def wait_ready(self, timeout: float = 30.0, interval: float = 1.0) -> bool:
         """Wait until the service is healthy. Override _health_check for custom logic."""
@@ -150,6 +121,4 @@ class Service:
 
     def __repr__(self) -> str:
         """Return a concise string representation of the service."""
-        return (
-            f"{type(self).__name__}(name={self.name!r}, status={self.status().value})"
-        )
+        return f"{type(self).__name__}(name={self.name!r}, status={self.status().value})"

@@ -30,12 +30,12 @@ def test_service_status_stopped():
 
 
 def test_service_status_running():
+    from oblako.services import backends
+
     svc = Service(name="test", image="alpine:latest")
-    mock_client = MagicMock()
-    mock_container = MagicMock()
-    mock_container.status = "running"
-    mock_client.containers.get.return_value = mock_container
-    svc._client = mock_client
+    mock_backend = MagicMock()
+    mock_backend.status.return_value = backends.RUNNING
+    svc.backend = mock_backend
     assert svc.status() == ServiceStatus.RUNNING
 
 
