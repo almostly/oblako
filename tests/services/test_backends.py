@@ -15,15 +15,43 @@ def test_podman_and_colima_use_docker_backend(monkeypatch):
         assert isinstance(backends.get_backend(), backends.DockerBackend)
 
 
-def test_kubernetes_backend_selected_and_not_implemented(monkeypatch):
+def test_kubernetes_backend_selected(monkeypatch):
     monkeypatch.setenv("OBLAKO_CONTAINER_BACKEND", "kubernetes")
-    backend = backends.get_backend()
-    assert isinstance(backend, backends.KubernetesBackend)
-    import pytest
+    assert isinstance(backends.get_backend(), backends.KubernetesBackend)
 
-    with pytest.raises(NotImplementedError):
-        backend.run(name="x", image="y", ports={}, environment={}, volumes={},
-                    extra_hosts={}, command=None, working_dir=None, user=None)
+
+def test_build_k8s_manifests():
+    # A dynamodb-like Service maps to a Deployment + Service.
+    manifest = backends.build_k8s_manifests(
+        name="oblako-ml-dynamodb", image="amazon/dynamodb-local:latest",
+        ports={"8000/tcp": 8001}, environment={"FOO": "bar"},
+        volumes={"oblako-ml-dynamodb": {"bind": "/home/dynamodblocal/data", "mode": "rw"}},
+        extra_hosts={}, command="-jar DynamoDBLocal.jar -sharedDb -dbPath ./data",
+        working_dir="/home/dynamodblocal", user="root", namespace="oblako",
+    )
+    items = {i["kind"]: i for i in manifest["items"]}
+    container = items["Deployment"]["spec"]["template"]["spec"]["containers"][0]
+    assert container["image"] == "amazon/dynamodb-local:latest"
+    assert container["args"] == ["-jar", "DynamoDBLocal.jar", "-sharedDb", "-dbPath", "./data"]
+    assert container["ports"] == [{"containerPort": 8000}]
+    assert {"name": "FOO", "value": "bar"} in container["env"]
+    assert container["workingDir"] == "/home/dynamodblocal"
+    assert container["securityContext"] == {"runAsUser": 0}
+    assert container["volumeMounts"][0]["mountPath"] == "/home/dynamodblocal/data"
+    svc = items["Service"]["spec"]
+    assert svc["selector"] == {"app": "oblako-ml-dynamodb"}
+    assert svc["ports"] == [{"name": "p8000", "port": 8000, "targetPort": 8000}]
+
+
+def test_build_k8s_manifests_skips_host_gateway():
+    # docker's "host-gateway" has no k8s equivalent, so no hostAliases is emitted.
+    manifest = backends.build_k8s_manifests(
+        name="sfn", image="i", ports={}, environment={}, volumes={},
+        extra_hosts={"host.docker.internal": "host-gateway"}, command=None,
+        working_dir=None, user=None, namespace="oblako",
+    )
+    pod_spec = manifest["items"][0]["spec"]["template"]["spec"]
+    assert "hostAliases" not in pod_spec
 
 
 def test_docker_host_overrides_socket_autodetect(monkeypatch):

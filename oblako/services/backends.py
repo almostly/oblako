@@ -12,12 +12,20 @@ kubernetes. ``DOCKER_HOST`` always wins for the Docker-API runtimes.
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
+import subprocess
 
 # container status normalised across backends
 RUNNING = "running"
 STOPPED = "stopped"
 ABSENT = "absent"
+
+# Kubernetes backend: namespace + a registry of live `kubectl port-forward`
+# processes (so localhost:host_port reaches the in-cluster Service), keyed by name.
+K8S_NAMESPACE = os.environ.get("OBLAKO_K8S_NAMESPACE") or "oblako"
+_port_forwards: dict[str, list] = {}
 
 # Best-effort socket locations when DOCKER_HOST is unset (the runtime's `start`
 # command usually creates these). DOCKER_HOST overrides all of them.
@@ -141,42 +149,172 @@ class DockerBackend(ContainerBackend):
             return ""
 
 
-class KubernetesBackend(ContainerBackend):
-    """Run oblako services as Kubernetes workloads (e.g. on minikube).
+def _k8s_name(value: str) -> str:
+    """Sanitize a string to a DNS-1123 label for use as a k8s resource/volume name."""
+    out = "".join(c if (c.isalnum() or c == "-") else "-" for c in value.lower())
+    return out.strip("-") or "vol"
 
-    Planned: map each Service to a Deployment + Service, expose ports via
-    NodePort or ``kubectl port-forward``, and read status from the pod phase.
-    Not yet implemented — the abstraction exists so this is a drop-in addition.
+
+def _args_list(command) -> list | None:
+    """Map a docker command (str or list) to k8s container args."""
+    if command is None:
+        return None
+    return command if isinstance(command, list) else command.split()
+
+
+def _run_as_user(user) -> int | None:
+    """Map a docker user (e.g. 'root' or a uid) to a k8s runAsUser, else None."""
+    if user is None:
+        return None
+    if user == "root":
+        return 0
+    try:
+        return int(user)
+    except (TypeError, ValueError):
+        return None
+
+
+def build_k8s_manifests(*, name, image, ports, environment, volumes, extra_hosts,
+                        command, working_dir, user, namespace) -> dict:
+    """Build a Deployment + Service ``List`` manifest for a Service (pure, no cluster)."""
+    container_ports = [int(str(spec).split("/")[0]) for spec in ports]
+    mounts, volume_defs = [], []
+    for i, (vol, mount) in enumerate(volumes.items()):
+        vname = f"{_k8s_name(vol)}-{i}"
+        mounts.append({"name": vname, "mountPath": mount["bind"]})
+        volume_defs.append({"name": vname, "emptyDir": {}})
+
+    container = {
+        "name": name, "image": image, "imagePullPolicy": "IfNotPresent",
+        "env": [{"name": k, "value": str(v)} for k, v in environment.items()],
+        "ports": [{"containerPort": cp} for cp in container_ports],
+    }
+    args = _args_list(command)
+    if args:
+        container["args"] = args
+    if working_dir:
+        container["workingDir"] = working_dir
+    if mounts:
+        container["volumeMounts"] = mounts
+    uid = _run_as_user(user)
+    if uid is not None:
+        container["securityContext"] = {"runAsUser": uid}
+
+    pod_spec = {"containers": [container]}
+    if volume_defs:
+        pod_spec["volumes"] = volume_defs
+    # Concrete host IPs become hostAliases; docker's "host-gateway" has no k8s
+    # equivalent here (use host.minikube.internal in the manifest if needed).
+    aliases = [{"ip": ip, "hostnames": [host]} for host, ip in (extra_hosts or {}).items()
+               if ip and ip != "host-gateway"]
+    if aliases:
+        pod_spec["hostAliases"] = aliases
+
+    deployment = {
+        "apiVersion": "apps/v1", "kind": "Deployment",
+        "metadata": {"name": name, "namespace": namespace, "labels": {"app": name}},
+        "spec": {"replicas": 1, "selector": {"matchLabels": {"app": name}},
+                 "template": {"metadata": {"labels": {"app": name}}, "spec": pod_spec}},
+    }
+    service = {
+        "apiVersion": "v1", "kind": "Service",
+        "metadata": {"name": name, "namespace": namespace},
+        "spec": {"selector": {"app": name},
+                 "ports": [{"name": f"p{cp}", "port": cp, "targetPort": cp}
+                           for cp in container_ports]},
+    }
+    return {"apiVersion": "v1", "kind": "List", "items": [deployment, service]}
+
+
+class KubernetesBackend(ContainerBackend):
+    """Run oblako services as Kubernetes workloads (e.g. on minikube), via kubectl.
+
+    Each Service maps to a Deployment + Service; ``kubectl port-forward`` binds
+    localhost:host_port to the in-cluster Service so oblako's boto3 clients work
+    unchanged. Port-forwards live as long as the oblako process — after a restart,
+    re-run start (or restart) on a service to re-establish them.
     """
 
     name = "kubernetes"
 
-    _MSG = ("The Kubernetes backend is scaffolded but not implemented yet. "
-            "Use OBLAKO_CONTAINER_BACKEND=docker|podman|colima for now.")
+    def __init__(self, namespace: str | None = None, kubectl: str = "kubectl"):
+        """Initialize for the given namespace (default OBLAKO_K8S_NAMESPACE / 'oblako')."""
+        self.namespace = namespace or K8S_NAMESPACE
+        self.kubectl = kubectl
+
+    def _run(self, *args, stdin: str | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run([self.kubectl, *args], input=stdin, text=True,
+                              capture_output=True)
+
+    def _ns(self, *args) -> subprocess.CompletedProcess:
+        return self._run("-n", self.namespace, *args)
+
+    def _require_kubectl(self) -> None:
+        if shutil.which(self.kubectl) is None:
+            raise RuntimeError(
+                "kubectl not found — install it and point it at a cluster (e.g. minikube start).")
 
     def ensure_image(self, image: str) -> None:
-        """Not implemented."""
-        raise NotImplementedError(self._MSG)
+        """No image pre-pull: the cluster pulls it (use `minikube image load` for local images)."""
+        self._require_kubectl()
 
-    def run(self, **kwargs) -> None:
-        """Not implemented."""
-        raise NotImplementedError(self._MSG)
+    def _ensure_namespace(self) -> None:
+        if self._run("get", "namespace", self.namespace).returncode != 0:
+            self._run("create", "namespace", self.namespace)
+
+    def run(self, *, name, image, ports, environment, volumes, extra_hosts,
+            command, working_dir, user) -> None:
+        """Apply a Deployment + Service, wait for it, and port-forward each port."""
+        self._require_kubectl()
+        self._ensure_namespace()
+        manifest = build_k8s_manifests(
+            name=name, image=image, ports=ports, environment=environment, volumes=volumes,
+            extra_hosts=extra_hosts, command=command, working_dir=working_dir, user=user,
+            namespace=self.namespace,
+        )
+        applied = self._run("apply", "-f", "-", stdin=json.dumps(manifest))
+        if applied.returncode != 0:
+            raise RuntimeError(f"kubectl apply failed: {applied.stderr.strip()}")
+        self._ns("wait", "--for=condition=available", f"deployment/{name}", "--timeout=180s")
+        self._start_port_forward(name, ports)
+
+    def _start_port_forward(self, name: str, ports: dict) -> None:
+        self._stop_port_forward(name)
+        procs = []
+        for spec, host_port in ports.items():
+            container_port = int(str(spec).split("/")[0])
+            procs.append(subprocess.Popen(
+                [self.kubectl, "-n", self.namespace, "port-forward",
+                 f"service/{name}", f"{host_port}:{container_port}"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            ))
+        _port_forwards[name] = procs
+
+    def _stop_port_forward(self, name: str) -> None:
+        for proc in _port_forwards.pop(name, []):
+            proc.terminate()
 
     def status(self, name: str) -> str:
-        """Not implemented."""
-        raise NotImplementedError(self._MSG)
+        """Return RUNNING/STOPPED/ABSENT from the deployment's ready replicas."""
+        result = self._ns("get", "deployment", name, "-o", "jsonpath={.status.readyReplicas}")
+        if result.returncode != 0:
+            return ABSENT
+        ready = (result.stdout or "").strip()
+        return RUNNING if ready and int(ready) >= 1 else STOPPED
 
     def remove(self, name: str) -> None:
-        """Not implemented."""
-        raise NotImplementedError(self._MSG)
+        """Delete the Deployment + Service and stop its port-forwards."""
+        self._stop_port_forward(name)
+        self._ns("delete", "deployment,service", name, "--ignore-not-found")
 
     def stop(self, name: str) -> None:
-        """Not implemented."""
-        raise NotImplementedError(self._MSG)
+        """Stop the service (delete its workload + port-forwards)."""
+        self.remove(name)
 
     def logs(self, name: str, tail: int = 50) -> str:
-        """Not implemented."""
-        raise NotImplementedError(self._MSG)
+        """Return recent logs from the deployment's pods."""
+        result = self._ns("logs", f"deployment/{name}", f"--tail={tail}", "--all-containers")
+        return result.stdout if result.returncode == 0 else ""
 
 
 def _docker_backend_for(runtime: str) -> DockerBackend:
