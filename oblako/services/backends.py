@@ -16,6 +16,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 
 # container status normalised across backends
 RUNNING = "running"
@@ -280,15 +281,25 @@ class KubernetesBackend(ContainerBackend):
 
     def _start_port_forward(self, name: str, ports: dict) -> None:
         self._stop_port_forward(name)
-        procs = []
-        for spec, host_port in ports.items():
-            container_port = int(str(spec).split("/")[0])
-            procs.append(subprocess.Popen(
+        procs = [self._spawn_forward(name, host_port, int(str(spec).split("/")[0]))
+                 for spec, host_port in ports.items()]
+        _port_forwards[name] = procs
+
+    def _spawn_forward(self, name: str, host_port: int, container_port: int):
+        # port-forward can exit if it races ahead of the Service's endpoints being
+        # ready; retry a few times until it stays up.
+        proc = None
+        for _ in range(4):
+            proc = subprocess.Popen(
                 [self.kubectl, "-n", self.namespace, "port-forward",
                  f"service/{name}", f"{host_port}:{container_port}"],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            ))
-        _port_forwards[name] = procs
+            )
+            time.sleep(1.5)
+            if proc.poll() is None:  # still running -> forwarding established
+                return proc
+            time.sleep(1)
+        return proc
 
     def _stop_port_forward(self, name: str) -> None:
         for proc in _port_forwards.pop(name, []):
