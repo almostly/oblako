@@ -70,3 +70,24 @@ jobs:
           tests/rds/test_rds_data.py
           tests/opensearch/test_opensearch.py
           tests/cloudformation/test_cloudformation.py
+
+  kubernetes:
+    name: kubernetes backend (kind)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Provision a real cluster so the Kubernetes backend's run/port-forward path
+      # (not just the manifest builder) is exercised end to end.
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+
+      - name: Kubernetes backend test
+        run: >
+          uv run --python 3.12 --extra dev python -m pytest -v
+          tests/services/test_k8s_backend.py
