@@ -152,9 +152,16 @@ def spawn(port: int = 8888, token: str = "oblako", workdir: Path | None = None) 
         return {"url": url, "port": port, "already_running": True}
     env = make_env(workdir)
     env["JUPYTER_TOKEN"] = token
+    # Allow the dashboard to embed JupyterLab in an iframe: jupyter-server gates
+    # framing via the CSP frame-ancestors directive (overridable). XSRF is disabled
+    # because a cross-origin iframe can't carry jupyter's XSRF cookie (token auth
+    # still applies). Localhost-only, so this is fine for local dev.
+    csp = "frame-ancestors 'self' http://localhost:8000 http://127.0.0.1:8000"
     subprocess.Popen(
         [sys.executable, "-m", "jupyterlab", "--port", str(port),
-         "--no-browser", "--ServerApp.ip", "127.0.0.1"],
+         "--no-browser", "--ServerApp.ip", "127.0.0.1",
+         "--ServerApp.disable_check_xsrf=True",
+         '--ServerApp.tornado_settings={"headers": {"Content-Security-Policy": %r}}' % csp],
         cwd=str(workdir), env=env,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
     )

@@ -6,6 +6,9 @@ import Box from '@cloudscape-design/components/box'
 import Button from '@cloudscape-design/components/button'
 import Select from '@cloudscape-design/components/select'
 import ColumnLayout from '@cloudscape-design/components/column-layout'
+import Tabs from '@cloudscape-design/components/tabs'
+import Link from '@cloudscape-design/components/link'
+import Spinner from '@cloudscape-design/components/spinner'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-python'
 import 'prismjs/themes/prism.css'
@@ -148,24 +151,43 @@ function CodeEditor({ value, onChange, rows = 12 }) {
   )
 }
 
-export default function NotebookPage() {
+// Launches JupyterLab (pre-wired to oblako) and embeds it in an iframe.
+function JupyterLabTab() {
+  const [state, setState] = useState({ loading: true, url: null, error: null })
+
+  useEffect(() => {
+    let active = true
+    setState({ loading: true, url: null, error: null })
+    fetch(`${API}/api/notebook/launch`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => { if (active) setState({ loading: false, url: d.url || null, error: d.error || null }) })
+      .catch(e => { if (active) setState({ loading: false, url: null, error: e.message }) })
+    return () => { active = false }
+  }, [])
+
+  if (state.loading) {
+    return <Box padding="l"><Spinner /> Launching JupyterLab… (the first launch builds the server)</Box>
+  }
+  if (state.error) {
+    return <Box padding="l" color="text-status-error">{state.error}</Box>
+  }
+  return (
+    <SpaceBetween size="xs">
+      <Box float="right"><Link external href={state.url}>Open in a new tab</Link></Box>
+      <iframe
+        title="JupyterLab"
+        src={state.url}
+        style={{ width: '100%', height: '78vh', border: '1px solid #d5dbdb', borderRadius: 4 }}
+      />
+    </SpaceBetween>
+  )
+}
+
+function CellRunner() {
   const [code, setCode] = useState(SNIPPETS[0].value)
   const [cells, setCells] = useState([])
   const [loading, setLoading] = useState(false)
   const [selectedSnippet, setSelectedSnippet] = useState({ label: SNIPPETS[0].label, value: '0' })
-  const [launching, setLaunching] = useState(false)
-
-  const openJupyterLab = () => {
-    setLaunching(true)
-    fetch(`${API}/api/notebook/launch`, { method: 'POST' })
-      .then(r => r.json())
-      .then(data => {
-        setLaunching(false)
-        if (data.url) window.open(data.url, '_blank')
-        else alert(data.error || 'Failed to launch JupyterLab')
-      })
-      .catch(e => { setLaunching(false); alert(e.message) })
-  }
 
   const runCode = () => {
     if (!code.trim()) return
@@ -189,14 +211,6 @@ export default function NotebookPage() {
 
   return (
     <SpaceBetween size="l">
-      <Header
-        variant="h1"
-        actions={<Button iconName="external" loading={launching} onClick={openJupyterLab}>Open in JupyterLab</Button>}
-        description="Run quick cells here, or open the full JupyterLab — its kernel is pre-wired so plain boto3 hits oblako."
-      >
-        Notebook
-      </Header>
-
       <Container header={<Header variant="h2" actions={
         <ColumnLayout columns={2}>
           <Select
@@ -241,6 +255,29 @@ export default function NotebookPage() {
           </SpaceBetween>
         </Container>
       ))}
+    </SpaceBetween>
+  )
+}
+
+export default function NotebookPage() {
+  const [activeTabId, setActiveTabId] = useState('cells')
+
+  return (
+    <SpaceBetween size="l">
+      <Header
+        variant="h1"
+        description="Run quick cells server-side, or open the full JupyterLab embedded here — its kernel is pre-wired so plain boto3 hits oblako."
+      >
+        Notebook
+      </Header>
+      <Tabs
+        activeTabId={activeTabId}
+        onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
+        tabs={[
+          { id: 'cells', label: 'Quick cells', content: <CellRunner /> },
+          { id: 'jupyterlab', label: 'JupyterLab', content: <JupyterLabTab /> },
+        ]}
+      />
     </SpaceBetween>
   )
 }
