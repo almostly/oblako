@@ -29,6 +29,7 @@ _lock = threading.Lock()
 
 
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
+    """Return True if an rds-data server is responding on the given port."""
     try:
         with urllib.request.urlopen(f"http://localhost:{port}/", timeout=timeout) as resp:
             return resp.status == 200

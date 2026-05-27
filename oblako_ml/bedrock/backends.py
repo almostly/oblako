@@ -22,12 +22,16 @@ from .ollama_client import OllamaClient
 
 
 class OllamaBackend:
+    """Chat backend that delegates to a local Ollama instance."""
+
     provider = "ollama"
 
     def __init__(self, base_url: str = "http://localhost:11434"):
+        """Initialize with the Ollama server base URL."""
         self.client = OllamaClient(base_url)
 
     def chat(self, model_id, messages, *, max_tokens=None, temperature=None, top_p=None) -> dict:
+        """Send a chat request to Ollama and return a normalized result dict."""
         kwargs = {}
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
@@ -43,18 +47,23 @@ class OllamaBackend:
         }
 
     def list_models(self) -> list[dict]:
+        """Return a list of locally available Ollama models as modelId/providerName dicts."""
         return [{"modelId": m["name"], "providerName": self.provider} for m in self.client.list_models()]
 
 
 class OpenRouterBackend:
+    """Chat backend that forwards requests to OpenRouter's OpenAI-compatible API."""
+
     provider = "openrouter"
 
     def __init__(self, api_key: str, base_url: str = "https://openrouter.ai/api/v1", timeout: float = 120.0):
+        """Initialize with the OpenRouter API key and optional base URL and timeout."""
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
     def chat(self, model_id, messages, *, max_tokens=None, temperature=None, top_p=None) -> dict:
+        """Send a chat completion request to OpenRouter and return a normalized result dict."""
         payload = {"model": resolve_openrouter(model_id), "messages": messages}
         if max_tokens is not None:
             payload["max_tokens"] = max_tokens
@@ -82,6 +91,7 @@ class OpenRouterBackend:
         }
 
     def list_models(self) -> list[dict]:
+        """Return the configured OpenRouter model map as modelId/providerName dicts."""
         from .models import OPENROUTER_MODEL_MAP
 
         return [{"modelId": bid, "providerName": self.provider} for bid in OPENROUTER_MODEL_MAP]

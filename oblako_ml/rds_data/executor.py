@@ -37,8 +37,11 @@ def _json_safe(value):
 
 
 class RdsDataExecutor:
+    """Synchronous SQL executor for the RDS Data API (Postgres or MySQL)."""
+
     def __init__(self, host="localhost", port=5432, user="oblako", password="oblako",
                  database="oblako", engine="postgres"):
+        """Initialize connection parameters and choose the driver for the given engine."""
         if engine not in ("postgres", "mysql"):
             raise ValueError(f"engine must be 'postgres' or 'mysql', got {engine!r}")
         self.host = host
@@ -130,6 +133,7 @@ class RdsDataExecutor:
     # -- statements --------------------------------------------------------
     def execute(self, sql, database=None, parameters=None, transaction_id=None,
                 include_result_metadata=False, format_records_as=None) -> dict:
+        """Execute a SQL statement and return the result dict."""
         bound, params = self._bind(sql, parameters)
         if transaction_id:
             conn = self._txns.get(transaction_id)
@@ -162,6 +166,7 @@ class RdsDataExecutor:
                 conn.close()
 
     def batch(self, sql, parameter_sets=None, transaction_id=None) -> list[dict]:
+        """Execute a parameterised statement once per parameter set and return update results."""
         sets = parameter_sets if parameter_sets else [None]
         if transaction_id:
             conn = self._txns.get(transaction_id)
@@ -185,6 +190,7 @@ class RdsDataExecutor:
 
     # -- transactions ------------------------------------------------------
     def begin(self, database=None) -> str:
+        """Open a new database transaction and return its id."""
         tid = uuid.uuid4().hex
         conn = self._connect(database, autocommit=False)
         with self._lock:
@@ -199,6 +205,7 @@ class RdsDataExecutor:
         return conn
 
     def commit(self, transaction_id) -> str:
+        """Commit the given transaction and close its connection."""
         conn = self._pop(transaction_id)
         try:
             conn.commit()
@@ -207,6 +214,7 @@ class RdsDataExecutor:
         return "Transaction Committed"
 
     def rollback(self, transaction_id) -> str:
+        """Roll back the given transaction and close its connection."""
         conn = self._pop(transaction_id)
         try:
             conn.rollback()

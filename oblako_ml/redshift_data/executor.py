@@ -1,6 +1,6 @@
-"""Redshift Data API executor: runs SQL against the pgredshift container and
-shapes results like the real `redshift-data` API (Field / ColumnMetadata).
+"""Redshift Data API executor: runs SQL against the pgredshift container.
 
+Shapes results like the real ``redshift-data`` API (Field / ColumnMetadata).
 Ported from the aws-samples LocalStack Redshift provider, but backed by the
 single local pgredshift container instead of a per-cluster Postgres server.
 """
@@ -33,6 +33,7 @@ class RedshiftDataExecutor:
         password: str = "oblako",
         database: str = "oblako",
     ):
+        """Initialize connection parameters and empty in-memory statement store."""
         self.host = host
         self.port = port
         self.user = user
@@ -90,6 +91,7 @@ class RedshiftDataExecutor:
         return {"stringValue": str(value)}
 
     def _column_metadata(self, conn, description) -> list[dict]:
+        """Build a ColumnMetadata list from a cursor description."""
         type_map = self._type_map(conn)
         columns = []
         for col in description:
@@ -108,6 +110,7 @@ class RedshiftDataExecutor:
 
     @staticmethod
     def _bind_params(sql: str, parameters: list[dict] | None):
+        """Rewrite named ``:param`` placeholders to ``%(param)s`` and build a value dict."""
         if not parameters:
             return sql, None
         named = {p["name"]: p["value"] for p in parameters}
@@ -192,16 +195,19 @@ class RedshiftDataExecutor:
         return stmt_id
 
     def get(self, stmt_id: str) -> dict | None:
+        """Return the raw statement record, or None if not found."""
         with self._lock:
             return self._statements.get(stmt_id)
 
     def describe(self, stmt_id: str) -> dict | None:
+        """Return public metadata for a statement, omitting internal ``_``-prefixed keys."""
         stmt = self.get(stmt_id)
         if not stmt:
             return None
         return {k: v for k, v in stmt.items() if not k.startswith("_")}
 
     def result(self, stmt_id: str) -> dict | None:
+        """Return the ColumnMetadata and Records for a completed statement."""
         stmt = self.get(stmt_id)
         if not stmt:
             return None
@@ -212,6 +218,7 @@ class RedshiftDataExecutor:
         }
 
     def list_statements(self) -> list[dict]:
+        """Return a summary list of all stored statements."""
         with self._lock:
             return [
                 {
@@ -235,12 +242,14 @@ class RedshiftDataExecutor:
             conn.close()
 
     def list_databases(self, database: str | None = None) -> list[str]:
+        """Return the names of all non-template databases."""
         return self._scalar_list(
             "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname",
             database,
         )
 
     def list_schemas(self, database: str | None = None) -> list[str]:
+        """Return the names of all schemas in the specified database."""
         return self._scalar_list(
             "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name",
             database,
@@ -252,6 +261,7 @@ class RedshiftDataExecutor:
         schema_pattern: str | None = None,
         table_pattern: str | None = None,
     ) -> list[dict]:
+        """Return tables matching optional schema and name LIKE patterns."""
         clauses = ["table_schema NOT IN ('pg_catalog', 'information_schema')"]
         params: list[str] = []
         if schema_pattern:
@@ -276,6 +286,7 @@ class RedshiftDataExecutor:
             conn.close()
 
     def describe_table(self, table: str, database: str | None = None) -> list[dict]:
+        """Return column metadata for the named table."""
         conn = self._connect(database)
         try:
             with conn.cursor() as cur:

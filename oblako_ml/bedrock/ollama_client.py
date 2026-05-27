@@ -6,7 +6,10 @@ DEFAULT_OLLAMA_URL = "http://localhost:11434"
 
 
 class OllamaClient:
+    """Thin synchronous HTTP client for the Ollama REST API."""
+
     def __init__(self, base_url: str = DEFAULT_OLLAMA_URL):
+        """Initialize with the Ollama server base URL."""
         self.base_url = base_url.rstrip("/")
 
     def chat(self, model: str, messages: list[dict], **kwargs) -> dict:

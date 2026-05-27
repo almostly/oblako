@@ -11,7 +11,10 @@ from .base import Service, PortMapping
 
 
 class MotoService(Service):
+    """Moto server service providing AWS control-plane APIs locally."""
+
     def __init__(self, host_port: int = 5500):
+        """Initialize the Moto service on the given host port."""
         super().__init__(
             name="moto",
             image="motoserver/moto:latest",
@@ -21,6 +24,7 @@ class MotoService(Service):
 
     @property
     def endpoint_url(self) -> str:
+        """Return the Moto server endpoint URL."""
         return f"http://localhost:{self.host_port}"
 
     def _health_check(self) -> bool:

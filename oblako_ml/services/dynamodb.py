@@ -6,7 +6,10 @@ from .base import Service, PortMapping
 
 
 class DynamoDBService(Service):
+    """DynamoDB Local service backed by the official Amazon Docker image."""
+
     def __init__(self, host_port: int = 8000):
+        """Initialize the DynamoDB Local service on the given host port."""
         super().__init__(
             name="dynamodb",
             image="amazon/dynamodb-local:latest",
@@ -24,6 +27,7 @@ class DynamoDBService(Service):
 
     @property
     def endpoint_url(self) -> str:
+        """Return the DynamoDB Local endpoint URL."""
         return f"http://localhost:{self.host_port}"
 
     def get_client(self):

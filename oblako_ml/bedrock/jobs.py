@@ -26,6 +26,7 @@ class ModelInvocationJob:
     """A single batch job. Runs in a daemon thread; status tracked on `details`."""
 
     def __init__(self, details: dict, adapter: BedrockAdapter, s3_factory):
+        """Initialize with job details dict, the Bedrock adapter, and an S3 client factory."""
         self.details = details
         self.adapter = adapter
         self._s3_factory = s3_factory
@@ -34,13 +35,16 @@ class ModelInvocationJob:
 
     @property
     def job_id(self) -> str:
+        """Return the short job ID extracted from the job ARN."""
         return self.details["jobArn"].split("/")[-1]
 
     def start(self) -> None:
+        """Launch the job in a background daemon thread."""
         self._thread = threading.Thread(target=self._run, name=f"bedrock-job-{self.job_id}", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:
+        """Signal the job to stop and update its status to Stopping."""
         self._stop.set()
         self.details["status"] = "Stopping"
 
@@ -108,20 +112,24 @@ class JobStore:
     """In-memory store of model-invocation jobs."""
 
     def __init__(self):
+        """Initialize an empty in-memory job store."""
         self._jobs: dict[str, ModelInvocationJob] = {}
         self._lock = threading.Lock()
 
     def create(self, details: dict, adapter: BedrockAdapter, s3_factory) -> ModelInvocationJob:
+        """Create and register a new ModelInvocationJob from the given details."""
         job = ModelInvocationJob(details, adapter, s3_factory)
         with self._lock:
             self._jobs[job.job_id] = job
         return job
 
     def get(self, job_id: str) -> ModelInvocationJob | None:
+        """Return the job with the given ID, or None if not found."""
         with self._lock:
             return self._jobs.get(job_id)
 
     def list(self) -> list[ModelInvocationJob]:
+        """Return all registered jobs."""
         with self._lock:
             return list(self._jobs.values())
 

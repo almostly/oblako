@@ -27,6 +27,7 @@ def _jsonable(obj):
 
 
 def _json_response(payload: dict, status: int = 200, error_type: str | None = None) -> Response:
+    """Return an ``application/x-amz-json-1.1`` response."""
     headers = {"Content-Type": "application/x-amz-json-1.1"}
     if error_type:
         headers["X-Amzn-Errortype"] = error_type
@@ -34,6 +35,7 @@ def _json_response(payload: dict, status: int = 200, error_type: str | None = No
 
 
 def _error(code: str, message: str, status: int = 400) -> Response:
+    """Return a JSON error response with the given error code and message."""
     return _json_response({"__type": code, "message": message}, status=status, error_type=code)
 
 
@@ -41,9 +43,11 @@ class RedshiftDataApp:
     """Dispatches redshift-data operations to a RedshiftDataExecutor."""
 
     def __init__(self, executor: RedshiftDataExecutor):
+        """Bind the dispatcher to the given executor."""
         self.executor = executor
 
     async def handle(self, request: Request) -> Response:
+        """Dispatch an incoming request to the appropriate operation handler."""
         target = request.headers.get("X-Amz-Target", "")
         op = target.split(".")[-1]
         try:
@@ -64,6 +68,7 @@ class RedshiftDataApp:
 
     # -- operations ---------------------------------------------------------
     def op_ExecuteStatement(self, req: dict) -> Response:
+        """Execute a single SQL statement and return its statement id."""
         if not req.get("Sql"):
             return _error("ValidationException", "Sql is required")
         stmt_id = self.executor.execute(
@@ -83,6 +88,7 @@ class RedshiftDataApp:
         )
 
     def op_BatchExecuteStatement(self, req: dict) -> Response:
+        """Execute multiple SQL statements in sequence and return the last statement id."""
         sqls = req.get("Sqls") or []
         if not sqls:
             return _error("ValidationException", "Sqls is required")
@@ -118,31 +124,38 @@ class RedshiftDataApp:
         )
 
     def op_DescribeStatement(self, req: dict) -> Response:
+        """Return metadata for a previously submitted statement."""
         stmt = self.executor.describe(_require(req, "Id"))
         if not stmt:
             raise _NotFound(f"Statement {req.get('Id')} not found")
         return _json_response(stmt)
 
     def op_GetStatementResult(self, req: dict) -> Response:
+        """Return the result set for a completed statement."""
         result = self.executor.result(_require(req, "Id"))
         if result is None:
             raise _NotFound(f"Statement {req.get('Id')} not found")
         return _json_response(result)
 
     def op_CancelStatement(self, req: dict) -> Response:
+        """Acknowledge a cancel request (statements execute synchronously)."""
         _require(req, "Id")
         return _json_response({"Status": True})
 
     def op_ListStatements(self, req: dict) -> Response:
+        """Return a summary list of all submitted statements."""
         return _json_response({"Statements": self.executor.list_statements()})
 
     def op_ListDatabases(self, req: dict) -> Response:
+        """Return the list of databases in the cluster."""
         return _json_response({"Databases": self.executor.list_databases(req.get("Database"))})
 
     def op_ListSchemas(self, req: dict) -> Response:
+        """Return the list of schemas in the specified database."""
         return _json_response({"Schemas": self.executor.list_schemas(req.get("Database"))})
 
     def op_ListTables(self, req: dict) -> Response:
+        """Return tables matching optional schema and name patterns."""
         tables = self.executor.list_tables(
             database=req.get("Database"),
             schema_pattern=req.get("SchemaPattern"),
@@ -151,6 +164,7 @@ class RedshiftDataApp:
         return _json_response({"Tables": tables})
 
     def op_DescribeTable(self, req: dict) -> Response:
+        """Return column metadata for the specified table."""
         table = _require(req, "Table")
         return _json_response(
             {
@@ -165,12 +179,14 @@ class _NotFound(Exception):
 
 
 def _require(req: dict, key: str):
+    """Return ``req[key]`` or raise if the key is absent or None."""
     if key not in req or req[key] is None:
         raise Exception(f"{key} is required")
     return req[key]
 
 
 def create_app(executor: RedshiftDataExecutor | None = None) -> Starlette:
+    """Create and return the Starlette ASGI application for the redshift-data service."""
     executor = executor or RedshiftDataExecutor(
         host=os.environ.get("OBLAKO_REDSHIFT_HOST", "localhost"),
         port=int(os.environ.get("OBLAKO_REDSHIFT_PORT", "5439")),

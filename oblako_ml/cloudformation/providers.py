@@ -1,6 +1,8 @@
-"""CloudFormation resource providers — create/delete each resource type in
-oblako's REAL engines (not a mock). This is what makes `aws cloudformation deploy`
-provision actual buckets/tables/clusters in oblako.
+"""CloudFormation resource providers.
+
+Create/delete each resource type in oblako's REAL engines (not a mock). This is
+what makes `aws cloudformation deploy` provision actual buckets/tables/clusters
+in oblako.
 """
 
 from __future__ import annotations

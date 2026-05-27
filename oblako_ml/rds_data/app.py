@@ -24,6 +24,7 @@ from .executor import RdsDataExecutor
 
 
 def _error(message: str, error_type: str = "BadRequestException", status: int = 400) -> Response:
+    """Return a JSON error response with the given message and error type."""
     return JSONResponse(
         {"message": message, "__type": error_type},
         status_code=status,
@@ -32,14 +33,19 @@ def _error(message: str, error_type: str = "BadRequestException", status: int = 
 
 
 class RdsDataApp:
+    """Handles rds-data HTTP routes and delegates to an RdsDataExecutor."""
+
     def __init__(self, executor: RdsDataExecutor):
+        """Bind the app to the given executor."""
         self.executor = executor
 
     async def _body(self, request: Request) -> dict:
+        """Parse and return the JSON request body."""
         raw = await request.body()
         return json.loads(raw) if raw else {}
 
     async def execute(self, request: Request) -> Response:
+        """Handle ExecuteStatement: run a SQL statement and return the result."""
         req = await self._body(request)
         if not req.get("sql"):
             return _error("SQL is required")
@@ -57,6 +63,7 @@ class RdsDataApp:
         return JSONResponse(result)
 
     async def batch_execute(self, request: Request) -> Response:
+        """Handle BatchExecuteStatement: run a parameterised statement for each parameter set."""
         req = await self._body(request)
         if not req.get("sql"):
             return _error("SQL is required")
@@ -71,6 +78,7 @@ class RdsDataApp:
         return JSONResponse({"updateResults": results})
 
     async def begin(self, request: Request) -> Response:
+        """Handle BeginTransaction: open a new transaction and return its id."""
         req = await self._body(request)
         try:
             tid = self.executor.begin(database=req.get("database"))
@@ -79,6 +87,7 @@ class RdsDataApp:
         return JSONResponse({"transactionId": tid})
 
     async def commit(self, request: Request) -> Response:
+        """Handle CommitTransaction: commit and close the given transaction."""
         req = await self._body(request)
         try:
             status = self.executor.commit(req["transactionId"])
@@ -87,6 +96,7 @@ class RdsDataApp:
         return JSONResponse({"transactionStatus": status})
 
     async def rollback(self, request: Request) -> Response:
+        """Handle RollbackTransaction: roll back and close the given transaction."""
         req = await self._body(request)
         try:
             status = self.executor.rollback(req["transactionId"])
@@ -96,6 +106,7 @@ class RdsDataApp:
 
 
 def create_app(executor: RdsDataExecutor | None = None) -> Starlette:
+    """Create and return the Starlette ASGI application for the rds-data service."""
     engine = os.environ.get("OBLAKO_RDS_ENGINE", "postgres")
     executor = executor or RdsDataExecutor(
         host=os.environ.get("OBLAKO_RDS_HOST", "localhost"),

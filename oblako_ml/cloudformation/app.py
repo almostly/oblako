@@ -103,10 +103,14 @@ def _parse_params(form):
 
 
 class CfnApp:
+    """ASGI handler that dispatches CloudFormation query-protocol requests to StackStore."""
+
     def __init__(self, store: StackStore):
+        """Initialize with the given StackStore instance."""
         self.store = store
 
     async def handle(self, request: Request) -> Response:
+        """Dispatch an incoming CloudFormation request to the matching op_ method."""
         raw = (await request.body()).decode()
         form = dict(urllib.parse.parse_qsl(raw))
         action = form.get("Action", "")
@@ -120,11 +124,13 @@ class CfnApp:
             return _error(str(e), code="InternalFailure", status=500)
 
     def op_DescribeStacks(self, form):
+        """Handle DescribeStacks and return XML for the requested stack(s)."""
         name = form.get("StackName")
         stacks = [self.store.get(name)] if name else self.store.all()
         return _ok("DescribeStacks", "<Stacks>" + "".join(_stack_xml(s) for s in stacks) + "</Stacks>")
 
     def op_DescribeStackResources(self, form):
+        """Handle DescribeStackResources and return XML for all resources in the stack."""
         resources = self.store.describe_stack_resources(form["StackName"])
         members = "".join(
             "<member>" + _el("StackName", form["StackName"])
@@ -137,6 +143,7 @@ class CfnApp:
         return _ok("DescribeStackResources", f"<StackResources>{members}</StackResources>")
 
     def op_CreateChangeSet(self, form):
+        """Handle CreateChangeSet, fetching the template from S3 if a URL was given."""
         # sam/aws upload large templates to S3 and pass TemplateURL instead of body.
         body = form.get("TemplateBody") or _fetch_template_url(form.get("TemplateURL", ""))
         out = self.store.create_change_set(
@@ -146,6 +153,7 @@ class CfnApp:
         return _ok("CreateChangeSet", _el("Id", out["Id"]) + _el("StackId", out["StackId"]))
 
     def op_DescribeChangeSet(self, form):
+        """Handle DescribeChangeSet and return XML for the requested change set."""
         cs = self.store.describe_change_set(form["StackName"], form["ChangeSetName"])
         changes = "".join(
             "<member><Type>Resource</Type><ResourceChange>"
@@ -162,14 +170,17 @@ class CfnApp:
         return _ok("DescribeChangeSet", inner)
 
     def op_ExecuteChangeSet(self, form):
+        """Handle ExecuteChangeSet and provision all resources in the change set."""
         self.store.execute_change_set(form["StackName"], form["ChangeSetName"])
         return _ok("ExecuteChangeSet")
 
     def op_DeleteStack(self, form):
+        """Handle DeleteStack, destroying the stack and all its provisioned resources."""
         self.store.delete_stack(form["StackName"])
         return _ok("DeleteStack")
 
     def op_DescribeStackEvents(self, form):
+        """Handle DescribeStackEvents and return XML for all events on the stack."""
         events = self.store.describe_stack_events(form["StackName"])
         members = "".join(
             "<member>" + _el("StackId", e["StackId"]) + _el("EventId", e["EventId"])
@@ -184,6 +195,7 @@ class CfnApp:
 
 
 def create_app(store: StackStore | None = None) -> Starlette:
+    """Build and return the Starlette ASGI app for the CloudFormation service."""
     handler = CfnApp(store or StackStore())
 
     async def health(_request):

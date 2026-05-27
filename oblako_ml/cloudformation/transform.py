@@ -28,6 +28,7 @@ LAMBDA_TRUST_POLICY = {
 
 
 def is_sam(template: dict) -> bool:
+    """Return True if the template declares the SAM transform."""
     t = template.get("Transform")
     transforms = t if isinstance(t, list) else [t]
     return SAM_TRANSFORM in transforms

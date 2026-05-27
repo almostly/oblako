@@ -1,5 +1,4 @@
-"""Local Redshift ML: CREATE MODEL via SageMaker-local training + an in-DB
-plpython3u inference UDF.
+"""Local Redshift ML: CREATE MODEL via SageMaker-local training and an in-DB plpython3u inference UDF.
 
 `CREATE MODEL name FROM (SELECT ...) TARGET col FUNCTION fn [MODEL_TYPE ...]`:
   1. run the SELECT against pgredshift -> features + target rows
@@ -39,10 +38,12 @@ _CREATE_MODEL_RE = re.compile(
 
 
 def is_create_model(sql: str) -> bool:
+    """Return True if the SQL string starts with a CREATE MODEL statement."""
     return bool(re.match(r"\s*CREATE\s+MODEL\b", sql, re.IGNORECASE))
 
 
 def parse_create_model(sql: str) -> dict:
+    """Parse a CREATE MODEL SQL statement and return a spec dict with all extracted options."""
     m = _CREATE_MODEL_RE.match(sql)
     if not m:
         raise ValueError(

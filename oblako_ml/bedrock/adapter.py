@@ -1,5 +1,8 @@
-"""Bedrock API adapter: translates Bedrock invoke_model / converse to a chat
-backend (Ollama by default, or OpenRouter)."""
+"""Bedrock API adapter: translate Bedrock invoke_model / converse to a chat backend.
+
+Ollama is the default backend; set OBLAKO_BEDROCK_BACKEND=openrouter to use
+OpenRouter instead.
+"""
 
 import json
 import time
@@ -17,10 +20,12 @@ class BedrockAdapter:
     """
 
     def __init__(self, backend=None):
+        """Initialize with a chat backend, defaulting to the env-configured backend."""
         self.backend = backend or make_backend()
 
     # -- invoke_model (Anthropic Messages format) ---------------------------
     def invoke_model(self, model_id: str, body: bytes | str) -> dict:
+        """Invoke a model with an Anthropic Messages-format body and return the response dict."""
         if isinstance(body, bytes):
             body = body.decode("utf-8")
         request = json.loads(body)
@@ -80,6 +85,7 @@ class BedrockAdapter:
         system: list[dict] | None = None,
         inference_config: dict | None = None,
     ) -> dict:
+        """Send a Converse API request and return the Bedrock-shaped response dict."""
         chat_messages = []
         if system:
             if text := " ".join(b.get("text", "") for b in system):
@@ -116,6 +122,7 @@ class BedrockAdapter:
 
     # -- list_foundation_models ---------------------------------------------
     def list_foundation_models(self) -> dict:
+        """Return a ListFoundationModels-shaped dict of all models from the backend."""
         return {
             "modelSummaries": [
                 {

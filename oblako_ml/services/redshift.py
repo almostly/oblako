@@ -19,6 +19,8 @@ from .base import Service, PortMapping
 
 
 class RedshiftService(Service):
+    """Local Amazon Redshift replacement backed by pgredshift."""
+
     def __init__(
         self,
         host_port: int = 5439,
@@ -29,6 +31,7 @@ class RedshiftService(Service):
         data_port: int = 8002,
         region: str = "us-east-1",
     ):
+        """Initialize the Redshift service with connection and port settings."""
         super().__init__(
             name="redshift",
             image="hearthsim/pgredshift:latest",

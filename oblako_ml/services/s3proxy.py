@@ -8,7 +8,10 @@ from .base import Service, PortMapping
 
 
 class S3ProxyService(Service):
+    """S3-compatible object storage service backed by S3Proxy."""
+
     def __init__(self, host_port: int = 9000):
+        """Initialize the S3Proxy service on the given host port."""
         super().__init__(
             name="s3proxy",
             image="andrewgaul/s3proxy:latest",
@@ -23,6 +26,7 @@ class S3ProxyService(Service):
 
     @property
     def endpoint_url(self) -> str:
+        """Return the S3Proxy endpoint URL."""
         return f"http://localhost:{self.host_port}"
 
     def get_client(self):

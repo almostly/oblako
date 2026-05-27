@@ -15,10 +15,12 @@ class SageMakerService:
     """
 
     def __init__(self):
+        """Initialize SageMaker local mode with a deferred Docker client."""
         self._client: docker.DockerClient | None = None
 
     @property
     def client(self) -> docker.DockerClient:
+        """Return (or lazily create) the Docker client."""
         if self._client is None:
             self._client = docker.from_env()
         return self._client

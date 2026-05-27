@@ -6,7 +6,10 @@ from .base import Service, PortMapping
 
 
 class OpenSearchService(Service):
+    """OpenSearch service for vector search and RAG Knowledge Bases."""
+
     def __init__(self, host_port: int = 9200):
+        """Initialize the OpenSearch service on the given host port."""
         super().__init__(
             name="opensearch",
             image="opensearchproject/opensearch:2",
@@ -22,6 +25,7 @@ class OpenSearchService(Service):
 
     @property
     def url(self) -> str:
+        """Return the OpenSearch base URL."""
         return f"http://localhost:{self.host_port}"
 
     def _health_check(self) -> bool:

@@ -11,7 +11,10 @@ DUMMY_ROLE = "arn:aws:iam::012345678901:role/DummyRole"
 
 
 class StepFunctionsService(Service):
+    """Step Functions Local service backed by the official Amazon image."""
+
     def __init__(self, host_port: int = 8083, lambda_endpoint: str = "http://host.docker.internal:3001"):
+        """Initialize the Step Functions service with the given host port and Lambda endpoint."""
         super().__init__(
             name="stepfunctions",
             image="amazon/aws-stepfunctions-local:latest",
@@ -24,6 +27,7 @@ class StepFunctionsService(Service):
 
     @property
     def endpoint_url(self) -> str:
+        """Return the Step Functions Local endpoint URL."""
         return f"http://localhost:{self.host_port}"
 
     def get_client(self):

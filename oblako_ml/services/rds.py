@@ -35,6 +35,8 @@ _ENGINES = {
 
 
 class RdsService(Service):
+    """Local Amazon RDS and Aurora service backed by a real PostgreSQL or MySQL engine."""
+
     def __init__(
         self,
         engine: str = "postgres",
@@ -46,6 +48,7 @@ class RdsService(Service):
         data_port: int = 8006,
         region: str = "us-east-1",
     ):
+        """Initialize the RDS service for the specified engine (postgres or mysql)."""
         if engine not in _ENGINES:
             raise ValueError(f"engine must be one of {sorted(_ENGINES)}, got {engine!r}")
         spec = _ENGINES[engine]

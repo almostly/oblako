@@ -81,7 +81,7 @@ def list_models(region: str = "us-east-1") -> list[dict]:
 
 
 def get_model(model_identifier: str, region: str = "us-east-1") -> dict | None:
-    """A single FoundationModelDetails dict, or None if unknown."""
+    """Return a single FoundationModelDetails dict, or None if unknown."""
     detail = FOUNDATION_MODELS.get(model_identifier)
     return _with_arn(detail, region) if detail else None
 

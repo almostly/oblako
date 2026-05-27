@@ -18,6 +18,7 @@ class Oblako:
     """Manage the full oblako-ml service stack."""
 
     def __init__(self):
+        """Initialize all oblako-ml services."""
         self.bedrock = BedrockService()
         self.ollama = self.bedrock  # backwards-compatible alias (engine is Ollama)
         self.opensearch = OpenSearchService()

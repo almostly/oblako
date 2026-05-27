@@ -11,6 +11,8 @@ from docker.errors import NotFound, APIError, DockerException
 
 
 class ServiceStatus(str, Enum):
+    """Possible lifecycle states for a managed service container."""
+
     STOPPED = "stopped"
     STARTING = "starting"
     RUNNING = "running"
@@ -19,6 +21,8 @@ class ServiceStatus(str, Enum):
 
 @dataclass
 class PortMapping:
+    """Map a container port to a host port for a single protocol."""
+
     container_port: int
     host_port: int
     protocol: str = "tcp"
@@ -40,12 +44,14 @@ class Service:
 
     @property
     def client(self) -> docker.DockerClient:
+        """Return (or lazily create) the Docker client."""
         if self._client is None:
             self._client = docker.from_env()
         return self._client
 
     @property
     def container_name(self) -> str:
+        """Return the Docker container name for this service."""
         return f"oblako-ml-{self.name}"
 
     def _port_bindings(self) -> dict:
@@ -139,8 +145,10 @@ class Service:
         return self.status() == ServiceStatus.RUNNING
 
     def restart(self) -> None:
+        """Stop and restart the service container."""
         self.stop()
         self.start()
 
     def __repr__(self) -> str:
+        """Return a concise string representation of the service."""
         return f"{type(self).__name__}(name={self.name!r}, status={self.status().value})"

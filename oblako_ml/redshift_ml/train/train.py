@@ -38,6 +38,7 @@ def _load():
 
 # Per-type training -> plain-JSON export
 def train_linear(X, y, classify, multiclass):
+    """Train a linear/logistic regression model and return it as a plain-JSON-serializable dict."""
     from sklearn.linear_model import LinearRegression, LogisticRegression
 
     if multiclass:
@@ -52,6 +53,7 @@ def train_linear(X, y, classify, multiclass):
 
 
 def train_mlp(X, y, classify, multiclass):
+    """Train an MLP model with StandardScaler and return it as a plain-JSON-serializable dict."""
     import statistics
 
     from sklearn.neural_network import MLPClassifier, MLPRegressor
@@ -102,6 +104,7 @@ def _flatten_tree(node, out):
 
 
 def train_xgboost(X, y, classify, multiclass, hp):
+    """Train an XGBoost model and return it as a plain-JSON-serializable dict."""
     import xgboost as xgb
 
     num_round = int(hp.get("num_round", 100))
@@ -127,7 +130,7 @@ def train_xgboost(X, y, classify, multiclass, hp):
 
 # Autopilot: holdout validation score so the caller can pick the best type
 def _fit_scorer(model_type, X, y, classify, multiclass, hp):
-    """A fitted estimator with a uniform .predict (labels / values)."""
+    """Fit and return an estimator with a uniform .predict interface (labels / values)."""
     if model_type == "LINEAR_LEARNER":
         from sklearn.linear_model import LinearRegression, LogisticRegression
 
@@ -190,6 +193,7 @@ def _val_score(model_type, X, y, classify, multiclass, hp):
 
 
 def main():
+    """Read hyperparameters, train the requested model type, and write model.json to /opt/ml/model."""
     hp = {}
     if os.path.exists(CONFIG):
         with open(CONFIG) as fh:

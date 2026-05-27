@@ -81,9 +81,11 @@ class BedrockRuntimeApp:
     """bedrock-runtime data plane."""
 
     def __init__(self, adapter: BedrockAdapter):
+        """Initialize with a BedrockAdapter instance."""
         self.adapter = adapter
 
     async def invoke_model(self, request: Request) -> Response:
+        """Handle POST /model/{modelId}/invoke and return a Bedrock invoke response."""
         model_id = request.path_params["model_id"]
         body = await request.body()
         try:
@@ -93,6 +95,7 @@ class BedrockRuntimeApp:
         return Response(json.dumps(result), media_type="application/json")
 
     async def converse(self, request: Request) -> Response:
+        """Handle POST /model/{modelId}/converse and return a Bedrock Converse response."""
         model_id = request.path_params["model_id"]
         try:
             req = json.loads(await request.body() or b"{}")
@@ -114,6 +117,7 @@ class BedrockControlApp:
     """bedrock control plane: foundation models + batch model-invocation jobs."""
 
     def __init__(self, adapter: BedrockAdapter, region: str = "us-east-1"):
+        """Initialize with a BedrockAdapter and AWS region."""
         self.adapter = adapter
         self.region = region
         self.jobs = JobStore()
@@ -121,6 +125,7 @@ class BedrockControlApp:
 
     # -- foundation models --------------------------------------------------
     async def list_foundation_models(self, request: Request) -> Response:
+        """Handle GET /foundation-models and return catalog summaries plus live backend models."""
         summaries = foundation_models.list_models(self.region)
         try:  # also surface the backend's live models (Ollama tags / OpenRouter slugs)
             for m in self.adapter.backend.list_models():
@@ -132,6 +137,7 @@ class BedrockControlApp:
         return _json({"modelSummaries": summaries})
 
     async def get_foundation_model(self, request: Request) -> Response:
+        """Handle GET /foundation-models/{modelIdentifier} and return model details."""
         model_id = request.path_params["model_identifier"]
         detail = foundation_models.get_model(model_id, self.region)
         if detail is None:
@@ -140,6 +146,7 @@ class BedrockControlApp:
 
     # -- model-invocation jobs ---------------------------------------------
     async def create_job(self, request: Request) -> Response:
+        """Handle POST /model-invocation-job, create a batch job, and return its ARN."""
         try:
             req = json.loads(await request.body() or b"{}")
         except json.JSONDecodeError:
@@ -163,6 +170,7 @@ class BedrockControlApp:
         return _json({"jobArn": details["jobArn"]})
 
     async def get_job(self, request: Request) -> Response:
+        """Handle GET /model-invocation-job/{jobIdentifier} and return job details."""
         job_id = request.path_params["job_identifier"].split("/")[-1]
         job = self.jobs.get(job_id)
         if job is None:
@@ -170,9 +178,11 @@ class BedrockControlApp:
         return _json(job.details)
 
     async def list_jobs(self, request: Request) -> Response:
+        """Handle GET /model-invocation-jobs and return summaries of all jobs."""
         return _json({"invocationJobSummaries": [j.details for j in self.jobs.list()]})
 
     async def stop_job(self, request: Request) -> Response:
+        """Handle POST /model-invocation-job/{jobIdentifier}/stop and signal the job to stop."""
         job_id = request.path_params["job_identifier"].split("/")[-1]
         job = self.jobs.get(job_id)
         if job is None:
@@ -186,6 +196,7 @@ def create_app(
     ollama_url: str | None = None,
     region: str = "us-east-1",
 ) -> Starlette:
+    """Build and return the Starlette ASGI app wiring runtime and control plane routes."""
     if adapter is None:
         adapter = BedrockAdapter(make_backend(ollama_url=ollama_url))
     runtime = BedrockRuntimeApp(adapter)

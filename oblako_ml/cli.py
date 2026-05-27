@@ -33,6 +33,7 @@ def _check_docker():
 #-----------------------------------------------------------------------------------------------
 
 def cmd_up(args):
+    """Start all services, or a single named service."""
     _check_docker()
     oblako = Oblako()
     if args.service:
@@ -49,6 +50,7 @@ def cmd_up(args):
 
 
 def cmd_down(args):
+    """Stop all services, or a single named service."""
     _check_docker()
     oblako = Oblako()
     if args.service:
@@ -59,6 +61,7 @@ def cmd_down(args):
 
 
 def cmd_status(args):
+    """Print the status of all user-facing services."""
     _check_docker()
     oblako = Oblako()
     for name, state in oblako.status().items():
@@ -66,6 +69,7 @@ def cmd_status(args):
 
 
 def cmd_logs(args):
+    """Print recent container logs for a named service."""
     _check_docker()
     oblako = Oblako()
     svc = _get_service(oblako, args.service)
@@ -77,6 +81,7 @@ def cmd_logs(args):
 #-----------------------------------------------------------------------------------------------
 
 def cmd_pull(args):
+    """Pull a model into the Ollama engine."""
     _check_docker()
     from oblako_ml.bedrock.models import DEFAULT_MODEL
     oblako = Oblako()
@@ -86,6 +91,7 @@ def cmd_pull(args):
 
 
 def cmd_models(args):
+    """List models available in the local Ollama engine."""
     _check_docker()
     oblako = Oblako()
     models = oblako.bedrock.list_models()
@@ -100,6 +106,7 @@ def cmd_models(args):
 # Dashboard
 #-----------------------------------------------------------------------------------------------
 def cmd_dashboard(args):
+    """Start the web dashboard and open it in the default browser."""
     _check_docker()
     import subprocess
     import webbrowser
@@ -173,12 +180,14 @@ def cmd_agentcore(args):
 # Test Commands
 #-----------------------------------------------------------------------------------------------
 def cmd_test(args):
+    """Run unit tests."""
     import subprocess
     cmd = [sys.executable, "-m", "pytest", "tests/test_bedrock_adapter.py", "tests/test_services.py", "-v"]
     sys.exit(subprocess.call(cmd))
 
 
 def cmd_test_integration(args):
+    """Run integration tests."""
     import subprocess
     cmd = [sys.executable, "-m", "pytest", "tests/", "-v", "--ignore=tests/test_bedrock_adapter.py", "--ignore=tests/test_services.py"]
     sys.exit(subprocess.call(cmd))
@@ -213,6 +222,7 @@ def _get_service(oblako: Oblako, name: str):
 #-----------------------------------------------------------------------------------------------
 
 def main():
+    """Parse arguments and dispatch to the appropriate command handler."""
     parser = argparse.ArgumentParser(prog="oblako", description="Local AWS ML platform")
     sub = parser.add_subparsers(dest="command")
 

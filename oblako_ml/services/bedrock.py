@@ -14,7 +14,10 @@ from .base import Service, PortMapping
 
 
 class BedrockService(Service):
+    """Local Amazon Bedrock service powered by Ollama."""
+
     def __init__(self, host_port: int = 11434, runtime_port: int = 8004, region: str = "us-east-1"):
+        """Initialize the Bedrock service with Ollama engine and runtime port."""
         super().__init__(
             name="bedrock",
             image="ollama/ollama:latest",

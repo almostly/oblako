@@ -1,5 +1,7 @@
-"""Local CloudFormation engine: parse a template, resolve intrinsics, and
-provision resources into oblako's real engines via the provider registry.
+"""Local CloudFormation engine.
+
+Parse a template, resolve intrinsics, and provision resources into oblako's
+real engines via the provider registry.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ ACCOUNT = "000000000000"
 
 
 class StackNotFound(Exception):
-    pass
+    """Raised when a referenced stack or change set does not exist."""
 
 
 # CloudFormation-flavored YAML (handles !Ref, !GetAtt, !Sub, … short tags)
@@ -48,6 +50,7 @@ _CfnLoader.add_multi_constructor("!", _multi)
 
 
 def parse_template(body: str) -> dict:
+    """Parse a CloudFormation template body from JSON or YAML and return it as a dict."""
     try:
         return json.loads(body)
     except json.JSONDecodeError:
@@ -148,23 +151,30 @@ def _ordered(resources):
 
 
 class StackStore:
+    """In-memory store for CloudFormation stacks and their associated change sets."""
+
     def __init__(self):
+        """Initialize the store with an empty stacks dict and a reentrant lock."""
         self._stacks: dict[str, dict] = {}
         self._lock = threading.Lock()
 
     def get(self, name):
+        """Return the named stack dict, raising StackNotFound if it does not exist."""
         stack = self._stacks.get(name)
         if stack is None:
             raise StackNotFound(f"Stack with id {name} does not exist")
         return stack
 
     def exists(self, name):
+        """Return True if a stack with the given name is currently stored."""
         return name in self._stacks
 
     def all(self):
+        """Return a list of all stored stack dicts."""
         return list(self._stacks.values())
 
     def describe_stack_resources(self, name):
+        """Return a list of resource summary dicts for every resource in the named stack."""
         stack = self.get(name)
         status = stack["StackStatus"] if stack["StackStatus"].endswith(("COMPLETE", "FAILED")) else "CREATE_COMPLETE"
         return [{"LogicalResourceId": rid, "PhysicalResourceId": r["PhysicalId"],
@@ -186,6 +196,7 @@ class StackStore:
         }
 
     def create_change_set(self, name, template_body, params, cs_name, cs_type):
+        """Create a change set for the named stack, creating the stack record if needed."""
         template = parse_template(template_body or "{}")
         if is_sam(template):
             template = transform_sam(template)  # expand SAM to base CFN resources
@@ -218,6 +229,7 @@ class StackStore:
         raise StackNotFound(f"ChangeSet [{ref}] does not exist")
 
     def describe_change_set(self, name, cs_ref):
+        """Return a description dict for the named change set (by name or ARN)."""
         stack = self.get(name)
         cs_name, cs = self._find_cs(stack, cs_ref)
         return {"ChangeSetName": cs_name, "ChangeSetId": cs["id"], "StackId": stack["StackId"],
@@ -225,6 +237,7 @@ class StackStore:
                 "Changes": cs["changes"]}
 
     def execute_change_set(self, name, cs_ref):
+        """Execute the named change set, provisioning all template resources into oblako."""
         stack = self.get(name)
         self._find_cs(stack, cs_ref)  # validate the change set exists
         template = stack["template"]
@@ -266,6 +279,7 @@ class StackStore:
             raise
 
     def delete_stack(self, name):
+        """Delete the named stack, destroying all provisioned resources in reverse order."""
         with self._lock:
             stack = self._stacks.get(name)
             if not stack:
@@ -276,6 +290,7 @@ class StackStore:
             self._stacks.pop(name, None)
 
     def describe_stack_events(self, name):
+        """Return the list of stack events recorded for the named stack."""
         return self.get(name)["events"]
 
 

@@ -16,11 +16,13 @@ class CloudFormationService:
     name = "cloudformation"
 
     def __init__(self, port: int = 5601, region: str = "us-east-1"):
+        """Initialize with the given port and AWS region."""
         self.port = port
         self.region = region
 
     @property
     def endpoint_url(self) -> str:
+        """Return the HTTP endpoint URL for the local CloudFormation server."""
         return f"http://localhost:{self.port}"
 
     def start_server(self) -> str:
@@ -45,6 +47,7 @@ class CloudFormationService:
         )
 
     def is_running(self) -> bool:
+        """Return True if the local CloudFormation server is already listening."""
         from oblako_ml import cloudformation
 
         return cloudformation.is_running(self.port)
