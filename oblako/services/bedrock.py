@@ -16,7 +16,12 @@ from .base import Service, PortMapping
 class BedrockService(Service):
     """Local Amazon Bedrock service powered by Ollama."""
 
-    def __init__(self, host_port: int = 11434, runtime_port: int = 8004, region: str = "us-east-1"):
+    def __init__(
+        self,
+        host_port: int = 11434,
+        runtime_port: int = 8004,
+        region: str = "us-east-1",
+    ):
         """Initialize the Bedrock service with Ollama engine and runtime port."""
         super().__init__(
             name="bedrock",
@@ -32,8 +37,10 @@ class BedrockService(Service):
     def url(self) -> str:
         """Ollama engine URL."""
         return f"http://localhost:{self.host_port}"
-
-    # -- engine (Ollama) model management -----------------------------------
+    
+    # -------------------------------------------------------------------------------
+    # Engine (Ollama) model management
+    # -------------------------------------------------------------------------------
     def pull_model(self, model: str | None = None) -> None:
         """Pull a model into the engine (defaults to the small qwen default)."""
         from oblako.bedrock.models import DEFAULT_MODEL
@@ -49,7 +56,9 @@ class BedrockService(Service):
         resp.raise_for_status()
         return [m["name"] for m in resp.json().get("models", [])]
 
-    # -- boto3 bedrock-runtime ----------------------------------------------
+    # -------------------------------------------------------------------------------
+    # boto3 bedrock-runtime
+    # -------------------------------------------------------------------------------
     def start_runtime_server(self):
         """Start the local bedrock-runtime server in-process (idempotent)."""
         from oblako.bedrock_runtime import start_in_thread

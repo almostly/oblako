@@ -43,7 +43,9 @@ class RedshiftDataExecutor:
         self._lock = threading.Lock()
         self._oid_to_typename: dict[int, str] | None = None
 
-    # -- connections --------------------------------------------------------
+    # -------------------------------------------------------------------------------
+    # Connections
+    # -------------------------------------------------------------------------------
     def _connect(self, database: str | None = None):
         conn = psycopg2.connect(
             host=self.host,
@@ -63,7 +65,9 @@ class RedshiftDataExecutor:
                 self._oid_to_typename = {oid: name for oid, name in cur.fetchall()}
         return self._oid_to_typename
 
-    # -- field / column encoding -------------------------------------------
+    # -------------------------------------------------------------------------------
+    # Field column-encoding
+    # -------------------------------------------------------------------------------
     @staticmethod
     def _encode_field(value: Any) -> dict:
         """Encode a Python value as a redshift-data Field union member."""
@@ -101,7 +105,9 @@ class RedshiftDataExecutor:
                     "label": col.name,
                     "typeName": type_map.get(col.type_code, "unknown"),
                     "nullable": 1,
-                    "length": col.internal_size if col.internal_size and col.internal_size > 0 else 0,
+                    "length": col.internal_size
+                    if col.internal_size and col.internal_size > 0
+                    else 0,
                     "precision": col.precision or 0,
                     "scale": col.scale or 0,
                 }
@@ -117,7 +123,9 @@ class RedshiftDataExecutor:
         rewritten = _NAMED_PARAM.sub(r"%(\1)s", sql)
         return rewritten, named
 
-    # -- statement execution ------------------------------------------------
+    # -------------------------------------------------------------------------------
+    # Statement execution
+    # -------------------------------------------------------------------------------
     def execute(
         self,
         sql: str,
@@ -149,14 +157,19 @@ class RedshiftDataExecutor:
                 # Redshift ML: train via SageMaker local + create an in-DB predict UDF.
                 summary = redshift_ml.create_model(
                     redshift_ml.parse_create_model(sql),
-                    host=self.host, port=self.port, user=self.user,
-                    password=self.password, database=database or self.database,
+                    host=self.host,
+                    port=self.port,
+                    user=self.user,
+                    password=self.password,
+                    database=database or self.database,
                 )
                 statement["ModelSummary"] = summary
                 statement["ResultRows"] = 0
                 statement["Status"] = "FINISHED"
                 statement["UpdatedAt"] = datetime.datetime.now(datetime.timezone.utc)
-                statement["Duration"] = int((datetime.datetime.now() - start).total_seconds() * 1e9)
+                statement["Duration"] = int(
+                    (datetime.datetime.now() - start).total_seconds() * 1e9
+                )
                 with self._lock:
                     self._statements[stmt_id] = statement
                 return stmt_id
@@ -169,7 +182,8 @@ class RedshiftDataExecutor:
                     if cur.description:
                         columns = self._column_metadata(conn, cur.description)
                         records = [
-                            [self._encode_field(v) for v in row] for row in cur.fetchall()
+                            [self._encode_field(v) for v in row]
+                            for row in cur.fetchall()
                         ]
                         statement["_columns"] = columns
                         statement["_records"] = records
@@ -231,7 +245,9 @@ class RedshiftDataExecutor:
                 for s in self._statements.values()
             ]
 
-    # -- catalog helpers ----------------------------------------------------
+    # -------------------------------------------------------------------------------
+    # Catalog helpers
+    # -------------------------------------------------------------------------------
     def _scalar_list(self, sql: str, database: str | None = None) -> list[str]:
         conn = self._connect(database)
         try:
@@ -316,6 +332,8 @@ class RedshiftDataExecutor:
 
 
 def _to_pg_array(values) -> str:
+    """Convert to pg array helper."""
+
     def fmt(element):
         if element is None:
             return "NULL"

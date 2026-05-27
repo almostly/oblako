@@ -19,11 +19,13 @@ _DDB_TYPE = {"String": "S", "Number": "N", "Binary": "B"}
 
 LAMBDA_TRUST_POLICY = {
     "Version": "2012-10-17",
-    "Statement": [{
-        "Effect": "Allow",
-        "Principal": {"Service": "lambda.amazonaws.com"},
-        "Action": "sts:AssumeRole",
-    }],
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Principal": {"Service": "lambda.amazonaws.com"},
+            "Action": "sts:AssumeRole",
+        }
+    ],
 }
 
 
@@ -46,13 +48,17 @@ def transform_sam(template: dict) -> dict:
         if rtype == "AWS::Serverless::Function":
             expanded.update(_expand_function(logical_id, props))
             events = props.get("Events") or {}
-            if any((e or {}).get("Type") in ("Api", "HttpApi") for e in events.values()):
+            if any(
+                (e or {}).get("Type") in ("Api", "HttpApi") for e in events.values()
+            ):
                 has_api_event = True
         elif rtype == "AWS::Serverless::SimpleTable":
             expanded[logical_id] = _expand_simple_table(props)
         elif rtype in ("AWS::Serverless::Api", "AWS::Serverless::HttpApi"):
-            expanded[logical_id] = {"Type": "AWS::ApiGateway::RestApi",
-                                    "Properties": {"Name": props.get("Name")}}
+            expanded[logical_id] = {
+                "Type": "AWS::ApiGateway::RestApi",
+                "Properties": {"Name": props.get("Name")},
+            }
             has_explicit_api = True
         else:
             if rtype == "AWS::ApiGateway::RestApi":
@@ -60,8 +66,10 @@ def transform_sam(template: dict) -> dict:
             expanded[logical_id] = res  # already a base CFN resource
     # SAM creates an implicit RestApi for function Api events when none is declared.
     if has_api_event and not has_explicit_api and "ServerlessRestApi" not in expanded:
-        expanded["ServerlessRestApi"] = {"Type": "AWS::ApiGateway::RestApi",
-                                         "Properties": {"Name": "ServerlessRestApi"}}
+        expanded["ServerlessRestApi"] = {
+            "Type": "AWS::ApiGateway::RestApi",
+            "Properties": {"Name": "ServerlessRestApi"},
+        }
     template["Resources"] = expanded
     template.pop("Transform", None)
     return template
@@ -94,7 +102,9 @@ def _expand_function(logical_id: str, props: dict) -> dict:
 def _expand_simple_table(props: dict) -> dict:
     pk = props.get("PrimaryKey", {"Name": "id", "Type": "String"})
     table_props = {
-        "AttributeDefinitions": [{"AttributeName": pk["Name"], "AttributeType": _DDB_TYPE[pk["Type"]]}],
+        "AttributeDefinitions": [
+            {"AttributeName": pk["Name"], "AttributeType": _DDB_TYPE[pk["Type"]]}
+        ],
         "KeySchema": [{"AttributeName": pk["Name"], "KeyType": "HASH"}],
         "BillingMode": "PAY_PER_REQUEST",
     }

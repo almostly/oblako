@@ -19,11 +19,13 @@ def adapter():
 
 
 def test_invoke_model_live(adapter):
-    body = json.dumps({
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 64,
-        "messages": [{"role": "user", "content": "Say 'hello' and nothing else."}],
-    })
+    body = json.dumps(
+        {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 64,
+            "messages": [{"role": "user", "content": "Say 'hello' and nothing else."}],
+        }
+    )
     result = adapter.invoke_model("anthropic.claude-3-haiku-20240307-v1:0", body)
     text = result["content"][0]["text"].lower()
     assert "hello" in text
@@ -32,7 +34,9 @@ def test_invoke_model_live(adapter):
 def test_converse_live(adapter):
     result = adapter.converse(
         model_id="anthropic.claude-3-haiku-20240307-v1:0",
-        messages=[{"role": "user", "content": [{"text": "Reply with just the word 'yes'."}]}],
+        messages=[
+            {"role": "user", "content": [{"text": "Reply with just the word 'yes'."}]}
+        ],
         inference_config={"maxTokens": 16},
     )
     text = result["output"]["message"]["content"][0]["text"].lower()

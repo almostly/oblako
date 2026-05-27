@@ -61,7 +61,7 @@ def parse_template(body: str) -> dict:
 def _resolve(node, ctx):
     if isinstance(node, dict):
         if len(node) == 1:
-            (k, v), = node.items()
+            ((k, v),) = node.items()
             if k == "Ref":
                 return _ref(v, ctx)
             if k == "Fn::GetAtt":
@@ -87,8 +87,14 @@ def _resolve(node, ctx):
 
 
 def _ref(name, ctx):
-    pseudo = {"AWS::Region": REGION, "AWS::AccountId": ACCOUNT, "AWS::StackName": ctx["stack"],
-              "AWS::Partition": "aws", "AWS::URLSuffix": "amazonaws.com", "AWS::NoValue": None}
+    pseudo = {
+        "AWS::Region": REGION,
+        "AWS::AccountId": ACCOUNT,
+        "AWS::StackName": ctx["stack"],
+        "AWS::Partition": "aws",
+        "AWS::URLSuffix": "amazonaws.com",
+        "AWS::NoValue": None,
+    }
     if name in pseudo:
         return pseudo[name]
     if name in ctx["params"]:
@@ -109,8 +115,11 @@ def _sub(template, ctx):
 
 def _resource_deps(resource):
     """Logical ids this resource references (for ordering)."""
-    deps = set(resource.get("DependsOn", []) if isinstance(resource.get("DependsOn"), list)
-               else ([resource["DependsOn"]] if "DependsOn" in resource else []))
+    deps = set(
+        resource.get("DependsOn", [])
+        if isinstance(resource.get("DependsOn"), list)
+        else ([resource["DependsOn"]] if "DependsOn" in resource else [])
+    )
 
     def walk(node):
         if isinstance(node, dict):
@@ -176,10 +185,20 @@ class StackStore:
     def describe_stack_resources(self, name):
         """Return a list of resource summary dicts for every resource in the named stack."""
         stack = self.get(name)
-        status = stack["StackStatus"] if stack["StackStatus"].endswith(("COMPLETE", "FAILED")) else "CREATE_COMPLETE"
-        return [{"LogicalResourceId": rid, "PhysicalResourceId": r["PhysicalId"],
-                 "ResourceType": r["Type"], "ResourceStatus": status}
-                for rid, r in stack["resources"].items()]
+        status = (
+            stack["StackStatus"]
+            if stack["StackStatus"].endswith(("COMPLETE", "FAILED"))
+            else "CREATE_COMPLETE"
+        )
+        return [
+            {
+                "LogicalResourceId": rid,
+                "PhysicalResourceId": r["PhysicalId"],
+                "ResourceType": r["Type"],
+                "ResourceStatus": status,
+            }
+            for rid, r in stack["resources"].items()
+        ]
 
     def _new_stack(self, name, template, params):
         return {
@@ -206,7 +225,14 @@ class StackStore:
                 # a stack-level event so describe_stack_events is never empty
                 # (sam deploy reads StackEvents[0] right after CreateChangeSet)
                 self._stacks[name]["events"].append(
-                    _event(self._stacks[name], name, "AWS::CloudFormation::Stack", name, "REVIEW_IN_PROGRESS"))
+                    _event(
+                        self._stacks[name],
+                        name,
+                        "AWS::CloudFormation::Stack",
+                        name,
+                        "REVIEW_IN_PROGRESS",
+                    )
+                )
             stack = self._stacks[name]
             stack["template"] = template
             stack["params"] = params
@@ -215,7 +241,11 @@ class StackStore:
                 {"Action": "Add", "LogicalResourceId": rid, "ResourceType": r["Type"]}
                 for rid, r in template.get("Resources", {}).items()
             ]
-            stack["change_sets"][cs_name] = {"id": cs_id, "changes": changes, "type": cs_type}
+            stack["change_sets"][cs_name] = {
+                "id": cs_id,
+                "changes": changes,
+                "type": cs_type,
+            }
             return {"Id": cs_id, "StackId": stack["StackId"]}
 
     def _find_cs(self, stack, ref):
@@ -232,9 +262,15 @@ class StackStore:
         """Return a description dict for the named change set (by name or ARN)."""
         stack = self.get(name)
         cs_name, cs = self._find_cs(stack, cs_ref)
-        return {"ChangeSetName": cs_name, "ChangeSetId": cs["id"], "StackId": stack["StackId"],
-                "StackName": name, "Status": "CREATE_COMPLETE", "ExecutionStatus": "AVAILABLE",
-                "Changes": cs["changes"]}
+        return {
+            "ChangeSetName": cs_name,
+            "ChangeSetId": cs["id"],
+            "StackId": stack["StackId"],
+            "StackName": name,
+            "Status": "CREATE_COMPLETE",
+            "ExecutionStatus": "AVAILABLE",
+            "Changes": cs["changes"],
+        }
 
     def execute_change_set(self, name, cs_ref):
         """Execute the named change set, provisioning all template resources into oblako."""
@@ -242,8 +278,11 @@ class StackStore:
         self._find_cs(stack, cs_ref)  # validate the change set exists
         template = stack["template"]
         # Template defaults first, then overlay any parameters the client passed.
-        params = {p: spec["Default"] for p, spec in template.get("Parameters", {}).items()
-                  if "Default" in spec}
+        params = {
+            p: spec["Default"]
+            for p, spec in template.get("Parameters", {}).items()
+            if "Default" in spec
+        }
         params.update(stack["params"])
         ctx = {"stack": name, "params": params, "physical": {}, "attrs": {}}
         resources = template.get("Resources", {})
@@ -252,7 +291,9 @@ class StackStore:
                 r = resources[rid]
                 rtype = r["Type"]
                 if rtype not in PROVIDERS:
-                    raise ValueError(f"unsupported resource type {rtype} (oblako CFN supports {sorted(PROVIDERS)})")
+                    raise ValueError(
+                        f"unsupported resource type {rtype} (oblako CFN supports {sorted(PROVIDERS)})"
+                    )
                 props = _resolve(r.get("Properties", {}), ctx)
                 result = PROVIDERS[rtype][0](rid, props, ctx)
                 # a provider returns a physical id, or {"PhysicalId", "Attributes"}
@@ -262,20 +303,42 @@ class StackStore:
                     physical, attrs = result, {}
                 ctx["physical"][rid] = physical
                 ctx["attrs"][rid] = attrs
-                stack["resources"][rid] = {"Type": rtype, "PhysicalId": physical,
-                                           "Properties": props, "Attributes": attrs}
-                stack["events"].append(_event(stack, rid, rtype, physical, "CREATE_COMPLETE"))
+                stack["resources"][rid] = {
+                    "Type": rtype,
+                    "PhysicalId": physical,
+                    "Properties": props,
+                    "Attributes": attrs,
+                }
+                stack["events"].append(
+                    _event(stack, rid, rtype, physical, "CREATE_COMPLETE")
+                )
             stack["Outputs"] = [
-                {"OutputKey": k, "OutputValue": str(_resolve(o.get("Value"), ctx)),
-                 **({"Description": o["Description"]} if "Description" in o else {})}
+                {
+                    "OutputKey": k,
+                    "OutputValue": str(_resolve(o.get("Value"), ctx)),
+                    **({"Description": o["Description"]} if "Description" in o else {}),
+                }
                 for k, o in template.get("Outputs", {}).items()
             ]
             stack["StackStatus"] = "CREATE_COMPLETE"
-            stack["events"].append(_event(stack, name, "AWS::CloudFormation::Stack", name, "CREATE_COMPLETE"))
+            stack["events"].append(
+                _event(
+                    stack, name, "AWS::CloudFormation::Stack", name, "CREATE_COMPLETE"
+                )
+            )
         except Exception as e:  # noqa: BLE001
             stack["StackStatus"] = "CREATE_FAILED"
             stack["StackStatusReason"] = str(e)
-            stack["events"].append(_event(stack, name, "AWS::CloudFormation::Stack", name, "CREATE_FAILED", str(e)))
+            stack["events"].append(
+                _event(
+                    stack,
+                    name,
+                    "AWS::CloudFormation::Stack",
+                    name,
+                    "CREATE_FAILED",
+                    str(e),
+                )
+            )
             raise
 
     def delete_stack(self, name):
@@ -295,7 +358,14 @@ class StackStore:
 
 
 def _event(stack, logical, rtype, physical, status, reason=None):
-    return {"StackId": stack["StackId"], "EventId": uuid.uuid4().hex, "StackName": stack["StackName"],
-            "LogicalResourceId": logical, "PhysicalResourceId": physical, "ResourceType": rtype,
-            "Timestamp": datetime.datetime.now(datetime.timezone.utc), "ResourceStatus": status,
-            **({"ResourceStatusReason": reason} if reason else {})}
+    return {
+        "StackId": stack["StackId"],
+        "EventId": uuid.uuid4().hex,
+        "StackName": stack["StackName"],
+        "LogicalResourceId": logical,
+        "PhysicalResourceId": physical,
+        "ResourceType": rtype,
+        "Timestamp": datetime.datetime.now(datetime.timezone.utc),
+        "ResourceStatus": status,
+        **({"ResourceStatusReason": reason} if reason else {}),
+    }

@@ -16,7 +16,9 @@ from oblako.cloudformation.engine import StackStore, _ordered, _resolve, parse_t
 from oblako.cloudformation.transform import is_sam, transform_sam
 from oblako.services import DynamoDBService, S3ProxyService
 
-CREDS = dict(region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test")
+CREDS = dict(
+    region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"
+)
 
 
 def test_parse_yaml_short_tags():
@@ -30,7 +32,9 @@ def test_parse_yaml_short_tags():
         "  Arn:\n"
         "    Value: !GetAtt B.Arn\n"
     )
-    assert t["Resources"]["B"]["Properties"]["BucketName"] == {"Fn::Sub": "${AWS::StackName}-data"}
+    assert t["Resources"]["B"]["Properties"]["BucketName"] == {
+        "Fn::Sub": "${AWS::StackName}-data"
+    }
     assert t["Outputs"]["Arn"]["Value"] == {"Fn::GetAtt": ["B", "Arn"]}
 
 
@@ -52,7 +56,10 @@ def test_resolve_intrinsics():
 
 def test_ordering_respects_dependson_and_refs():
     resources = {
-        "Table": {"Type": "AWS::DynamoDB::Table", "Properties": {"Name": {"Ref": "Bucket"}}},
+        "Table": {
+            "Type": "AWS::DynamoDB::Table",
+            "Properties": {"Name": {"Ref": "Bucket"}},
+        },
         "Bucket": {"Type": "AWS::S3::Bucket"},
         "Cluster": {"Type": "AWS::Redshift::Cluster", "DependsOn": "Table"},
     }
@@ -81,8 +88,12 @@ def test_sam_transform_expands_function_and_table():
     assert out["Fn"]["Type"] == "AWS::Lambda::Function"
     assert out["Fn"]["Properties"]["Role"] == {"Fn::GetAtt": ["FnRole", "Arn"]}
     assert out["Store"]["Type"] == "AWS::DynamoDB::Table"
-    assert out["Store"]["Properties"]["KeySchema"] == [{"AttributeName": "pk", "KeyType": "HASH"}]
-    assert out["Store"]["Properties"]["AttributeDefinitions"] == [{"AttributeName": "pk", "AttributeType": "S"}]
+    assert out["Store"]["Properties"]["KeySchema"] == [
+        {"AttributeName": "pk", "KeyType": "HASH"}
+    ]
+    assert out["Store"]["Properties"]["AttributeDefinitions"] == [
+        {"AttributeName": "pk", "AttributeType": "S"}
+    ]
     assert "Transform" not in transform_sam(template)
 
 
@@ -141,12 +152,22 @@ def test_template_url_parsing(monkeypatch):
     class _Client:
         def get_object(self, Bucket, Key):
             captured["ref"] = (Bucket, Key)
-            return {"Body": type("B", (), {"read": lambda self: b'{"Resources": {}}'})()}
+            return {
+                "Body": type("B", (), {"read": lambda self: b'{"Resources": {}}'})()
+            }
 
-    monkeypatch.setattr(svc, "S3ProxyService", lambda: type("S", (), {"get_client": lambda self: _Client()})())
-    _fetch_template_url("http://localhost:9099/my-bucket/abc.template")     # path style (S3Proxy)
+    monkeypatch.setattr(
+        svc,
+        "S3ProxyService",
+        lambda: type("S", (), {"get_client": lambda self: _Client()})(),
+    )
+    _fetch_template_url(
+        "http://localhost:9099/my-bucket/abc.template"
+    )  # path style (S3Proxy)
     assert captured["ref"] == ("my-bucket", "abc.template")
-    _fetch_template_url("https://my-bucket.s3.us-east-1.amazonaws.com/abc.template")  # virtual-host
+    _fetch_template_url(
+        "https://my-bucket.s3.us-east-1.amazonaws.com/abc.template"
+    )  # virtual-host
     assert captured["ref"] == ("my-bucket", "abc.template")
 
 
@@ -190,25 +211,46 @@ def test_deploy_lifecycle_provisions_real_engines():
     s3 = S3ProxyService().get_client()
     ddb = DynamoDBService(host_port=8001).get_client()
 
-    template = json.dumps({
-        "Parameters": {"Env": {"Type": "String", "Default": "test"}},
-        "Resources": {
-            "Data": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": {"Fn::Sub": "oblako-cfntest-${Env}"}}},
-            "Items": {"Type": "AWS::DynamoDB::Table", "DependsOn": "Data", "Properties": {
-                "TableName": {"Fn::Sub": "${Env}-cfntest-items"},
-                "AttributeDefinitions": [{"AttributeName": "id", "AttributeType": "S"}],
-                "KeySchema": [{"AttributeName": "id", "KeyType": "HASH"}]}},
-        },
-        "Outputs": {"Bucket": {"Value": {"Ref": "Data"}}, "Table": {"Value": {"Ref": "Items"}}},
-    })
+    template = json.dumps(
+        {
+            "Parameters": {"Env": {"Type": "String", "Default": "test"}},
+            "Resources": {
+                "Data": {
+                    "Type": "AWS::S3::Bucket",
+                    "Properties": {"BucketName": {"Fn::Sub": "oblako-cfntest-${Env}"}},
+                },
+                "Items": {
+                    "Type": "AWS::DynamoDB::Table",
+                    "DependsOn": "Data",
+                    "Properties": {
+                        "TableName": {"Fn::Sub": "${Env}-cfntest-items"},
+                        "AttributeDefinitions": [
+                            {"AttributeName": "id", "AttributeType": "S"}
+                        ],
+                        "KeySchema": [{"AttributeName": "id", "KeyType": "HASH"}],
+                    },
+                },
+            },
+            "Outputs": {
+                "Bucket": {"Value": {"Ref": "Data"}},
+                "Table": {"Value": {"Ref": "Items"}},
+            },
+        }
+    )
 
-    cfn.create_change_set(StackName="cfntest", TemplateBody=template,
-                          ChangeSetName="cs", ChangeSetType="CREATE",
-                          Parameters=[{"ParameterKey": "Env", "ParameterValue": "test"}])
+    cfn.create_change_set(
+        StackName="cfntest",
+        TemplateBody=template,
+        ChangeSetName="cs",
+        ChangeSetType="CREATE",
+        Parameters=[{"ParameterKey": "Env", "ParameterValue": "test"}],
+    )
     desc = cfn.describe_change_set(StackName="cfntest", ChangeSetName="cs")
     assert desc["Status"] == "CREATE_COMPLETE"
     assert {c["ResourceChange"]["ResourceType"] for c in desc["Changes"]} == {
-        "AWS::S3::Bucket", "AWS::DynamoDB::Table"}
+        "AWS::S3::Bucket",
+        "AWS::DynamoDB::Table",
+    }
 
     cfn.execute_change_set(StackName="cfntest", ChangeSetName="cs")
     cfn.get_waiter("stack_create_complete").wait(StackName="cfntest")
@@ -218,13 +260,17 @@ def test_deploy_lifecycle_provisions_real_engines():
     assert outputs == {"Bucket": "oblako-cfntest-test", "Table": "test-cfntest-items"}
 
     try:
-        assert "oblako-cfntest-test" in [b["Name"] for b in s3.list_buckets()["Buckets"]]
+        assert "oblako-cfntest-test" in [
+            b["Name"] for b in s3.list_buckets()["Buckets"]
+        ]
         assert "test-cfntest-items" in ddb.list_tables()["TableNames"]
     finally:
         cfn.delete_stack(StackName="cfntest")
         cfn.get_waiter("stack_delete_complete").wait(StackName="cfntest")
 
-    assert "oblako-cfntest-test" not in [b["Name"] for b in s3.list_buckets()["Buckets"]]
+    assert "oblako-cfntest-test" not in [
+        b["Name"] for b in s3.list_buckets()["Buckets"]
+    ]
     assert "test-cfntest-items" not in ddb.list_tables()["TableNames"]
 
 
@@ -260,29 +306,41 @@ def test_sam_deploy_function_to_moto_and_table_to_dynamodb():
         "    Properties:\n"
         "      TableName: cfntest-sam-store\n"
     )
-    cfn.create_change_set(StackName="cfnsam", TemplateBody=sam, ChangeSetName="cs", ChangeSetType="CREATE")
+    cfn.create_change_set(
+        StackName="cfnsam", TemplateBody=sam, ChangeSetName="cs", ChangeSetType="CREATE"
+    )
     desc = cfn.describe_change_set(StackName="cfnsam", ChangeSetName="cs")
     # the change set shows the EXPANDED base CFN types
     assert {c["ResourceChange"]["ResourceType"] for c in desc["Changes"]} == {
-        "AWS::IAM::Role", "AWS::Lambda::Function", "AWS::DynamoDB::Table"}
+        "AWS::IAM::Role",
+        "AWS::Lambda::Function",
+        "AWS::DynamoDB::Table",
+    }
     cfn.execute_change_set(StackName="cfnsam", ChangeSetName="cs")
     cfn.get_waiter("stack_create_complete").wait(StackName="cfnsam")
 
     try:
-        assert "cfntest-worker" in [f["FunctionName"] for f in lam.list_functions()["Functions"]]
+        assert "cfntest-worker" in [
+            f["FunctionName"] for f in lam.list_functions()["Functions"]
+        ]
         assert "WorkerRole" in [r["RoleName"] for r in iam.list_roles()["Roles"]]
-        assert "cfntest-sam-store" in ddb.list_tables()["TableNames"]  # real DynamoDB Local
+        assert (
+            "cfntest-sam-store" in ddb.list_tables()["TableNames"]
+        )  # real DynamoDB Local
     finally:
         cfn.delete_stack(StackName="cfnsam")
         cfn.get_waiter("stack_delete_complete").wait(StackName="cfnsam")
 
-    assert "cfntest-worker" not in [f["FunctionName"] for f in lam.list_functions()["Functions"]]
+    assert "cfntest-worker" not in [
+        f["FunctionName"] for f in lam.list_functions()["Functions"]
+    ]
     assert "cfntest-sam-store" not in ddb.list_tables()["TableNames"]
 
 
 def _sfn_up() -> bool:
     try:
         from oblako.services import StepFunctionsService
+
         StepFunctionsService().get_client().list_state_machines()
         return True
     except Exception:
@@ -292,12 +350,19 @@ def _sfn_up() -> bool:
 def _opensearch_up() -> bool:
     try:
         import httpx
-        return httpx.get("http://localhost:9200/_cluster/health", timeout=3).status_code == 200
+
+        return (
+            httpx.get("http://localhost:9200/_cluster/health", timeout=3).status_code
+            == 200
+        )
     except Exception:
         return False
 
 
-@pytest.mark.skipif(not (_sfn_up() and _opensearch_up()), reason="Step Functions Local + OpenSearch not running")
+@pytest.mark.skipif(
+    not (_sfn_up() and _opensearch_up()),
+    reason="Step Functions Local + OpenSearch not running",
+)
 def test_deploy_statemachine_and_opensearch_domain():
     import time
 
@@ -305,42 +370,70 @@ def test_deploy_statemachine_and_opensearch_domain():
 
     cfn = boto3.client("cloudformation", endpoint_url=start_in_thread(), **CREDS)
     sfn = StepFunctionsService().get_client()
-    asl = json.dumps({"StartAt": "Done", "States": {"Done": {"Type": "Pass", "End": True}}})
-    template = json.dumps({
-        "Resources": {
-            "Flow": {"Type": "AWS::StepFunctions::StateMachine", "Properties": {
-                "StateMachineName": "cfntest-flow", "DefinitionString": asl,
-                "RoleArn": "arn:aws:iam::012345678901:role/DummyRole"}},
-            "Search": {"Type": "AWS::OpenSearchService::Domain",
-                       "Properties": {"DomainName": "cfntest-search"}},
-        },
-        "Outputs": {
-            "FlowName": {"Value": {"Fn::GetAtt": ["Flow", "Name"]}},
-            "Endpoint": {"Value": {"Fn::GetAtt": ["Search", "DomainEndpoint"]}},
-        },
-    })
-    cfn.create_change_set(StackName="cfneng", TemplateBody=template, ChangeSetName="cs", ChangeSetType="CREATE")
+    asl = json.dumps(
+        {"StartAt": "Done", "States": {"Done": {"Type": "Pass", "End": True}}}
+    )
+    template = json.dumps(
+        {
+            "Resources": {
+                "Flow": {
+                    "Type": "AWS::StepFunctions::StateMachine",
+                    "Properties": {
+                        "StateMachineName": "cfntest-flow",
+                        "DefinitionString": asl,
+                        "RoleArn": "arn:aws:iam::012345678901:role/DummyRole",
+                    },
+                },
+                "Search": {
+                    "Type": "AWS::OpenSearchService::Domain",
+                    "Properties": {"DomainName": "cfntest-search"},
+                },
+            },
+            "Outputs": {
+                "FlowName": {"Value": {"Fn::GetAtt": ["Flow", "Name"]}},
+                "Endpoint": {"Value": {"Fn::GetAtt": ["Search", "DomainEndpoint"]}},
+            },
+        }
+    )
+    cfn.create_change_set(
+        StackName="cfneng",
+        TemplateBody=template,
+        ChangeSetName="cs",
+        ChangeSetType="CREATE",
+    )
     cfn.execute_change_set(StackName="cfneng", ChangeSetName="cs")
     cfn.get_waiter("stack_create_complete").wait(StackName="cfneng")
 
-    outs = {o["OutputKey"]: o["OutputValue"] for o in cfn.describe_stacks(StackName="cfneng")["Stacks"][0]["Outputs"]}
-    assert outs["FlowName"] == "cfntest-flow"          # attribute-aware GetAtt
+    outs = {
+        o["OutputKey"]: o["OutputValue"]
+        for o in cfn.describe_stacks(StackName="cfneng")["Stacks"][0]["Outputs"]
+    }
+    assert outs["FlowName"] == "cfntest-flow"  # attribute-aware GetAtt
     assert outs["Endpoint"] == "localhost:9200"
     try:
-        assert "cfntest-flow" in [m["name"] for m in sfn.list_state_machines()["stateMachines"]]
+        assert "cfntest-flow" in [
+            m["name"] for m in sfn.list_state_machines()["stateMachines"]
+        ]
     finally:
         cfn.delete_stack(StackName="cfneng")
         cfn.get_waiter("stack_delete_complete").wait(StackName="cfneng")
 
     # Step Functions Local deletes asynchronously — poll for the machine to vanish.
     for _ in range(20):
-        if "cfntest-flow" not in [m["name"] for m in sfn.list_state_machines()["stateMachines"]]:
+        if "cfntest-flow" not in [
+            m["name"] for m in sfn.list_state_machines()["stateMachines"]
+        ]:
             break
         time.sleep(0.5)
-    assert "cfntest-flow" not in [m["name"] for m in sfn.list_state_machines()["stateMachines"]]
+    assert "cfntest-flow" not in [
+        m["name"] for m in sfn.list_state_machines()["stateMachines"]
+    ]
 
 
-@pytest.mark.skipif(not (_moto_up() and _sfn_up()), reason="moto + DynamoDB Local + Step Functions not running")
+@pytest.mark.skipif(
+    not (_moto_up() and _sfn_up()),
+    reason="moto + DynamoDB Local + Step Functions not running",
+)
 def test_deploy_all_resource_types_one_stack():
     """One stack provisioning every supported type into its real engine at once.
 
@@ -354,48 +447,108 @@ def test_deploy_all_resource_types_one_stack():
     s3 = S3ProxyService().get_client()
     ddb = DynamoDBService(host_port=8001).get_client()
     sfn = StepFunctionsService().get_client()
-    lam, iam, rs, rds_, apigw = (_moto_client(s) for s in
-                                 ("lambda", "iam", "redshift", "rds", "apigateway"))
-    asl = json.dumps({"StartAt": "Done", "States": {"Done": {"Type": "Pass", "End": True}}})
+    lam, iam, rs, rds_, apigw = (
+        _moto_client(s) for s in ("lambda", "iam", "redshift", "rds", "apigateway")
+    )
+    asl = json.dumps(
+        {"StartAt": "Done", "States": {"Done": {"Type": "Pass", "End": True}}}
+    )
 
-    template = json.dumps({
-        "Transform": "AWS::Serverless-2016-10-31",
-        "Resources": {
-            "Bucket": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": "cfnall-bucket"}},
-            "Table": {"Type": "AWS::DynamoDB::Table", "Properties": {
-                "TableName": "cfnall-table",
-                "AttributeDefinitions": [{"AttributeName": "id", "AttributeType": "S"}],
-                "KeySchema": [{"AttributeName": "id", "KeyType": "HASH"}]}},
-            "Flow": {"Type": "AWS::StepFunctions::StateMachine", "Properties": {
-                "StateMachineName": "cfnall-flow", "DefinitionString": asl,
-                "RoleArn": "arn:aws:iam::012345678901:role/DummyRole"}},
-            "Warehouse": {"Type": "AWS::Redshift::Cluster", "Properties": {
-                "ClusterIdentifier": "cfnall-dw", "NodeType": "ra3.xlplus",
-                "MasterUsername": "oblako", "MasterUserPassword": "Oblako123"}},
-            "Database": {"Type": "AWS::RDS::DBInstance", "Properties": {
-                "DBInstanceIdentifier": "cfnall-db", "Engine": "postgres",
-                "MasterUsername": "oblako", "MasterUserPassword": "Oblako123"}},
-            "Worker": {"Type": "AWS::Serverless::Function", "Properties": {
-                "FunctionName": "cfnall-fn", "Handler": "app.handler", "Runtime": "python3.12",
-                "Events": {"Get": {"Type": "Api", "Properties": {"Path": "/x", "Method": "get"}}}}},
-        },
-    })
-    cfn.create_change_set(StackName="cfnall", TemplateBody=template, ChangeSetName="cs", ChangeSetType="CREATE")
+    template = json.dumps(
+        {
+            "Transform": "AWS::Serverless-2016-10-31",
+            "Resources": {
+                "Bucket": {
+                    "Type": "AWS::S3::Bucket",
+                    "Properties": {"BucketName": "cfnall-bucket"},
+                },
+                "Table": {
+                    "Type": "AWS::DynamoDB::Table",
+                    "Properties": {
+                        "TableName": "cfnall-table",
+                        "AttributeDefinitions": [
+                            {"AttributeName": "id", "AttributeType": "S"}
+                        ],
+                        "KeySchema": [{"AttributeName": "id", "KeyType": "HASH"}],
+                    },
+                },
+                "Flow": {
+                    "Type": "AWS::StepFunctions::StateMachine",
+                    "Properties": {
+                        "StateMachineName": "cfnall-flow",
+                        "DefinitionString": asl,
+                        "RoleArn": "arn:aws:iam::012345678901:role/DummyRole",
+                    },
+                },
+                "Warehouse": {
+                    "Type": "AWS::Redshift::Cluster",
+                    "Properties": {
+                        "ClusterIdentifier": "cfnall-dw",
+                        "NodeType": "ra3.xlplus",
+                        "MasterUsername": "oblako",
+                        "MasterUserPassword": "Oblako123",
+                    },
+                },
+                "Database": {
+                    "Type": "AWS::RDS::DBInstance",
+                    "Properties": {
+                        "DBInstanceIdentifier": "cfnall-db",
+                        "Engine": "postgres",
+                        "MasterUsername": "oblako",
+                        "MasterUserPassword": "Oblako123",
+                    },
+                },
+                "Worker": {
+                    "Type": "AWS::Serverless::Function",
+                    "Properties": {
+                        "FunctionName": "cfnall-fn",
+                        "Handler": "app.handler",
+                        "Runtime": "python3.12",
+                        "Events": {
+                            "Get": {
+                                "Type": "Api",
+                                "Properties": {"Path": "/x", "Method": "get"},
+                            }
+                        },
+                    },
+                },
+            },
+        }
+    )
+    cfn.create_change_set(
+        StackName="cfnall",
+        TemplateBody=template,
+        ChangeSetName="cs",
+        ChangeSetType="CREATE",
+    )
     cfn.execute_change_set(StackName="cfnall", ChangeSetName="cs")
     cfn.get_waiter("stack_create_complete").wait(StackName="cfnall")
 
     try:
         assert "cfnall-bucket" in [b["Name"] for b in s3.list_buckets()["Buckets"]]
         assert "cfnall-table" in ddb.list_tables()["TableNames"]
-        assert "cfnall-flow" in [m["name"] for m in sfn.list_state_machines()["stateMachines"]]
-        assert "cfnall-dw" in [c["ClusterIdentifier"] for c in rs.describe_clusters()["Clusters"]]
-        assert "cfnall-db" in [d["DBInstanceIdentifier"] for d in rds_.describe_db_instances()["DBInstances"]]
-        assert "cfnall-fn" in [f["FunctionName"] for f in lam.list_functions()["Functions"]]
+        assert "cfnall-flow" in [
+            m["name"] for m in sfn.list_state_machines()["stateMachines"]
+        ]
+        assert "cfnall-dw" in [
+            c["ClusterIdentifier"] for c in rs.describe_clusters()["Clusters"]
+        ]
+        assert "cfnall-db" in [
+            d["DBInstanceIdentifier"]
+            for d in rds_.describe_db_instances()["DBInstances"]
+        ]
+        assert "cfnall-fn" in [
+            f["FunctionName"] for f in lam.list_functions()["Functions"]
+        ]
         assert any("Worker" in r["RoleName"] for r in iam.list_roles()["Roles"])
-        assert "ServerlessRestApi" in [a["name"] for a in apigw.get_rest_apis()["items"]]
+        assert "ServerlessRestApi" in [
+            a["name"] for a in apigw.get_rest_apis()["items"]
+        ]
     finally:
         cfn.delete_stack(StackName="cfnall")
         cfn.get_waiter("stack_delete_complete").wait(StackName="cfnall")
 
     assert "cfnall-bucket" not in [b["Name"] for b in s3.list_buckets()["Buckets"]]
-    assert "cfnall-db" not in [d["DBInstanceIdentifier"] for d in rds_.describe_db_instances()["DBInstances"]]
+    assert "cfnall-db" not in [
+        d["DBInstanceIdentifier"] for d in rds_.describe_db_instances()["DBInstances"]
+    ]

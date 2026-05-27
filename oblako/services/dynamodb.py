@@ -18,7 +18,9 @@ class DynamoDBService(Service):
             # with -sharedDb -dbPath (else it runs per-credentials, in-memory-ish).
             command="-jar DynamoDBLocal.jar -sharedDb -dbPath ./data",
             working_dir="/home/dynamodblocal",
-            volumes={"oblako-ml-dynamodb": {"bind": "/home/dynamodblocal/data", "mode": "rw"}},
+            volumes={
+                "oblako-ml-dynamodb": {"bind": "/home/dynamodblocal/data", "mode": "rw"}
+            },
             # The named volume is root-owned; run as root so the non-root default
             # user can write shared-local-instance.db (else: "unable to open database file").
             container_user="root",

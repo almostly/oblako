@@ -13,8 +13,12 @@ import pytest
 
 from oblako.services import RdsService
 
-CREDS = dict(region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test")
-PG = dict(host="localhost", port=5432, user="oblako", password="oblako", dbname="oblako")
+CREDS = dict(
+    region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"
+)
+PG = dict(
+    host="localhost", port=5432, user="oblako", password="oblako", dbname="oblako"
+)
 
 
 @pytest.fixture(scope="module")
@@ -43,8 +47,13 @@ def test_create_db_instance(rds):
     except Exception:
         pass
     rds.create_db_instance(
-        DBInstanceIdentifier=cid, Engine="postgres", DBInstanceClass="db.t3.micro",
-        MasterUsername="oblako", MasterUserPassword="Oblako123", AllocatedStorage=20, DBName="oblako",
+        DBInstanceIdentifier=cid,
+        Engine="postgres",
+        DBInstanceClass="db.t3.micro",
+        MasterUsername="oblako",
+        MasterUserPassword="Oblako123",
+        AllocatedStorage=20,
+        DBName="oblako",
     )
     inst = rds.describe_db_instances(DBInstanceIdentifier=cid)["DBInstances"][0]
     assert inst["Engine"] == "postgres"
@@ -59,7 +68,9 @@ def test_create_aurora_cluster(rds):
     def teardown():
         # Aurora: instances must be deleted before the cluster.
         try:
-            rds.delete_db_instance(DBInstanceIdentifier=f"{cid}-1", SkipFinalSnapshot=True)
+            rds.delete_db_instance(
+                DBInstanceIdentifier=f"{cid}-1", SkipFinalSnapshot=True
+            )
         except Exception:
             pass
         try:
@@ -69,24 +80,34 @@ def test_create_aurora_cluster(rds):
 
     teardown()
     rds.create_db_cluster(
-        DBClusterIdentifier=cid, Engine="aurora-postgresql",
-        MasterUsername="oblako", MasterUserPassword="Oblako123", DatabaseName="oblako",
+        DBClusterIdentifier=cid,
+        Engine="aurora-postgresql",
+        MasterUsername="oblako",
+        MasterUserPassword="Oblako123",
+        DatabaseName="oblako",
     )
     rds.create_db_instance(
-        DBInstanceIdentifier=f"{cid}-1", DBClusterIdentifier=cid,
-        Engine="aurora-postgresql", DBInstanceClass="db.r6g.large",
+        DBInstanceIdentifier=f"{cid}-1",
+        DBClusterIdentifier=cid,
+        Engine="aurora-postgresql",
+        DBInstanceClass="db.r6g.large",
     )
     cluster = rds.describe_db_clusters(DBClusterIdentifier=cid)["DBClusters"][0]
     assert cluster["Engine"] == "aurora-postgresql"
-    assert cluster.get("Endpoint")        # writer endpoint
+    assert cluster.get("Endpoint")  # writer endpoint
     assert cluster.get("ReaderEndpoint")  # reader endpoint
-    assert any(m["DBInstanceIdentifier"] == f"{cid}-1" for m in cluster.get("DBClusterMembers", []))
+    assert any(
+        m["DBInstanceIdentifier"] == f"{cid}-1"
+        for m in cluster.get("DBClusterMembers", [])
+    )
     teardown()
 
 
 # -- data plane ------------------------------------------------------------
 def test_connect_and_crud(cursor):
-    cursor.executemany("INSERT INTO rds_test VALUES (%s, %s)", [(1, "alice"), (2, "bob")])
+    cursor.executemany(
+        "INSERT INTO rds_test VALUES (%s, %s)", [(1, "alice"), (2, "bob")]
+    )
     cursor.execute("SELECT name FROM rds_test ORDER BY id")
     assert [r[0] for r in cursor.fetchall()] == ["alice", "bob"]
 
@@ -95,26 +116,49 @@ def test_connect_and_crud(cursor):
 def test_seed_idempotent(rds):
     svc = RdsService()  # control plane only (moto); no engine container needed
     spec = dict(
-        instances=[{
-            "DBInstanceIdentifier": "seed-inst", "Engine": "postgres",
-            "DBInstanceClass": "db.t3.micro", "MasterUsername": "oblako",
-            "MasterUserPassword": "Oblako123", "AllocatedStorage": 20, "DBName": "oblako",
-        }],
-        clusters=[{
-            "DBClusterIdentifier": "seed-clus", "Engine": "aurora-postgresql",
-            "MasterUsername": "oblako", "MasterUserPassword": "Oblako123", "DatabaseName": "oblako",
-            "instances": [{
-                "DBInstanceIdentifier": "seed-clus-1", "Engine": "aurora-postgresql",
-                "DBInstanceClass": "db.r6g.large",
-            }],
-        }],
+        instances=[
+            {
+                "DBInstanceIdentifier": "seed-inst",
+                "Engine": "postgres",
+                "DBInstanceClass": "db.t3.micro",
+                "MasterUsername": "oblako",
+                "MasterUserPassword": "Oblako123",
+                "AllocatedStorage": 20,
+                "DBName": "oblako",
+            }
+        ],
+        clusters=[
+            {
+                "DBClusterIdentifier": "seed-clus",
+                "Engine": "aurora-postgresql",
+                "MasterUsername": "oblako",
+                "MasterUserPassword": "Oblako123",
+                "DatabaseName": "oblako",
+                "instances": [
+                    {
+                        "DBInstanceIdentifier": "seed-clus-1",
+                        "Engine": "aurora-postgresql",
+                        "DBInstanceClass": "db.r6g.large",
+                    }
+                ],
+            }
+        ],
     )
 
     def cleanup():
         for fn, kw in [
-            (rds.delete_db_instance, {"DBInstanceIdentifier": "seed-clus-1", "SkipFinalSnapshot": True}),
-            (rds.delete_db_cluster, {"DBClusterIdentifier": "seed-clus", "SkipFinalSnapshot": True}),
-            (rds.delete_db_instance, {"DBInstanceIdentifier": "seed-inst", "SkipFinalSnapshot": True}),
+            (
+                rds.delete_db_instance,
+                {"DBInstanceIdentifier": "seed-clus-1", "SkipFinalSnapshot": True},
+            ),
+            (
+                rds.delete_db_cluster,
+                {"DBClusterIdentifier": "seed-clus", "SkipFinalSnapshot": True},
+            ),
+            (
+                rds.delete_db_instance,
+                {"DBInstanceIdentifier": "seed-inst", "SkipFinalSnapshot": True},
+            ),
         ]:
             try:
                 fn(**kw)
@@ -131,7 +175,9 @@ def test_seed_idempotent(rds):
         second = svc.seed(**spec)
         assert second == {"clusters": [], "instances": []}
         # and they really exist
-        assert rds.describe_db_instances(DBInstanceIdentifier="seed-inst")["DBInstances"]
+        assert rds.describe_db_instances(DBInstanceIdentifier="seed-inst")[
+            "DBInstances"
+        ]
         assert rds.describe_db_clusters(DBClusterIdentifier="seed-clus")["DBClusters"]
     finally:
         cleanup()
@@ -150,7 +196,9 @@ def test_mysql_connect_and_crud():
         cur = conn.cursor()
         cur.execute("DROP TABLE IF EXISTS rds_mysql_test")
         cur.execute("CREATE TABLE rds_mysql_test (id INT PRIMARY KEY, name TEXT)")
-        cur.executemany("INSERT INTO rds_mysql_test VALUES (%s, %s)", [(1, "alice"), (2, "bob")])
+        cur.executemany(
+            "INSERT INTO rds_mysql_test VALUES (%s, %s)", [(1, "alice"), (2, "bob")]
+        )
         cur.execute("SELECT name FROM rds_mysql_test ORDER BY id")
         assert [r[0] for r in cur.fetchall()] == ["alice", "bob"]
         cur.execute("DROP TABLE rds_mysql_test")

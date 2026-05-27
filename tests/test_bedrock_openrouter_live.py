@@ -19,7 +19,9 @@ from oblako.bedrock.backends import OpenRouterBackend
 
 
 def test_live_converse():
-    adapter = BedrockAdapter(backend=OpenRouterBackend(api_key=os.environ["OPENROUTER_API_KEY"]))
+    adapter = BedrockAdapter(
+        backend=OpenRouterBackend(api_key=os.environ["OPENROUTER_API_KEY"])
+    )
     result = adapter.converse(
         model_id="meta.llama3-8b-instruct-v1:0",  # -> meta-llama/llama-3-8b-instruct
         messages=[{"role": "user", "content": [{"text": "Reply with a single word."}]}],

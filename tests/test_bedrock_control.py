@@ -15,7 +15,9 @@ from oblako.bedrock.ollama_client import OllamaClient
 from oblako.bedrock_runtime import start_in_thread
 from oblako.services import S3ProxyService
 
-CREDS = dict(region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test")
+CREDS = dict(
+    region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"
+)
 
 
 @pytest.fixture(scope="module")
@@ -67,7 +69,9 @@ def test_batch_model_invocation_job(bedrock):
             "messages": [{"role": "user", "content": "Reply with: ok"}],
         },
     }
-    s3.put_object(Bucket="bedrock-it-in", Key="in/records.jsonl", Body=json.dumps(record).encode())
+    s3.put_object(
+        Bucket="bedrock-it-in", Key="in/records.jsonl", Body=json.dumps(record).encode()
+    )
 
     job_arn = bedrock.create_model_invocation_job(
         jobName="it-batch",
@@ -86,10 +90,22 @@ def test_batch_model_invocation_job(bedrock):
     assert details["totalRecordCount"] == 1
     assert details["successRecordCount"] == 1
 
-    keys = [o["Key"] for o in s3.list_objects_v2(Bucket="bedrock-it-out", Prefix="out/").get("Contents", [])]
+    keys = [
+        o["Key"]
+        for o in s3.list_objects_v2(Bucket="bedrock-it-out", Prefix="out/").get(
+            "Contents", []
+        )
+    ]
     assert keys
-    out = json.loads(s3.get_object(Bucket="bedrock-it-out", Key=keys[0])["Body"].read().splitlines()[0])
+    out = json.loads(
+        s3.get_object(Bucket="bedrock-it-out", Key=keys[0])["Body"]
+        .read()
+        .splitlines()[0]
+    )
     assert out["recordId"] == "r1"
     assert "modelOutput" in out
 
-    assert any(j["jobName"] == "it-batch" for j in bedrock.list_model_invocation_jobs()["invocationJobSummaries"])
+    assert any(
+        j["jobName"] == "it-batch"
+        for j in bedrock.list_model_invocation_jobs()["invocationJobSummaries"]
+    )

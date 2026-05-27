@@ -40,7 +40,9 @@ class ModelInvocationJob:
 
     def start(self) -> None:
         """Launch the job in a background daemon thread."""
-        self._thread = threading.Thread(target=self._run, name=f"bedrock-job-{self.job_id}", daemon=True)
+        self._thread = threading.Thread(
+            target=self._run, name=f"bedrock-job-{self.job_id}", daemon=True
+        )
         self._thread.start()
 
     def stop(self) -> None:
@@ -56,8 +58,12 @@ class ModelInvocationJob:
         self._touch()
         try:
             s3 = self._s3_factory()
-            in_bucket, in_prefix = _parse_s3_uri(self.details["inputDataConfig"]["s3InputDataConfig"]["s3Uri"])
-            out_bucket, out_prefix = _parse_s3_uri(self.details["outputDataConfig"]["s3OutputDataConfig"]["s3Uri"])
+            in_bucket, in_prefix = _parse_s3_uri(
+                self.details["inputDataConfig"]["s3InputDataConfig"]["s3Uri"]
+            )
+            out_bucket, out_prefix = _parse_s3_uri(
+                self.details["outputDataConfig"]["s3OutputDataConfig"]["s3Uri"]
+            )
             model_id = self.details["modelId"].split("/")[-1]
 
             listing = s3.list_objects_v2(Bucket=in_bucket, Prefix=in_prefix)
@@ -68,7 +74,11 @@ class ModelInvocationJob:
                 key = obj["Key"]
                 if not key.endswith(".jsonl"):
                     continue
-                raw = s3.get_object(Bucket=in_bucket, Key=key)["Body"].read().decode("utf-8")
+                raw = (
+                    s3.get_object(Bucket=in_bucket, Key=key)["Body"]
+                    .read()
+                    .decode("utf-8")
+                )
                 out_lines = []
                 for i, line in enumerate(raw.splitlines()):
                     line = line.strip()
@@ -81,19 +91,35 @@ class ModelInvocationJob:
                         model_output = self.adapter.invoke_model(
                             model_id, json.dumps(record.get("modelInput", record))
                         )
-                        out_lines.append(json.dumps(
-                            {"recordId": record_id, "modelInput": record.get("modelInput"), "modelOutput": model_output}
-                        ))
+                        out_lines.append(
+                            json.dumps(
+                                {
+                                    "recordId": record_id,
+                                    "modelInput": record.get("modelInput"),
+                                    "modelOutput": model_output,
+                                }
+                            )
+                        )
                         success += 1
                     except Exception as e:  # noqa: BLE001 - record-level error
-                        out_lines.append(json.dumps(
-                            {"recordId": record_id, "modelInput": record.get("modelInput"), "error": str(e)}
-                        ))
+                        out_lines.append(
+                            json.dumps(
+                                {
+                                    "recordId": record_id,
+                                    "modelInput": record.get("modelInput"),
+                                    "error": str(e),
+                                }
+                            )
+                        )
                         errors += 1
                     processed += 1
                 base = key.rsplit("/", 1)[-1]
                 out_key = f"{out_prefix}{self.job_id}/{base}.out"
-                s3.put_object(Bucket=out_bucket, Key=out_key, Body="\n".join(out_lines).encode("utf-8"))
+                s3.put_object(
+                    Bucket=out_bucket,
+                    Key=out_key,
+                    Body="\n".join(out_lines).encode("utf-8"),
+                )
 
             self.details["totalRecordCount"] = total
             self.details["processedRecordCount"] = processed
@@ -116,7 +142,9 @@ class JobStore:
         self._jobs: dict[str, ModelInvocationJob] = {}
         self._lock = threading.Lock()
 
-    def create(self, details: dict, adapter: BedrockAdapter, s3_factory) -> ModelInvocationJob:
+    def create(
+        self, details: dict, adapter: BedrockAdapter, s3_factory
+    ) -> ModelInvocationJob:
         """Create and register a new ModelInvocationJob from the given details."""
         job = ModelInvocationJob(details, adapter, s3_factory)
         with self._lock:
@@ -135,9 +163,16 @@ class JobStore:
 
 
 def new_job_details(
-    *, job_name: str, model_id: str, role_arn: str, input_config: dict, output_config: dict,
-    region: str = "us-east-1", account_id: str = "000000000000",
-    client_request_token: str | None = None, timeout_hours: int | None = None,
+    *,
+    job_name: str,
+    model_id: str,
+    role_arn: str,
+    input_config: dict,
+    output_config: dict,
+    region: str = "us-east-1",
+    account_id: str = "000000000000",
+    client_request_token: str | None = None,
+    timeout_hours: int | None = None,
 ) -> dict:
     """Build the GetModelInvocationJob-shaped details dict for a new job."""
     job_uid = uuid.uuid4().hex[:16]

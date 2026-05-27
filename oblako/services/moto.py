@@ -29,7 +29,9 @@ class MotoService(Service):
 
     def _health_check(self) -> bool:
         try:
-            with urllib.request.urlopen(f"{self.endpoint_url}/moto-api/", timeout=2) as resp:
+            with urllib.request.urlopen(
+                f"{self.endpoint_url}/moto-api/", timeout=2
+            ) as resp:
                 return resp.status == 200
         except Exception:
             return False

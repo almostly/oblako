@@ -39,8 +39,15 @@ def _json_safe(value):
 class RdsDataExecutor:
     """Synchronous SQL executor for the RDS Data API (Postgres or MySQL)."""
 
-    def __init__(self, host="localhost", port=5432, user="oblako", password="oblako",
-                 database="oblako", engine="postgres"):
+    def __init__(
+        self,
+        host="localhost",
+        port=5432,
+        user="oblako",
+        password="oblako",
+        database="oblako",
+        engine="postgres",
+    ):
         """Initialize connection parameters and choose the driver for the given engine."""
         if engine not in ("postgres", "mysql"):
             raise ValueError(f"engine must be 'postgres' or 'mysql', got {engine!r}")
@@ -55,7 +62,9 @@ class RdsDataExecutor:
         self._pg_type_cache: dict[int, str] | None = None
         self._mysql_type_cache: dict[int, str] | None = None
 
-    # -- connections / metadata --------------------------------------------
+    # -------------------------------------------------------------------------------
+    # Connections / metadata
+    # -------------------------------------------------------------------------------
     def _connect(self, database=None, autocommit=True):
         db = database or self.database
         if self.engine == "mysql":
@@ -65,14 +74,24 @@ class RdsDataExecutor:
                 raise ImportError(
                     "rds-data over MySQL needs pymysql: pip install 'oblako[mysql]'"
                 ) from e
-            conn = pymysql.connect(host=self.host, port=self.port, user=self.user,
-                                   password=self.password, database=db)
+            conn = pymysql.connect(
+                host=self.host,
+                port=self.port,
+                user=self.user,
+                password=self.password,
+                database=db,
+            )
             conn.autocommit(autocommit)  # pymysql: method
             return conn
         import psycopg2
 
-        conn = psycopg2.connect(host=self.host, port=self.port, user=self.user,
-                                password=self.password, dbname=db)
+        conn = psycopg2.connect(
+            host=self.host,
+            port=self.port,
+            user=self.user,
+            password=self.password,
+            dbname=db,
+        )
         conn.autocommit = autocommit  # psycopg2: attribute
         return conn
 
@@ -88,7 +107,8 @@ class RdsDataExecutor:
             from pymysql.constants import FIELD_TYPE
 
             self._mysql_type_cache = {
-                v: k for k, v in vars(FIELD_TYPE).items()
+                v: k
+                for k, v in vars(FIELD_TYPE).items()
                 if isinstance(v, int) and not k.startswith("_")
             }
         return self._mysql_type_cache
@@ -103,17 +123,21 @@ class RdsDataExecutor:
         # (name, type_code, display_size, internal_size, precision, scale, null_ok)
         cols = []
         for c in description:
-            cols.append({
-                "name": c[0],
-                "label": c[0],
-                "typeName": self._typename(c[1], conn),
-                "nullable": 1,
-                "precision": (c[4] if len(c) > 4 else 0) or 0,
-                "scale": (c[5] if len(c) > 5 else 0) or 0,
-            })
+            cols.append(
+                {
+                    "name": c[0],
+                    "label": c[0],
+                    "typeName": self._typename(c[1], conn),
+                    "nullable": 1,
+                    "precision": (c[4] if len(c) > 4 else 0) or 0,
+                    "scale": (c[5] if len(c) > 5 else 0) or 0,
+                }
+            )
         return cols
 
-    # -- parameters (Field-valued) -----------------------------------------
+    # -------------------------------------------------------------------------------
+    # Parameters (Field-valued)
+    # -------------------------------------------------------------------------------
     @staticmethod
     def _param_scalar(field: dict):
         if not field or field.get("isNull"):
@@ -130,9 +154,18 @@ class RdsDataExecutor:
         named = {p["name"]: self._param_scalar(p.get("value", {})) for p in parameters}
         return _NAMED_PARAM.sub(r"%(\1)s", sql), named
 
-    # -- statements --------------------------------------------------------
-    def execute(self, sql, database=None, parameters=None, transaction_id=None,
-                include_result_metadata=False, format_records_as=None) -> dict:
+    # -------------------------------------------------------------------------------
+    # Statements
+    # -------------------------------------------------------------------------------
+    def execute(
+        self,
+        sql,
+        database=None,
+        parameters=None,
+        transaction_id=None,
+        include_result_metadata=False,
+        format_records_as=None,
+    ) -> dict:
         """Execute a SQL statement and return the result dict."""
         bound, params = self._bind(sql, parameters)
         if transaction_id:
@@ -152,12 +185,19 @@ class RdsDataExecutor:
                     if format_records_as == "JSON":
                         cols = [c[0] for c in cur.description]
                         out["formattedRecords"] = json.dumps(
-                            [{c: _json_safe(v) for c, v in zip(cols, row)} for row in rows]
+                            [
+                                {c: _json_safe(v) for c, v in zip(cols, row)}
+                                for row in rows
+                            ]
                         )
                     else:
-                        out["records"] = [[_encode_field(v) for v in row] for row in rows]
+                        out["records"] = [
+                            [_encode_field(v) for v in row] for row in rows
+                        ]
                     if include_result_metadata:
-                        out["columnMetadata"] = self._column_metadata(conn, cur.description)
+                        out["columnMetadata"] = self._column_metadata(
+                            conn, cur.description
+                        )
                 else:
                     out["numberOfRecordsUpdated"] = max(cur.rowcount, 0)
                 return out
@@ -188,7 +228,9 @@ class RdsDataExecutor:
             if temp:
                 conn.close()
 
-    # -- transactions ------------------------------------------------------
+    # -------------------------------------------------------------------------------
+    # Transactions
+    # -------------------------------------------------------------------------------
     def begin(self, database=None) -> str:
         """Open a new database transaction and return its id."""
         tid = uuid.uuid4().hex

@@ -42,7 +42,9 @@ def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
         return False
 
 
-def start_in_thread(port: int = DEFAULT_PORT, executor: RedshiftDataExecutor | None = None) -> str:
+def start_in_thread(
+    port: int = DEFAULT_PORT, executor: RedshiftDataExecutor | None = None
+) -> str:
     """Start the redshift-data server in a daemon thread (idempotent).
 
     ``port`` is the HTTP server port; ``executor`` configures the pgredshift
@@ -58,7 +60,9 @@ def start_in_thread(port: int = DEFAULT_PORT, executor: RedshiftDataExecutor | N
         if port in _servers:
             return url
         application = create_app(executor)
-        config = uvicorn.Config(application, host="127.0.0.1", port=port, log_level="warning")
+        config = uvicorn.Config(
+            application, host="127.0.0.1", port=port, log_level="warning"
+        )
         server = uvicorn.Server(config)
         thread = threading.Thread(target=server.run, daemon=True)
         thread.start()

@@ -31,13 +31,17 @@ _lock = threading.Lock()
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if an rds-data server is responding on the given port."""
     try:
-        with urllib.request.urlopen(f"http://localhost:{port}/", timeout=timeout) as resp:
+        with urllib.request.urlopen(
+            f"http://localhost:{port}/", timeout=timeout
+        ) as resp:
             return resp.status == 200
     except Exception:
         return False
 
 
-def start_in_thread(port: int = DEFAULT_PORT, executor: RdsDataExecutor | None = None) -> str:
+def start_in_thread(
+    port: int = DEFAULT_PORT, executor: RdsDataExecutor | None = None
+) -> str:
     """Start the rds-data server in a daemon thread (idempotent). Returns the URL."""
     import uvicorn
 
@@ -48,7 +52,9 @@ def start_in_thread(port: int = DEFAULT_PORT, executor: RdsDataExecutor | None =
         if port in _servers:
             return url
         application = create_app(executor)
-        config = uvicorn.Config(application, host="127.0.0.1", port=port, log_level="warning")
+        config = uvicorn.Config(
+            application, host="127.0.0.1", port=port, log_level="warning"
+        )
         server = uvicorn.Server(config)
         thread = threading.Thread(target=server.run, daemon=True)
         thread.start()

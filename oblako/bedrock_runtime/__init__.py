@@ -29,7 +29,9 @@ _lock = threading.Lock()
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if a bedrock-runtime server is reachable on the port."""
     try:
-        with urllib.request.urlopen(f"http://localhost:{port}/", timeout=timeout) as resp:
+        with urllib.request.urlopen(
+            f"http://localhost:{port}/", timeout=timeout
+        ) as resp:
             return resp.status == 200
     except Exception:
         return False
@@ -46,7 +48,9 @@ def start_in_thread(port: int = DEFAULT_PORT, ollama_url: str | None = None) -> 
         if port in _servers:
             return url
         application = create_app(ollama_url=ollama_url)
-        config = uvicorn.Config(application, host="127.0.0.1", port=port, log_level="warning")
+        config = uvicorn.Config(
+            application, host="127.0.0.1", port=port, log_level="warning"
+        )
         server = uvicorn.Server(config)
         thread = threading.Thread(target=server.run, daemon=True)
         thread.start()

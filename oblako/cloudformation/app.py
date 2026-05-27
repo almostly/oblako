@@ -33,8 +33,11 @@ def _el(tag, value):
 
 def _outputs_xml(outputs):
     members = "".join(
-        "<member>" + _el("OutputKey", o["OutputKey"]) + _el("OutputValue", o["OutputValue"])
-        + (_el("Description", o["Description"]) if "Description" in o else "") + "</member>"
+        "<member>"
+        + _el("OutputKey", o["OutputKey"])
+        + _el("OutputValue", o["OutputValue"])
+        + (_el("Description", o["Description"]) if "Description" in o else "")
+        + "</member>"
         for o in outputs
     )
     return f"<Outputs>{members}</Outputs>"
@@ -43,10 +46,15 @@ def _outputs_xml(outputs):
 def _stack_xml(stack):
     return (
         "<member>"
-        + _el("StackId", stack["StackId"]) + _el("StackName", stack["StackName"])
+        + _el("StackId", stack["StackId"])
+        + _el("StackName", stack["StackName"])
         + _el("StackStatus", stack["StackStatus"])
         + _el("CreationTime", stack["CreationTime"].isoformat())
-        + (_el("StackStatusReason", stack["StackStatusReason"]) if stack.get("StackStatusReason") else "")
+        + (
+            _el("StackStatusReason", stack["StackStatusReason"])
+            if stack.get("StackStatusReason")
+            else ""
+        )
         + _outputs_xml(stack["Outputs"])
         + "</member>"
     )
@@ -84,11 +92,24 @@ def _fetch_template_url(url):
     path = unquote(p.path).lstrip("/")
     host = p.netloc.split(":")[0]
     parts = host.split(".")
-    if len(parts) > 2 and parts[1] in ("s3", "s3-website") or (len(parts) > 1 and parts[1].startswith("s3")):
-        bucket, key = parts[0], path  # virtual-host style: <bucket>.s3.<region>.amazonaws.com/<key>
+    if (
+        len(parts) > 2
+        and parts[1] in ("s3", "s3-website")
+        or (len(parts) > 1 and parts[1].startswith("s3"))
+    ):
+        bucket, key = (
+            parts[0],
+            path,
+        )  # virtual-host style: <bucket>.s3.<region>.amazonaws.com/<key>
     else:
         bucket, _, key = path.partition("/")  # path style: <host>/<bucket>/<key>
-    return S3ProxyService().get_client().get_object(Bucket=bucket, Key=key)["Body"].read().decode()
+    return (
+        S3ProxyService()
+        .get_client()
+        .get_object(Bucket=bucket, Key=key)["Body"]
+        .read()
+        .decode()
+    )
 
 
 def _parse_params(form):
@@ -127,44 +148,64 @@ class CfnApp:
         """Handle DescribeStacks and return XML for the requested stack(s)."""
         name = form.get("StackName")
         stacks = [self.store.get(name)] if name else self.store.all()
-        return _ok("DescribeStacks", "<Stacks>" + "".join(_stack_xml(s) for s in stacks) + "</Stacks>")
+        return _ok(
+            "DescribeStacks",
+            "<Stacks>" + "".join(_stack_xml(s) for s in stacks) + "</Stacks>",
+        )
 
     def op_DescribeStackResources(self, form):
         """Handle DescribeStackResources and return XML for all resources in the stack."""
         resources = self.store.describe_stack_resources(form["StackName"])
         members = "".join(
-            "<member>" + _el("StackName", form["StackName"])
+            "<member>"
+            + _el("StackName", form["StackName"])
             + _el("LogicalResourceId", r["LogicalResourceId"])
             + _el("PhysicalResourceId", r["PhysicalResourceId"])
-            + _el("ResourceType", r["ResourceType"]) + _el("ResourceStatus", r["ResourceStatus"])
-            + _el("Timestamp", _now()) + "</member>"
+            + _el("ResourceType", r["ResourceType"])
+            + _el("ResourceStatus", r["ResourceStatus"])
+            + _el("Timestamp", _now())
+            + "</member>"
             for r in resources
         )
-        return _ok("DescribeStackResources", f"<StackResources>{members}</StackResources>")
+        return _ok(
+            "DescribeStackResources", f"<StackResources>{members}</StackResources>"
+        )
 
     def op_CreateChangeSet(self, form):
         """Handle CreateChangeSet, fetching the template from S3 if a URL was given."""
         # sam/aws upload large templates to S3 and pass TemplateURL instead of body.
-        body = form.get("TemplateBody") or _fetch_template_url(form.get("TemplateURL", ""))
-        out = self.store.create_change_set(
-            form["StackName"], body, _parse_params(form),
-            form.get("ChangeSetName", "oblako-cs"), form.get("ChangeSetType", "CREATE"),
+        body = form.get("TemplateBody") or _fetch_template_url(
+            form.get("TemplateURL", "")
         )
-        return _ok("CreateChangeSet", _el("Id", out["Id"]) + _el("StackId", out["StackId"]))
+        out = self.store.create_change_set(
+            form["StackName"],
+            body,
+            _parse_params(form),
+            form.get("ChangeSetName", "oblako-cs"),
+            form.get("ChangeSetType", "CREATE"),
+        )
+        return _ok(
+            "CreateChangeSet", _el("Id", out["Id"]) + _el("StackId", out["StackId"])
+        )
 
     def op_DescribeChangeSet(self, form):
         """Handle DescribeChangeSet and return XML for the requested change set."""
         cs = self.store.describe_change_set(form["StackName"], form["ChangeSetName"])
         changes = "".join(
             "<member><Type>Resource</Type><ResourceChange>"
-            + _el("Action", c["Action"]) + _el("LogicalResourceId", c["LogicalResourceId"])
-            + _el("ResourceType", c["ResourceType"]) + "</ResourceChange></member>"
+            + _el("Action", c["Action"])
+            + _el("LogicalResourceId", c["LogicalResourceId"])
+            + _el("ResourceType", c["ResourceType"])
+            + "</ResourceChange></member>"
             for c in cs["Changes"]
         )
         inner = (
-            _el("ChangeSetName", cs["ChangeSetName"]) + _el("ChangeSetId", cs["ChangeSetId"])
-            + _el("StackId", cs["StackId"]) + _el("StackName", cs["StackName"])
-            + _el("Status", cs["Status"]) + _el("ExecutionStatus", cs["ExecutionStatus"])
+            _el("ChangeSetName", cs["ChangeSetName"])
+            + _el("ChangeSetId", cs["ChangeSetId"])
+            + _el("StackId", cs["StackId"])
+            + _el("StackName", cs["StackName"])
+            + _el("Status", cs["Status"])
+            + _el("ExecutionStatus", cs["ExecutionStatus"])
             + f"<Changes>{changes}</Changes>"
         )
         return _ok("DescribeChangeSet", inner)
@@ -183,11 +224,20 @@ class CfnApp:
         """Handle DescribeStackEvents and return XML for all events on the stack."""
         events = self.store.describe_stack_events(form["StackName"])
         members = "".join(
-            "<member>" + _el("StackId", e["StackId"]) + _el("EventId", e["EventId"])
-            + _el("StackName", e["StackName"]) + _el("LogicalResourceId", e["LogicalResourceId"])
-            + _el("PhysicalResourceId", e["PhysicalResourceId"]) + _el("ResourceType", e["ResourceType"])
-            + _el("Timestamp", e["Timestamp"].isoformat()) + _el("ResourceStatus", e["ResourceStatus"])
-            + (_el("ResourceStatusReason", e["ResourceStatusReason"]) if e.get("ResourceStatusReason") else "")
+            "<member>"
+            + _el("StackId", e["StackId"])
+            + _el("EventId", e["EventId"])
+            + _el("StackName", e["StackName"])
+            + _el("LogicalResourceId", e["LogicalResourceId"])
+            + _el("PhysicalResourceId", e["PhysicalResourceId"])
+            + _el("ResourceType", e["ResourceType"])
+            + _el("Timestamp", e["Timestamp"].isoformat())
+            + _el("ResourceStatus", e["ResourceStatus"])
+            + (
+                _el("ResourceStatusReason", e["ResourceStatusReason"])
+                if e.get("ResourceStatusReason")
+                else ""
+            )
             + "</member>"
             for e in reversed(events)
         )
@@ -201,10 +251,12 @@ def create_app(store: StackStore | None = None) -> Starlette:
     async def health(_request):
         return PlainTextResponse("ok")
 
-    return Starlette(routes=[
-        Route("/", health, methods=["GET"]),
-        Route("/", handler.handle, methods=["POST"]),
-    ])
+    return Starlette(
+        routes=[
+            Route("/", health, methods=["GET"]),
+            Route("/", handler.handle, methods=["POST"]),
+        ]
+    )
 
 
 app = create_app()

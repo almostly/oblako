@@ -50,7 +50,9 @@ class RdsService(Service):
     ):
         """Initialize the RDS service for the specified engine (postgres or mysql)."""
         if engine not in _ENGINES:
-            raise ValueError(f"engine must be one of {sorted(_ENGINES)}, got {engine!r}")
+            raise ValueError(
+                f"engine must be one of {sorted(_ENGINES)}, got {engine!r}"
+            )
         spec = _ENGINES[engine]
         host_port = host_port or spec["default_host_port"]
         if engine == "postgres":
@@ -69,7 +71,9 @@ class RdsService(Service):
         super().__init__(
             name="rds",
             image=spec["image"],
-            ports=[PortMapping(container_port=spec["container_port"], host_port=host_port)],
+            ports=[
+                PortMapping(container_port=spec["container_port"], host_port=host_port)
+            ],
             environment=environment,
             volumes={spec["volume"]: {"bind": spec["data_dir"], "mode": "rw"}},
         )
@@ -92,14 +96,20 @@ class RdsService(Service):
                     "The MySQL engine needs pymysql: pip install 'oblako[mysql]'"
                 ) from e
             return pymysql.connect(
-                host="localhost", port=self.host_port, user=self.user,
-                password=self.password, database=self.database,
+                host="localhost",
+                port=self.host_port,
+                user=self.user,
+                password=self.password,
+                database=self.database,
             )
         import psycopg2
 
         return psycopg2.connect(
-            host="localhost", port=self.host_port, user=self.user,
-            password=self.password, dbname=self.database,
+            host="localhost",
+            port=self.host_port,
+            user=self.user,
+            password=self.password,
+            dbname=self.database,
         )
 
     def get_client(self):
@@ -114,7 +124,9 @@ class RdsService(Service):
             aws_secret_access_key="test",
         )
 
-    # -- declarative seed (moto metadata is in-memory; recreate after restart) --
+    # -------------------------------------------------------------------------------
+    # Declarative seed (moto metadata is in-memory; recreate after restart)
+    # -------------------------------------------------------------------------------
     @staticmethod
     def _create_ignoring_exists(fn, **kwargs) -> bool:
         """Call fn(**kwargs); return True if created, False if it already existed."""
@@ -126,7 +138,9 @@ class RdsService(Service):
                 return False
             raise
 
-    def seed(self, instances: list[dict] | None = None, clusters: list[dict] | None = None) -> dict:
+    def seed(
+        self, instances: list[dict] | None = None, clusters: list[dict] | None = None
+    ) -> dict:
         """Idempotently (re)create RDS instances and Aurora clusters from a spec.
 
         ``clusters`` entries may carry an ``"instances"`` list of member specs.
@@ -142,21 +156,29 @@ class RdsService(Service):
             if self._create_ignoring_exists(rds.create_db_cluster, **spec):
                 created["clusters"].append(cid)
             for member in members:
-                if self._create_ignoring_exists(rds.create_db_instance, DBClusterIdentifier=cid, **member):
+                if self._create_ignoring_exists(
+                    rds.create_db_instance, DBClusterIdentifier=cid, **member
+                ):
                     created["instances"].append(member["DBInstanceIdentifier"])
         for spec in instances or []:
             if self._create_ignoring_exists(rds.create_db_instance, **spec):
                 created["instances"].append(spec["DBInstanceIdentifier"])
         return created
 
-    # -- RDS Data API (postgres or mysql engine) ---------------------------
+    # -------------------------------------------------------------------------------
+    # RDS Data API (postgres or mysql engine)
+    # -------------------------------------------------------------------------------
     def start_data_server(self):
         """Start the rds-data server in-process (idempotent). Returns its URL."""
         from oblako.rds_data import RdsDataExecutor, start_in_thread
 
         executor = RdsDataExecutor(
-            host="localhost", port=self.host_port, user=self.user,
-            password=self.password, database=self.database, engine=self.engine,
+            host="localhost",
+            port=self.host_port,
+            user=self.user,
+            password=self.password,
+            database=self.database,
+            engine=self.engine,
         )
         return start_in_thread(port=self.data_port, executor=executor)
 

@@ -76,9 +76,13 @@ class Oblako:
             result[svc.name] = svc.status().value
         # SageMaker is Docker-native, report container count
         sm_containers = self.sagemaker.list_training_containers()
-        result["sagemaker"] = f"{len(sm_containers)} containers" if sm_containers else "idle"
+        result["sagemaker"] = (
+            f"{len(sm_containers)} containers" if sm_containers else "idle"
+        )
         return result
 
     def wait_ready(self, timeout: float = 60.0) -> dict[str, bool]:
         """Wait for all services to be ready."""
-        return {svc.name: svc.wait_ready(timeout=timeout) for svc in self._docker_services}
+        return {
+            svc.name: svc.wait_ready(timeout=timeout) for svc in self._docker_services
+        }

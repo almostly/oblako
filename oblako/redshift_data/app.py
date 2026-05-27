@@ -26,17 +26,23 @@ def _jsonable(obj):
     raise TypeError(f"not JSON serializable: {type(obj)}")
 
 
-def _json_response(payload: dict, status: int = 200, error_type: str | None = None) -> Response:
+def _json_response(
+    payload: dict, status: int = 200, error_type: str | None = None
+) -> Response:
     """Return an ``application/x-amz-json-1.1`` response."""
     headers = {"Content-Type": "application/x-amz-json-1.1"}
     if error_type:
         headers["X-Amzn-Errortype"] = error_type
-    return Response(json.dumps(payload, default=_jsonable), status_code=status, headers=headers)
+    return Response(
+        json.dumps(payload, default=_jsonable), status_code=status, headers=headers
+    )
 
 
 def _error(code: str, message: str, status: int = 400) -> Response:
     """Return a JSON error response with the given error code and message."""
-    return _json_response({"__type": code, "message": message}, status=status, error_type=code)
+    return _json_response(
+        {"__type": code, "message": message}, status=status, error_type=code
+    )
 
 
 class RedshiftDataApp:
@@ -66,7 +72,9 @@ class RedshiftDataApp:
         except Exception as e:  # surface backend errors as ValidationException
             return _error("ValidationException", str(e))
 
-    # -- operations ---------------------------------------------------------
+    # -------------------------------------------------------------------------------
+    # Operations
+    # -------------------------------------------------------------------------------
     def op_ExecuteStatement(self, req: dict) -> Response:
         """Execute a single SQL statement and return its statement id."""
         if not req.get("Sql"):
@@ -148,11 +156,15 @@ class RedshiftDataApp:
 
     def op_ListDatabases(self, req: dict) -> Response:
         """Return the list of databases in the cluster."""
-        return _json_response({"Databases": self.executor.list_databases(req.get("Database"))})
+        return _json_response(
+            {"Databases": self.executor.list_databases(req.get("Database"))}
+        )
 
     def op_ListSchemas(self, req: dict) -> Response:
         """Return the list of schemas in the specified database."""
-        return _json_response({"Schemas": self.executor.list_schemas(req.get("Database"))})
+        return _json_response(
+            {"Schemas": self.executor.list_schemas(req.get("Database"))}
+        )
 
     def op_ListTables(self, req: dict) -> Response:
         """Return tables matching optional schema and name patterns."""

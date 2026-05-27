@@ -31,7 +31,8 @@ class BedrockAdapter:
         request = json.loads(body)
         messages = self._extract_messages(request)
         result = self.backend.chat(
-            model_id, messages,
+            model_id,
+            messages,
             max_tokens=request.get("max_tokens"),
             temperature=request.get("temperature"),
             top_p=request.get("top_p"),
@@ -46,7 +47,9 @@ class BedrockAdapter:
             if isinstance(system, str):
                 messages.append({"role": "system", "content": system})
             elif isinstance(system, list):
-                if text := " ".join(b["text"] for b in system if b.get("type") == "text"):
+                if text := " ".join(
+                    b["text"] for b in system if b.get("type") == "text"
+                ):
                     messages.append({"role": "system", "content": text})
 
         for msg in request.get("messages", []):
@@ -100,7 +103,8 @@ class BedrockAdapter:
 
         cfg = inference_config or {}
         result = self.backend.chat(
-            model_id, chat_messages,
+            model_id,
+            chat_messages,
             max_tokens=cfg.get("maxTokens"),
             temperature=cfg.get("temperature"),
             top_p=cfg.get("topP"),
@@ -111,7 +115,12 @@ class BedrockAdapter:
         input_tokens = result["input_tokens"]
         output_tokens = result["output_tokens"]
         return {
-            "output": {"message": {"role": "assistant", "content": [{"text": result["content"]}]}},
+            "output": {
+                "message": {
+                    "role": "assistant",
+                    "content": [{"text": result["content"]}],
+                }
+            },
             "stopReason": "end_turn",
             "usage": {
                 "inputTokens": input_tokens,

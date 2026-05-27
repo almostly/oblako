@@ -50,7 +50,9 @@ def _workspace() -> Path:
     JupyterLab roots here so it shows only relevant notebooks, not the whole repo;
     override with $OBLAKO_NOTEBOOK_DIR.
     """
-    path = Path(os.environ.get("OBLAKO_NOTEBOOK_DIR") or Path.home() / ".oblako" / "notebooks")
+    path = Path(
+        os.environ.get("OBLAKO_NOTEBOOK_DIR") or Path.home() / ".oblako" / "notebooks"
+    )
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -72,8 +74,13 @@ def make_env(workdir: Path) -> dict[str, str]:
 
 
 def _code(*lines: str) -> dict:
-    return {"cell_type": "code", "metadata": {}, "execution_count": None,
-            "outputs": [], "source": "\n".join(lines)}
+    return {
+        "cell_type": "code",
+        "metadata": {},
+        "execution_count": None,
+        "outputs": [],
+        "source": "\n".join(lines),
+    }
 
 
 def _md(*lines: str) -> dict:
@@ -83,37 +90,58 @@ def _md(*lines: str) -> dict:
 def starter_notebook() -> dict:
     """Build the welcome notebook (nbformat v4) demonstrating the pre-wired kernel."""
     cells = [
-        _md("# oblako — work against your local AWS",
+        _md(
+            "# oblako — work against your local AWS",
             "",
             "This kernel is **pre-wired**: unmodified `boto3` calls hit oblako's local",
             "services (via `AWS_ENDPOINT_URL_*`), the way code written for real AWS runs.",
             "",
-            "Start the services first: `oblako up` (S3, DynamoDB, moto, Step Functions)."),
+            "Start the services first: `oblako up` (S3, DynamoDB, moto, Step Functions).",
+        ),
         _md("## Unmodified boto3 — no `endpoint_url` needed"),
-        _code("import boto3",
-              "",
-              's3 = boto3.client("s3")            # transparently points at S3Proxy',
-              's3.create_bucket(Bucket="from-notebook")',
-              's3.put_object(Bucket="from-notebook", Key="hello.txt", Body=b"hi from a notebook")',
-              'print([b["Name"] for b in s3.list_buckets()["Buckets"]])'),
-        _code('ddb = boto3.client("dynamodb")     # DynamoDB Local',
-              'print("tables:", ddb.list_tables()["TableNames"])'),
-        _md("## oblako helpers — start the in-process servers on first use",
+        _code(
+            "import boto3",
+            "",
+            's3 = boto3.client("s3")            # transparently points at S3Proxy',
+            's3.create_bucket(Bucket="from-notebook")',
+            's3.put_object(Bucket="from-notebook", Key="hello.txt", Body=b"hi from a notebook")',
+            'print([b["Name"] for b in s3.list_buckets()["Buckets"]])',
+        ),
+        _code(
+            'ddb = boto3.client("dynamodb")     # DynamoDB Local',
+            'print("tables:", ddb.list_tables()["TableNames"])',
+        ),
+        _md(
+            "## oblako helpers — start the in-process servers on first use",
             "",
             "CloudFormation, redshift-data, rds-data and bedrock-runtime are in-process",
-            "servers; the `oblako` service objects start them for you."),
-        _code("from oblako.services import Oblako",
-              "oblako = Oblako()",
-              "",
-              "cfn = oblako.cloudformation.get_client()   # auto-starts the local CloudFormation server",
-              'print("stacks:", [s["StackName"] for s in cfn.describe_stacks()["Stacks"]])'),
-        _md("From here, write the AWS code you normally would — it runs against oblako.",
+            "servers; the `oblako` service objects start them for you.",
+        ),
+        _code(
+            "from oblako.services import Oblako",
+            "oblako = Oblako()",
+            "",
+            "cfn = oblako.cloudformation.get_client()   # auto-starts the local CloudFormation server",
+            'print("stacks:", [s["StackName"] for s in cfn.describe_stacks()["Stacks"]])',
+        ),
+        _md(
+            "From here, write the AWS code you normally would — it runs against oblako.",
             "See `examples/` in the repo for S3, DynamoDB, Step Functions, Redshift ML,",
-            "CloudFormation, Bedrock, and more."),
+            "CloudFormation, Bedrock, and more.",
+        ),
     ]
-    return {"cells": cells,
-            "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}},
-            "nbformat": 4, "nbformat_minor": 5}
+    return {
+        "cells": cells,
+        "metadata": {
+            "kernelspec": {
+                "display_name": "Python 3",
+                "language": "python",
+                "name": "python3",
+            }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
 
 
 def write_starter(workdir: Path) -> Path:
@@ -132,8 +160,11 @@ def seed_workspace(workdir: Path) -> Path:
     example = Path(__file__).resolve().parents[1] / "examples" / "sagemaker_credit_risk"
     dst = workdir / "sagemaker_credit_risk"
     if example.exists() and not dst.exists():
-        shutil.copytree(example, dst,
-                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".aws-sam"))
+        shutil.copytree(
+            example,
+            dst,
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".aws-sam"),
+        )
     return workdir
 
 
@@ -145,7 +176,9 @@ def launch(port: int = 8888, workdir: Path | None = None) -> int:
     env = make_env(workdir)
     return subprocess.run(
         [sys.executable, "-m", "jupyterlab", "--port", str(port)],
-        cwd=str(workdir), env=env, check=False,
+        cwd=str(workdir),
+        env=env,
+        check=False,
     ).returncode
 
 
@@ -154,7 +187,9 @@ def is_running(port: int = 8888, timeout: float = 0.5) -> bool:
     import urllib.request
 
     try:
-        with urllib.request.urlopen(f"http://localhost:{port}/api", timeout=timeout) as resp:
+        with urllib.request.urlopen(
+            f"http://localhost:{port}/api", timeout=timeout
+        ) as resp:
             return resp.status == 200
     except Exception:
         return False
@@ -182,12 +217,23 @@ def spawn(port: int = 8888, token: str = "oblako", workdir: Path | None = None) 
     # still applies). Localhost-only, so this is fine for local dev.
     csp = "frame-ancestors 'self' http://localhost:8000 http://127.0.0.1:8000"
     subprocess.Popen(
-        [sys.executable, "-m", "jupyterlab", "--port", str(port),
-         "--no-browser", "--ServerApp.ip", "127.0.0.1",
-         "--ServerApp.disable_check_xsrf=True",
-         '--ServerApp.tornado_settings={"headers": {"Content-Security-Policy": %r}}' % csp],
-        cwd=str(workdir), env=env,
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            sys.executable,
+            "-m",
+            "jupyterlab",
+            "--port",
+            str(port),
+            "--no-browser",
+            "--ServerApp.ip",
+            "127.0.0.1",
+            "--ServerApp.disable_check_xsrf=True",
+            '--ServerApp.tornado_settings={"headers": {"Content-Security-Policy": %r}}'
+            % csp,
+        ],
+        cwd=str(workdir),
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     deadline = time.time() + 30
     while time.time() < deadline:

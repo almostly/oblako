@@ -47,7 +47,9 @@ def _json(payload: dict, status: int = 200) -> Response:
     )
 
 
-def _error(message: str, error_type: str = "InternalServerException", status: int = 500) -> Response:
+def _error(
+    message: str, error_type: str = "InternalServerException", status: int = 500
+) -> Response:
     return JSONResponse(
         {"message": message, "__type": error_type},
         status_code=status,
@@ -130,7 +132,9 @@ class BedrockControlApp:
         try:  # also surface the backend's live models (Ollama tags / OpenRouter slugs)
             for m in self.adapter.backend.list_models():
                 summaries.append(
-                    foundation_models.live_model_summary(m["modelId"], m["providerName"], self.region)
+                    foundation_models.live_model_summary(
+                        m["modelId"], m["providerName"], self.region
+                    )
                 )
         except Exception:  # noqa: BLE001 - engine may be down; static catalog still returned
             pass
@@ -141,20 +145,34 @@ class BedrockControlApp:
         model_id = request.path_params["model_identifier"]
         detail = foundation_models.get_model(model_id, self.region)
         if detail is None:
-            return _error("The provided model identifier is invalid.", "ValidationException", 400)
+            return _error(
+                "The provided model identifier is invalid.", "ValidationException", 400
+            )
         return _json({"modelDetails": detail})
 
-    # -- model-invocation jobs ---------------------------------------------
+    # -------------------------------------------------------------------------------
+    # Model-invocation jobs
+    # -------------------------------------------------------------------------------
     async def create_job(self, request: Request) -> Response:
         """Handle POST /model-invocation-job, create a batch job, and return its ARN."""
         try:
             req = json.loads(await request.body() or b"{}")
         except json.JSONDecodeError:
             return _error("Invalid JSON body", "ValidationException", 400)
-        required = ("jobName", "roleArn", "modelId", "inputDataConfig", "outputDataConfig")
+        required = (
+            "jobName",
+            "roleArn",
+            "modelId",
+            "inputDataConfig",
+            "outputDataConfig",
+        )
         missing = [k for k in required if k not in req]
         if missing:
-            return _error(f"Missing required field(s): {', '.join(missing)}", "ValidationException", 400)
+            return _error(
+                f"Missing required field(s): {', '.join(missing)}",
+                "ValidationException",
+                400,
+            )
         details = new_job_details(
             job_name=req["jobName"],
             model_id=req["modelId"],
@@ -174,7 +192,9 @@ class BedrockControlApp:
         job_id = request.path_params["job_identifier"].split("/")[-1]
         job = self.jobs.get(job_id)
         if job is None:
-            return _error("The provided job identifier is invalid.", "ValidationException", 400)
+            return _error(
+                "The provided job identifier is invalid.", "ValidationException", 400
+            )
         return _json(job.details)
 
     async def list_jobs(self, request: Request) -> Response:
@@ -186,7 +206,9 @@ class BedrockControlApp:
         job_id = request.path_params["job_identifier"].split("/")[-1]
         job = self.jobs.get(job_id)
         if job is None:
-            return _error("The provided job identifier is invalid.", "ValidationException", 400)
+            return _error(
+                "The provided job identifier is invalid.", "ValidationException", 400
+            )
         job.stop()
         return _json({})
 
@@ -209,15 +231,33 @@ def create_app(
         routes=[
             Route("/", health, methods=["GET"]),
             # bedrock-runtime
-            Route("/model/{model_id:path}/invoke", runtime.invoke_model, methods=["POST"]),
-            Route("/model/{model_id:path}/converse", runtime.converse, methods=["POST"]),
+            Route(
+                "/model/{model_id:path}/invoke", runtime.invoke_model, methods=["POST"]
+            ),
+            Route(
+                "/model/{model_id:path}/converse", runtime.converse, methods=["POST"]
+            ),
             # bedrock control plane
-            Route("/foundation-models", control.list_foundation_models, methods=["GET"]),
-            Route("/foundation-models/{model_identifier:path}", control.get_foundation_model, methods=["GET"]),
+            Route(
+                "/foundation-models", control.list_foundation_models, methods=["GET"]
+            ),
+            Route(
+                "/foundation-models/{model_identifier:path}",
+                control.get_foundation_model,
+                methods=["GET"],
+            ),
             Route("/model-invocation-jobs", control.list_jobs, methods=["GET"]),
             Route("/model-invocation-job", control.create_job, methods=["POST"]),
-            Route("/model-invocation-job/{job_identifier:path}/stop", control.stop_job, methods=["POST"]),
-            Route("/model-invocation-job/{job_identifier:path}", control.get_job, methods=["GET"]),
+            Route(
+                "/model-invocation-job/{job_identifier:path}/stop",
+                control.stop_job,
+                methods=["POST"],
+            ),
+            Route(
+                "/model-invocation-job/{job_identifier:path}",
+                control.get_job,
+                methods=["GET"],
+            ),
         ]
     )
 

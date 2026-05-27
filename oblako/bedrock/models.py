@@ -106,7 +106,7 @@ def resolve_model(bedrock_model_id: str) -> str:
     embedding mapping > the id as-is (so any local Ollama name works directly).
     """
     if bedrock_model_id.startswith(OLLAMA_PREFIX):
-        return bedrock_model_id[len(OLLAMA_PREFIX):]
+        return bedrock_model_id[len(OLLAMA_PREFIX) :]
     model = DEFAULT_MODEL_MAP.get(bedrock_model_id)
     if model:
         return model
@@ -129,7 +129,7 @@ def resolve_openrouter(bedrock_model_id: str) -> str:
       otherwise (unmapped Bedrock id) -> error (no OpenRouter equivalent, e.g. Titan)
     """
     if bedrock_model_id.startswith(OPENROUTER_PREFIX):
-        return bedrock_model_id[len(OPENROUTER_PREFIX):]
+        return bedrock_model_id[len(OPENROUTER_PREFIX) :]
     base = _CONTEXT_SUFFIX.sub("", bedrock_model_id)  # drop ":48k"/":200k" variants
     if base in OPENROUTER_MODEL_MAP:
         return OPENROUTER_MODEL_MAP[base]

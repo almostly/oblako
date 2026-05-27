@@ -19,7 +19,12 @@ class OpenSearchService(Service):
                 "DISABLE_SECURITY_PLUGIN": "true",
                 "OPENSEARCH_INITIAL_ADMIN_PASSWORD": "admin",
             },
-            volumes={"oblako-ml-opensearch": {"bind": "/usr/share/opensearch/data", "mode": "rw"}},
+            volumes={
+                "oblako-ml-opensearch": {
+                    "bind": "/usr/share/opensearch/data",
+                    "mode": "rw",
+                }
+            },
         )
         self.host_port = host_port
 

@@ -23,7 +23,9 @@ from starlette.routing import Route
 from .executor import RdsDataExecutor
 
 
-def _error(message: str, error_type: str = "BadRequestException", status: int = 400) -> Response:
+def _error(
+    message: str, error_type: str = "BadRequestException", status: int = 400
+) -> Response:
     """Return a JSON error response with the given message and error type."""
     return JSONResponse(
         {"message": message, "__type": error_type},
@@ -110,7 +112,9 @@ def create_app(executor: RdsDataExecutor | None = None) -> Starlette:
     engine = os.environ.get("OBLAKO_RDS_ENGINE", "postgres")
     executor = executor or RdsDataExecutor(
         host=os.environ.get("OBLAKO_RDS_HOST", "localhost"),
-        port=int(os.environ.get("OBLAKO_RDS_PORT", "3306" if engine == "mysql" else "5432")),
+        port=int(
+            os.environ.get("OBLAKO_RDS_PORT", "3306" if engine == "mysql" else "5432")
+        ),
         user=os.environ.get("OBLAKO_RDS_USER", "oblako"),
         password=os.environ.get("OBLAKO_RDS_PASSWORD", "oblako"),
         database=os.environ.get("OBLAKO_RDS_DB", "oblako"),

@@ -57,7 +57,9 @@ def __getattr__(name: str):
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if an AgentCore runtime is reachable (GET /ping)."""
     try:
-        with urllib.request.urlopen(f"http://localhost:{port}/ping", timeout=timeout) as resp:
+        with urllib.request.urlopen(
+            f"http://localhost:{port}/ping", timeout=timeout
+        ) as resp:
             return resp.status == 200
     except Exception:
         return False
@@ -100,5 +102,7 @@ def run(entrypoint: str, port: int = DEFAULT_PORT, host: str = "0.0.0.0") -> Non
             f"{entrypoint} does not define a BedrockAgentCoreApp instance "
             "(expected something like `app = BedrockAgentCoreApp()`)."
         )
-    print(f"Serving AgentCore agent on http://localhost:{port}  (POST /invocations, GET /ping)")
+    print(
+        f"Serving AgentCore agent on http://localhost:{port}  (POST /invocations, GET /ping)"
+    )
     app.run(port=port, host=host)

@@ -29,6 +29,9 @@ node_modules/
 # SAM build artifacts
 .aws-sam/
 
+# Temp
+.tmp/
+
 # Local env files
 .env
 .env.*

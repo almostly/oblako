@@ -25,7 +25,9 @@ except Exception:  # pragma: no cover - sagemaker v3 has no local mode
 
 from oblako.services import SageMakerService
 
-EXAMPLE_IMAGE_DIR = pathlib.Path(__file__).resolve().parent.parent / "examples" / "sagemaker"
+EXAMPLE_IMAGE_DIR = (
+    pathlib.Path(__file__).resolve().parent.parent / "examples" / "sagemaker"
+)
 
 
 @pytest.fixture(scope="module")

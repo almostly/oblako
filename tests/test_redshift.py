@@ -6,7 +6,9 @@ Backed by hearthsim/pgredshift on port 5439.
 import psycopg2
 import pytest
 
-RS_CONFIG = dict(host="localhost", port=5439, user="oblako", password="oblako", dbname="oblako")
+RS_CONFIG = dict(
+    host="localhost", port=5439, user="oblako", password="oblako", dbname="oblako"
+)
 
 
 @pytest.fixture
@@ -44,7 +46,9 @@ def test_insert_and_select(cursor):
 
 
 def test_batch_insert(cursor):
-    rows = [(f"C{i:03d}", i / 100, "APPROVED" if i > 50 else "DECLINED") for i in range(100)]
+    rows = [
+        (f"C{i:03d}", i / 100, "APPROVED" if i > 50 else "DECLINED") for i in range(100)
+    ]
     cursor.executemany("INSERT INTO test_scores VALUES (%s, %s, %s)", rows)
     cursor.execute("SELECT COUNT(*) FROM test_scores")
     assert cursor.fetchone()[0] == 100
@@ -53,7 +57,11 @@ def test_batch_insert(cursor):
 def test_aggregation(cursor):
     cursor.executemany(
         "INSERT INTO test_scores VALUES (%s, %s, %s)",
-        [("C001", 0.9, "APPROVED"), ("C002", 0.3, "DECLINED"), ("C003", 0.7, "APPROVED")],
+        [
+            ("C001", 0.9, "APPROVED"),
+            ("C002", 0.3, "DECLINED"),
+            ("C003", 0.7, "APPROVED"),
+        ],
     )
     cursor.execute("SELECT AVG(score) FROM test_scores WHERE decision = 'APPROVED'")
     avg = cursor.fetchone()[0]

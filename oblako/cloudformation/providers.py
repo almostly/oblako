@@ -27,14 +27,20 @@ def _moto_client(service):
     import boto3
 
     return boto3.client(
-        service, endpoint_url="http://localhost:5500", region_name="us-east-1",
-        aws_access_key_id="test", aws_secret_access_key="test",
+        service,
+        endpoint_url="http://localhost:5500",
+        region_name="us-east-1",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
     )
 
 
 # AWS::S3::Bucket
 def _s3_create(logical_id, props, ctx):
-    name = props.get("BucketName") or f"{ctx['stack']}-{logical_id}-{uuid.uuid4().hex[:8]}".lower()
+    name = (
+        props.get("BucketName")
+        or f"{ctx['stack']}-{logical_id}-{uuid.uuid4().hex[:8]}".lower()
+    )
     _s3_client().create_bucket(Bucket=name)
     return name
 
@@ -53,8 +59,11 @@ def _s3_delete(physical_id, props):
 # AWS::DynamoDB::Table
 def _ddb_create(logical_id, props, ctx):
     name = props.get("TableName") or f"{ctx['stack']}-{logical_id}"
-    kwargs = {"TableName": name, "AttributeDefinitions": props["AttributeDefinitions"],
-              "KeySchema": props["KeySchema"]}
+    kwargs = {
+        "TableName": name,
+        "AttributeDefinitions": props["AttributeDefinitions"],
+        "KeySchema": props["KeySchema"],
+    }
     if "BillingMode" in props:
         kwargs["BillingMode"] = props["BillingMode"]
     if "ProvisionedThroughput" in props:
@@ -76,9 +85,12 @@ def _ddb_delete(physical_id, props):
 def _redshift_create(logical_id, props, ctx):
     cid = props.get("ClusterIdentifier") or f"{ctx['stack']}-{logical_id}".lower()
     rs = _moto_client("redshift")
-    kwargs = {"ClusterIdentifier": cid, "NodeType": props.get("NodeType", "ra3.xlplus"),
-              "MasterUsername": props.get("MasterUsername", "oblako"),
-              "MasterUserPassword": props.get("MasterUserPassword", "Oblako123")}
+    kwargs = {
+        "ClusterIdentifier": cid,
+        "NodeType": props.get("NodeType", "ra3.xlplus"),
+        "MasterUsername": props.get("MasterUsername", "oblako"),
+        "MasterUserPassword": props.get("MasterUserPassword", "Oblako123"),
+    }
     if "DBName" in props:
         kwargs["DBName"] = props["DBName"]
     if "NumberOfNodes" in props:
@@ -90,7 +102,9 @@ def _redshift_create(logical_id, props, ctx):
 
 def _redshift_delete(physical_id, props):
     try:
-        _moto_client("redshift").delete_cluster(ClusterIdentifier=physical_id, SkipFinalClusterSnapshot=True)
+        _moto_client("redshift").delete_cluster(
+            ClusterIdentifier=physical_id, SkipFinalClusterSnapshot=True
+        )
     except Exception:  # noqa: BLE001
         pass
 
@@ -98,11 +112,14 @@ def _redshift_delete(physical_id, props):
 # AWS::RDS::DBInstance (control plane via moto)
 def _rds_create(logical_id, props, ctx):
     iid = props.get("DBInstanceIdentifier") or f"{ctx['stack']}-{logical_id}".lower()
-    kwargs = {"DBInstanceIdentifier": iid, "Engine": props.get("Engine", "postgres"),
-              "DBInstanceClass": props.get("DBInstanceClass", "db.t3.micro"),
-              "MasterUsername": props.get("MasterUsername", "oblako"),
-              "MasterUserPassword": props.get("MasterUserPassword", "Oblako123"),
-              "AllocatedStorage": int(props.get("AllocatedStorage", 20))}
+    kwargs = {
+        "DBInstanceIdentifier": iid,
+        "Engine": props.get("Engine", "postgres"),
+        "DBInstanceClass": props.get("DBInstanceClass", "db.t3.micro"),
+        "MasterUsername": props.get("MasterUsername", "oblako"),
+        "MasterUserPassword": props.get("MasterUserPassword", "Oblako123"),
+        "AllocatedStorage": int(props.get("AllocatedStorage", 20)),
+    }
     if "DBName" in props:
         kwargs["DBName"] = props["DBName"]
     _moto_client("rds").create_db_instance(**kwargs)
@@ -111,7 +128,9 @@ def _rds_create(logical_id, props, ctx):
 
 def _rds_delete(physical_id, props):
     try:
-        _moto_client("rds").delete_db_instance(DBInstanceIdentifier=physical_id, SkipFinalSnapshot=True)
+        _moto_client("rds").delete_db_instance(
+            DBInstanceIdentifier=physical_id, SkipFinalSnapshot=True
+        )
     except Exception:  # noqa: BLE001
         pass
 
@@ -185,11 +204,18 @@ def _sfn_create(logical_id, props, ctx):
     definition = props.get("DefinitionString")
     if definition is None and "Definition" in props:
         definition = json.dumps(props["Definition"])
-    kwargs = {"name": name, "definition": definition,
-              "roleArn": props.get("RoleArn", "arn:aws:iam::012345678901:role/DummyRole")}
+    kwargs = {
+        "name": name,
+        "definition": definition,
+        "roleArn": props.get("RoleArn", "arn:aws:iam::012345678901:role/DummyRole"),
+    }
     if "StateMachineType" in props:
         kwargs["type"] = props["StateMachineType"]
-    arn = StepFunctionsService().get_client().create_state_machine(**kwargs)["stateMachineArn"]
+    arn = (
+        StepFunctionsService()
+        .get_client()
+        .create_state_machine(**kwargs)["stateMachineArn"]
+    )
     # Ref returns the ARN (as in real CFN); GetAtt Name returns the name.
     return {"PhysicalId": arn, "Attributes": {"Name": name, "Arn": arn}}
 
@@ -198,7 +224,9 @@ def _sfn_delete(physical_id, props):
     from oblako.services import StepFunctionsService
 
     try:
-        StepFunctionsService().get_client().delete_state_machine(stateMachineArn=physical_id)
+        StepFunctionsService().get_client().delete_state_machine(
+            stateMachineArn=physical_id
+        )
     except Exception:  # noqa: BLE001
         pass
 
@@ -216,10 +244,13 @@ def _opensearch_create(logical_id, props, ctx):
     name = (props.get("DomainName") or f"{ctx['stack']}-{logical_id}").lower()
     httpx.get(f"{svc.url}/_cluster/health", timeout=5.0).raise_for_status()
     endpoint = svc.url.split("://", 1)[-1]
-    return {"PhysicalId": name, "Attributes": {
-        "DomainEndpoint": endpoint,
-        "Arn": f"arn:aws:es:us-east-1:000000000000:domain/{name}",
-    }}
+    return {
+        "PhysicalId": name,
+        "Attributes": {
+            "DomainEndpoint": endpoint,
+            "Arn": f"arn:aws:es:us-east-1:000000000000:domain/{name}",
+        },
+    }
 
 
 def _opensearch_delete(physical_id, props):

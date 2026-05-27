@@ -5,7 +5,13 @@ import pathlib
 
 import boto3
 
-from oblako.notebook import ENDPOINTS, is_running, make_env, starter_notebook, write_starter
+from oblako.notebook import (
+    ENDPOINTS,
+    is_running,
+    make_env,
+    starter_notebook,
+    write_starter,
+)
 
 
 def test_make_env_wires_endpoints_creds_and_config(tmp_path):
@@ -28,10 +34,10 @@ def test_endpoint_env_vars_redirect_unmodified_boto3(monkeypatch):
     expected = {
         "s3": "http://localhost:9000",
         "dynamodb": "http://localhost:8001",
-        "stepfunctions": "http://localhost:8083",     # serviceId "SFN"
+        "stepfunctions": "http://localhost:8083",  # serviceId "SFN"
         "cloudformation": "http://localhost:5601",
         "lambda": "http://localhost:5500",
-        "apigateway": "http://localhost:5500",         # serviceId "API Gateway"
+        "apigateway": "http://localhost:5500",  # serviceId "API Gateway"
     }
     for svc, url in expected.items():
         assert boto3.client(svc).meta.endpoint_url == url, svc

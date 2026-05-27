@@ -28,6 +28,7 @@ class SageMakerService:
     def get_session(self):
         """Return a SageMaker LocalSession for local mode training/inference."""
         from sagemaker.local import LocalSession
+
         return LocalSession()
 
     def build_image(self, path: str, tag: str) -> str:
@@ -42,7 +43,12 @@ class SageMakerService:
         """List running SageMaker local mode containers."""
         containers = self.client.containers.list(filters={"name": "sagemaker-local"})
         return [
-            {"id": c.short_id, "name": c.name, "status": c.status, "image": c.image.tags}
+            {
+                "id": c.short_id,
+                "name": c.name,
+                "status": c.status,
+                "image": c.image.tags,
+            }
             for c in containers
         ]
 
@@ -58,7 +64,9 @@ class SageMakerService:
     def cleanup(self) -> int:
         """Remove stopped SageMaker local mode containers."""
         removed = 0
-        containers = self.client.containers.list(all=True, filters={"name": "sagemaker-local"})
+        containers = self.client.containers.list(
+            all=True, filters={"name": "sagemaker-local"}
+        )
         for c in containers:
             if c.status != "running":
                 c.remove(force=True)

@@ -15,7 +15,11 @@ def s3():
         aws_access_key_id="test",
         aws_secret_access_key="test",
         region_name="us-east-1",
-        config=Config(signature_version="s3v4", request_checksum_calculation="when_required", response_checksum_validation="when_required"),
+        config=Config(
+            signature_version="s3v4",
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
+        ),
     )
 
 

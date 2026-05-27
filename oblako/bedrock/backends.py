@@ -30,7 +30,9 @@ class OllamaBackend:
         """Initialize with the Ollama server base URL."""
         self.client = OllamaClient(base_url)
 
-    def chat(self, model_id, messages, *, max_tokens=None, temperature=None, top_p=None) -> dict:
+    def chat(
+        self, model_id, messages, *, max_tokens=None, temperature=None, top_p=None
+    ) -> dict:
         """Send a chat request to Ollama and return a normalized result dict."""
         kwargs = {}
         if max_tokens is not None:
@@ -48,7 +50,10 @@ class OllamaBackend:
 
     def list_models(self) -> list[dict]:
         """Return a list of locally available Ollama models as modelId/providerName dicts."""
-        return [{"modelId": m["name"], "providerName": self.provider} for m in self.client.list_models()]
+        return [
+            {"modelId": m["name"], "providerName": self.provider}
+            for m in self.client.list_models()
+        ]
 
 
 class OpenRouterBackend:
@@ -56,13 +61,20 @@ class OpenRouterBackend:
 
     provider = "openrouter"
 
-    def __init__(self, api_key: str, base_url: str = "https://openrouter.ai/api/v1", timeout: float = 120.0):
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "https://openrouter.ai/api/v1",
+        timeout: float = 120.0,
+    ):
         """Initialize with the OpenRouter API key and optional base URL and timeout."""
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
 
-    def chat(self, model_id, messages, *, max_tokens=None, temperature=None, top_p=None) -> dict:
+    def chat(
+        self, model_id, messages, *, max_tokens=None, temperature=None, top_p=None
+    ) -> dict:
         """Send a chat completion request to OpenRouter and return a normalized result dict."""
         payload = {"model": resolve_openrouter(model_id), "messages": messages}
         if max_tokens is not None:
@@ -94,7 +106,10 @@ class OpenRouterBackend:
         """Return the configured OpenRouter model map as modelId/providerName dicts."""
         from .models import OPENROUTER_MODEL_MAP
 
-        return [{"modelId": bid, "providerName": self.provider} for bid in OPENROUTER_MODEL_MAP]
+        return [
+            {"modelId": bid, "providerName": self.provider}
+            for bid in OPENROUTER_MODEL_MAP
+        ]
 
 
 def make_backend(ollama_url: str | None = None):
@@ -103,8 +118,15 @@ def make_backend(ollama_url: str | None = None):
     if backend == "openrouter":
         api_key = os.environ.get("OPENROUTER_API_KEY")
         if not api_key:
-            raise RuntimeError("OBLAKO_BEDROCK_BACKEND=openrouter requires OPENROUTER_API_KEY")
+            raise RuntimeError(
+                "OBLAKO_BEDROCK_BACKEND=openrouter requires OPENROUTER_API_KEY"
+            )
         return OpenRouterBackend(api_key=api_key)
     if backend != "ollama":
-        raise RuntimeError(f"unknown OBLAKO_BEDROCK_BACKEND={backend!r} (expected 'ollama' or 'openrouter')")
-    return OllamaBackend(base_url=ollama_url or os.environ.get("OBLAKO_OLLAMA_URL", "http://localhost:11434"))
+        raise RuntimeError(
+            f"unknown OBLAKO_BEDROCK_BACKEND={backend!r} (expected 'ollama' or 'openrouter')"
+        )
+    return OllamaBackend(
+        base_url=ollama_url
+        or os.environ.get("OBLAKO_OLLAMA_URL", "http://localhost:11434")
+    )

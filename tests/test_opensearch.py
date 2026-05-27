@@ -1,6 +1,5 @@
 """Integration tests for OpenSearch (requires: docker compose up opensearch)."""
 
-
 import pytest
 from opensearchpy import OpenSearch
 
@@ -40,8 +39,16 @@ def index(client):
 
 
 def test_index_and_search_document(client, index):
-    client.index(index=index, id="1", body={"text": "credit risk model", "embedding": [0.1, 0.2, 0.3, 0.4]})
-    client.index(index=index, id="2", body={"text": "fraud detection", "embedding": [0.9, 0.8, 0.7, 0.6]})
+    client.index(
+        index=index,
+        id="1",
+        body={"text": "credit risk model", "embedding": [0.1, 0.2, 0.3, 0.4]},
+    )
+    client.index(
+        index=index,
+        id="2",
+        body={"text": "fraud detection", "embedding": [0.9, 0.8, 0.7, 0.6]},
+    )
     client.indices.refresh(index=index)
 
     results = client.search(
@@ -63,8 +70,16 @@ def test_index_and_search_document(client, index):
 
 
 def test_text_search(client, index):
-    client.index(index=index, id="1", body={"text": "loan default prediction", "embedding": [0.1, 0.2, 0.3, 0.4]})
-    client.index(index=index, id="2", body={"text": "customer churn analysis", "embedding": [0.5, 0.6, 0.7, 0.8]})
+    client.index(
+        index=index,
+        id="1",
+        body={"text": "loan default prediction", "embedding": [0.1, 0.2, 0.3, 0.4]},
+    )
+    client.index(
+        index=index,
+        id="2",
+        body={"text": "customer churn analysis", "embedding": [0.5, 0.6, 0.7, 0.8]},
+    )
     client.indices.refresh(index=index)
 
     results = client.search(index=index, body={"query": {"match": {"text": "loan"}}})

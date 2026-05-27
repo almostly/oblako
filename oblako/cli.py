@@ -22,16 +22,16 @@ def _check_docker():
     """Verify Docker is reachable."""
     try:
         import docker
+
         docker.from_env().ping()
     except Exception:
         print("Error: Docker is not running. Start Docker and try again.")
         sys.exit(1)
 
 
-#-----------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 # Service Commands
-#-----------------------------------------------------------------------------------------------
-
+# -----------------------------------------------------------------------------------------------
 def cmd_up(args):
     """Start all services, or a single named service."""
     _check_docker()
@@ -76,14 +76,14 @@ def cmd_logs(args):
     print(svc.logs(tail=args.tail))
 
 
-#-----------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 # Model Commands
-#-----------------------------------------------------------------------------------------------
-
+# -----------------------------------------------------------------------------------------------
 def cmd_pull(args):
     """Pull a model into the Ollama engine."""
     _check_docker()
     from oblako.bedrock.models import DEFAULT_MODEL
+
     oblako = Oblako()
     model = args.model or DEFAULT_MODEL
     print(f"Pulling {model}...")
@@ -102,18 +102,30 @@ def cmd_models(args):
         print("No models. Run: oblako pull")
 
 
-#-----------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 # Dashboard
-#-----------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 def cmd_dashboard(args):
     """Start the web dashboard and open it in the default browser."""
     _check_docker()
     import subprocess
     import webbrowser
+
     port = args.port or 8000
     print(f"Starting oblako dashboard on http://localhost:{port}")
     webbrowser.open(f"http://localhost:{port}")
-    subprocess.call([sys.executable, "-m", "uvicorn", "dashboard.api:app", "--host", "0.0.0.0", "--port", str(port)])
+    subprocess.call(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "dashboard.api:app",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            str(port),
+        ]
+    )
 
 
 # Notebook
@@ -122,21 +134,27 @@ def cmd_notebook(args):
     try:
         import jupyterlab  # noqa: F401
     except ImportError:
-        print("JupyterLab isn't installed. Install the extra: pip install 'oblako[notebook]'")
+        print(
+            "JupyterLab isn't installed. Install the extra: pip install 'oblako[notebook]'"
+        )
         sys.exit(1)
     from oblako import notebook
+
     port = args.port or 8888
     print(f"Launching JupyterLab on http://localhost:{port}")
-    print("kernel is pre-wired: boto3.client('s3') etc. hit oblako (run 'oblako up' for the services)")
+    print(
+        "kernel is pre-wired: boto3.client('s3') etc. hit oblako (run 'oblako up' for the services)"
+    )
     sys.exit(notebook.launch(port=port, workdir=args.dir))
 
 
-#-----------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 # Redshift Data API
-#-----------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 def cmd_redshift_data(args):
     """Run the Redshift Data API server (boto3 'redshift-data' endpoint)."""
     import uvicorn
+
     port = args.port or 8002
     print(f"Starting Redshift Data API on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('redshift-data', endpoint_url=...)")
@@ -146,6 +164,7 @@ def cmd_redshift_data(args):
 def cmd_bedrock_runtime(args):
     """Run the Bedrock Runtime server (boto3 'bedrock-runtime' endpoint -> Ollama)."""
     import uvicorn
+
     port = args.port or 8004
     print(f"Starting Bedrock Runtime on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('bedrock-runtime', endpoint_url=...)")
@@ -155,6 +174,7 @@ def cmd_bedrock_runtime(args):
 def cmd_rds_data(args):
     """Run the RDS Data API server (boto3 'rds-data' endpoint -> RDS engine)."""
     import uvicorn
+
     port = args.port or 8006
     print(f"Starting RDS Data API on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('rds-data', endpoint_url=...)")
@@ -169,49 +189,70 @@ def cmd_cloudformation(args):
         export AWS_ENDPOINT_URL_CLOUDFORMATION=http://localhost:5601
     """
     import uvicorn
+
     port = args.port or 5601
     print(f"Starting CloudFormation on http://localhost:{port}")
     print("point the AWS CLI / SAM at it:")
     print(f"export AWS_ENDPOINT_URL_CLOUDFORMATION=http://localhost:{port}")
-    print("supported resources: S3::Bucket, DynamoDB::Table, Redshift::Cluster, RDS::DBInstance")
+    print(
+        "supported resources: S3::Bucket, DynamoDB::Table, Redshift::Cluster, RDS::DBInstance"
+    )
     uvicorn.run("oblako.cloudformation.app:app", host="0.0.0.0", port=port)
 
 
-#-----------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 # Bedrock AgentCore (local runtime)
-#-----------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 def cmd_agentcore(args):
     """Run or invoke a local Bedrock AgentCore agent."""
     from oblako import agentcore
+
     if args.action == "run":
         agentcore.run(args.target, port=args.port)
     else:  # invoke
         import json
+
         payload = json.loads(args.target) if args.target else {}
         print(json.dumps(agentcore.invoke(payload, port=args.port), indent=2))
 
 
-#-----------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 # Test Commands
-#-----------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 def cmd_test(args):
     """Run unit tests."""
     import subprocess
-    cmd = [sys.executable, "-m", "pytest", "tests/test_bedrock_adapter.py", "tests/test_services.py", "-v"]
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "tests/test_bedrock_adapter.py",
+        "tests/test_services.py",
+        "-v",
+    ]
     sys.exit(subprocess.call(cmd))
 
 
 def cmd_test_integration(args):
     """Run integration tests."""
     import subprocess
-    cmd = [sys.executable, "-m", "pytest", "tests/", "-v", "--ignore=tests/test_bedrock_adapter.py", "--ignore=tests/test_services.py"]
+
+    cmd = [
+        sys.executable,
+        "-m",
+        "pytest",
+        "tests/",
+        "-v",
+        "--ignore=tests/test_bedrock_adapter.py",
+        "--ignore=tests/test_services.py",
+    ]
     sys.exit(subprocess.call(cmd))
 
 
-#-----------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 # Helpers
-#-----------------------------------------------------------------------------------------------
-
+# -----------------------------------------------------------------------------------------------
 def _get_service(oblako: Oblako, name: str):
     services = {
         "bedrock": oblako.bedrock,
@@ -232,10 +273,9 @@ def _get_service(oblako: Oblako, name: str):
     return services[name]
 
 
-#-----------------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------------------
 # Entry Point
-#-----------------------------------------------------------------------------------------------
-
+# -----------------------------------------------------------------------------------------------
 def main():
     """Parse arguments and dispatch to the appropriate command handler."""
     parser = argparse.ArgumentParser(prog="oblako", description="Local AWS platform")
@@ -271,34 +311,56 @@ def main():
     p_ti.set_defaults(func=cmd_test_integration)
 
     p_dash = sub.add_parser("dashboard", help="Start the web dashboard")
-    p_dash.add_argument("-p", "--port", type=int, default=8000, help="Port (default: 8000)")
+    p_dash.add_argument(
+        "-p", "--port", type=int, default=8000, help="Port (default: 8000)"
+    )
     p_dash.set_defaults(func=cmd_dashboard)
 
-    p_nb = sub.add_parser("notebook", help="Launch JupyterLab wired to oblako's services")
-    p_nb.add_argument("-p", "--port", type=int, default=8888, help="Port (default: 8888)")
-    p_nb.add_argument("--dir", help="Notebook workspace dir (default: ~/.oblako/notebooks)")
+    p_nb = sub.add_parser(
+        "notebook", help="Launch JupyterLab wired to oblako's services"
+    )
+    p_nb.add_argument(
+        "-p", "--port", type=int, default=8888, help="Port (default: 8888)"
+    )
+    p_nb.add_argument(
+        "--dir", help="Notebook workspace dir (default: ~/.oblako/notebooks)"
+    )
     p_nb.set_defaults(func=cmd_notebook)
 
     p_rsd = sub.add_parser("redshift-data", help="Run the Redshift Data API server")
-    p_rsd.add_argument("-p", "--port", type=int, default=8002, help="Port (default: 8002)")
+    p_rsd.add_argument(
+        "-p", "--port", type=int, default=8002, help="Port (default: 8002)"
+    )
     p_rsd.set_defaults(func=cmd_redshift_data)
 
     p_brt = sub.add_parser("bedrock-runtime", help="Run the Bedrock Runtime server")
-    p_brt.add_argument("-p", "--port", type=int, default=8004, help="Port (default: 8004)")
+    p_brt.add_argument(
+        "-p", "--port", type=int, default=8004, help="Port (default: 8004)"
+    )
     p_brt.set_defaults(func=cmd_bedrock_runtime)
 
     p_rd = sub.add_parser("rds-data", help="Run the RDS Data API server")
-    p_rd.add_argument("-p", "--port", type=int, default=8006, help="Port (default: 8006)")
+    p_rd.add_argument(
+        "-p", "--port", type=int, default=8006, help="Port (default: 8006)"
+    )
     p_rd.set_defaults(func=cmd_rds_data)
 
     p_cfn = sub.add_parser("cloudformation", help="Run the CloudFormation server")
-    p_cfn.add_argument("-p", "--port", type=int, default=5601, help="Port (default: 5601)")
+    p_cfn.add_argument(
+        "-p", "--port", type=int, default=5601, help="Port (default: 5601)"
+    )
     p_cfn.set_defaults(func=cmd_cloudformation)
 
     p_ac = sub.add_parser("agentcore", help="Run or invoke a local AgentCore agent")
-    p_ac.add_argument("action", choices=["run", "invoke"], help="run an agent file, or invoke a running one")
+    p_ac.add_argument(
+        "action",
+        choices=["run", "invoke"],
+        help="run an agent file, or invoke a running one",
+    )
     p_ac.add_argument("target", help="agent .py file (run) or JSON payload (invoke)")
-    p_ac.add_argument("-p", "--port", type=int, default=8080, help="Port (default: 8080)")
+    p_ac.add_argument(
+        "-p", "--port", type=int, default=8080, help="Port (default: 8080)"
+    )
     p_ac.set_defaults(func=cmd_agentcore)
 
     args = parser.parse_args()

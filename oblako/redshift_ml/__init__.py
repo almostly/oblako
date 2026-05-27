@@ -58,7 +58,9 @@ def parse_create_model(sql: str) -> dict:
     if mt:
         model_type = mt.group(1).upper()
         if model_type not in _UDF_BODIES:
-            raise ValueError(f"unsupported MODEL_TYPE {model_type!r}; supported: {sorted(_UDF_BODIES)}")
+            raise ValueError(
+                f"unsupported MODEL_TYPE {model_type!r}; supported: {sorted(_UDF_BODIES)}"
+            )
         autopilot = False
     else:
         if re.search(r"AUTO\s+OFF", rest, re.IGNORECASE):
@@ -98,12 +100,16 @@ def parse_create_model(sql: str) -> dict:
 _PROBLEM_TYPES = {"regression", "binary_classification", "multiclass_classification"}
 
 
-# -- plpython3u inference UDF codegen (pure Python, per model type) -----------
+# -------------------------------------------------------------------------------
+# plpython3u inference UDF codegen (pure Python, per model type)
+# -------------------------------------------------------------------------------
 def _linear_body(pt: str) -> str:
     if pt == "multiclass_classification":
-        return ('cls = m["classes"]; W = m["weights"]; b = m["intercepts"]\n'
-                'scores = [sum(W[k][i] * x[i] for i in range(len(x))) + b[k] for k in range(len(cls))]\n'
-                'return float(cls[max(range(len(cls)), key=lambda k: scores[k])])\n')
+        return (
+            'cls = m["classes"]; W = m["weights"]; b = m["intercepts"]\n'
+            "scores = [sum(W[k][i] * x[i] for i in range(len(x))) + b[k] for k in range(len(cls))]\n"
+            "return float(cls[max(range(len(cls)), key=lambda k: scores[k])])\n"
+        )
     body = 'z = sum(w * xi for w, xi in zip(m["weights"], x)) + m["intercept"]\n'
     if pt == "binary_classification":
         return body + "return 1.0 if 1.0 / (1.0 + math.exp(-z)) >= 0.5 else 0.0\n"
@@ -111,7 +117,7 @@ def _linear_body(pt: str) -> str:
 
 
 def _mlp_body(pt: str) -> str:
-    body = '''sc = m["scaler"]
+    body = """sc = m["scaler"]
 x = [(xi - mu) / sd if sd else 0.0 for xi, mu, sd in zip(x, sc["mean"], sc["std"])]
 def _act(v, name):
     if name == "relu":
@@ -127,11 +133,13 @@ for _li, _layer in enumerate(layers):
     z = [sum(x[i] * W[i][j] for i in range(len(x))) + b[j] for j in range(len(b))]
     _name = m["hidden_activation"] if _li < len(layers) - 1 else m["out_activation"]
     x = [_act(v, _name) for v in z]
-'''
+"""
     if pt == "multiclass_classification":
         # final layer has one unit per class; argmax of the logits is the class
-        return body + ('cls = m["classes"]\n'
-                       'return float(cls[max(range(len(x)), key=lambda k: x[k])])\n')
+        return body + (
+            'cls = m["classes"]\n'
+            "return float(cls[max(range(len(x)), key=lambda k: x[k])])\n"
+        )
     body += "out = x[0]\n"
     if pt == "binary_classification":
         return body + "return 1.0 if out >= 0.5 else 0.0\n"
@@ -141,7 +149,7 @@ for _li, _layer in enumerate(layers):
 def _xgb_body(pt: str) -> str:
     if pt == "multiclass_classification":
         # softprob lays trees out round-major; tree i scores class (i % num_class)
-        return '''cls = m["classes"]; K = m["num_class"]
+        return """cls = m["classes"]; K = m["num_class"]
 totals = [0.0] * K
 for _ti, tree in enumerate(m["trees"]):
     nid = "0"
@@ -151,8 +159,8 @@ for _ti, tree in enumerate(m["trees"]):
             totals[_ti % K] += node["leaf"]; break
         nid = str(node["y"]) if x[node["f"]] < node["c"] else str(node["n"])
 return float(cls[max(range(K), key=lambda k: totals[k])])
-'''
-    body = '''total = 0.0
+"""
+    body = """total = 0.0
 for tree in m["trees"]:
     nid = "0"
     while True:
@@ -162,7 +170,7 @@ for tree in m["trees"]:
             break
         nid = str(node["y"]) if x[node["f"]] < node["c"] else str(node["n"])
 bs = m["base_score"]
-'''
+"""
     if pt == "binary_classification":
         return body + (
             "base_margin = math.log(bs / (1.0 - bs))\n"
@@ -174,9 +182,12 @@ bs = m["base_score"]
 _UDF_BODIES = {"LINEAR_LEARNER": _linear_body, "MLP": _mlp_body, "XGBOOST": _xgb_body}
 
 
-def _udf_sql(name: str, function: str, features: list[str], problem_type: str, model_type: str) -> str:
+def _udf_sql(
+    name: str, function: str, features: list[str], problem_type: str, model_type: str
+) -> str:
+    """Execute UDF with SQL."""
     args = ", ".join(f"{f} float" for f in features)
-    header = f'''
+    header = f"""
 import json, math
 key = "rsml_{name}"
 if key not in GD:
@@ -186,7 +197,7 @@ if key not in GD:
     GD[key] = json.loads(rv[0]["model"])
 m = GD[key]
 x = [{", ".join(features)}]
-'''
+"""
     body = _UDF_BODIES[model_type](problem_type)
     return (
         f"CREATE OR REPLACE FUNCTION {function}({args}) RETURNS float AS $$"
@@ -195,6 +206,7 @@ x = [{", ".join(features)}]
 
 
 def _ensure_table(cur):
+    """Ensure table exists."""
     cur.execute(
         """
         CREATE TABLE IF NOT EXISTS _ml_models (
@@ -238,11 +250,15 @@ def _train_local(X: list[list[float]], y: list[float], hyperparameters: dict) ->
         return json.load(t.extractfile("model.json"))
 
 
-def create_model(spec: dict, *, host: str, port: int, user: str, password: str, database: str) -> dict:
+def create_model(
+    spec: dict, *, host: str, port: int, user: str, password: str, database: str
+) -> dict:
     """Train a model from a CREATE MODEL spec and register its inference UDF."""
     import psycopg2
 
-    conn = psycopg2.connect(host=host, port=port, user=user, password=password, dbname=database)
+    conn = psycopg2.connect(
+        host=host, port=port, user=user, password=password, dbname=database
+    )
     conn.autocommit = True
     try:
         cur = conn.cursor()
@@ -251,7 +267,9 @@ def create_model(spec: dict, *, host: str, port: int, user: str, password: str, 
         rows = cur.fetchall()
         target = spec["target"]
         if target not in columns:
-            raise ValueError(f"TARGET {target!r} is not in the SELECT columns {columns}")
+            raise ValueError(
+                f"TARGET {target!r} is not in the SELECT columns {columns}"
+            )
         feature_idx = [i for i, c in enumerate(columns) if c != target]
         target_idx = columns.index(target)
         features = [columns[i] for i in feature_idx]
@@ -274,7 +292,9 @@ def create_model(spec: dict, *, host: str, port: int, user: str, password: str, 
             best = None
             leaderboard = []
             for candidate in ("XGBOOST", "MLP", "LINEAR_LEARNER"):
-                trained = _train_local(X, y, dict(base_hp, model_type=candidate, autopilot="true"))
+                trained = _train_local(
+                    X, y, dict(base_hp, model_type=candidate, autopilot="true")
+                )
                 score = trained.get("val_score", float("-inf"))
                 leaderboard.append({"model_type": candidate, "val_score": score})
                 if best is None or score > best[0]:
@@ -291,10 +311,19 @@ def create_model(spec: dict, *, host: str, port: int, user: str, password: str, 
         cur.execute(
             "INSERT INTO _ml_models (name, function_name, target, features, model, model_type, problem_type) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (spec["name"], spec["function"], target, json.dumps(features),
-             json.dumps(model), model_type, problem_type),
+            (
+                spec["name"],
+                spec["function"],
+                target,
+                json.dumps(features),
+                json.dumps(model),
+                model_type,
+                problem_type,
+            ),
         )
-        cur.execute(_udf_sql(spec["name"], spec["function"], features, problem_type, model_type))
+        cur.execute(
+            _udf_sql(spec["name"], spec["function"], features, problem_type, model_type)
+        )
         cur.close()
         result = {
             "model": spec["name"],
@@ -305,7 +334,9 @@ def create_model(spec: dict, *, host: str, port: int, user: str, password: str, 
             "rows": len(y),
         }
         if leaderboard is not None:
-            result["autopilot"] = sorted(leaderboard, key=lambda r: r["val_score"], reverse=True)
+            result["autopilot"] = sorted(
+                leaderboard, key=lambda r: r["val_score"], reverse=True
+            )
             result["selected"] = model_type
         return result
     finally:

@@ -43,8 +43,12 @@ def train_linear(X, y, classify, multiclass):
 
     if multiclass:
         clf = LogisticRegression(max_iter=1000).fit(X, y)
-        return {"multiclass": True, "classes": [float(c) for c in clf.classes_],
-                "weights": clf.coef_.tolist(), "intercepts": clf.intercept_.tolist()}
+        return {
+            "multiclass": True,
+            "classes": [float(c) for c in clf.classes_],
+            "weights": clf.coef_.tolist(),
+            "intercepts": clf.intercept_.tolist(),
+        }
     if classify:
         clf = LogisticRegression(max_iter=1000).fit(X, y)
         return {"weights": clf.coef_[0].tolist(), "intercept": float(clf.intercept_[0])}
@@ -61,13 +65,17 @@ def train_mlp(X, y, classify, multiclass):
 
     scaler = StandardScaler().fit(X)
     Xs = scaler.transform(X).tolist()
-    export = {"scaler": {"mean": scaler.mean_.tolist(), "std": scaler.scale_.tolist()},
-              "y_mean": 0.0, "y_std": 1.0}
+    export = {
+        "scaler": {"mean": scaler.mean_.tolist(), "std": scaler.scale_.tolist()},
+        "y_mean": 0.0,
+        "y_std": 1.0,
+    }
     # lbfgs fits small datasets well; scale the target for regression so the net
     # isn't asked to output huge magnitudes.
     if classify:
-        net = MLPClassifier(hidden_layer_sizes=(16, 8), solver="lbfgs", max_iter=2000,
-                            random_state=0).fit(Xs, y)
+        net = MLPClassifier(
+            hidden_layer_sizes=(16, 8), solver="lbfgs", max_iter=2000, random_state=0
+        ).fit(Xs, y)
         if multiclass:
             export["multiclass"] = True
             export["classes"] = [float(c) for c in net.classes_]
@@ -75,11 +83,14 @@ def train_mlp(X, y, classify, multiclass):
         y_mean = statistics.fmean(y)
         y_std = statistics.pstdev(y) or 1.0
         ys = [(v - y_mean) / y_std for v in y]
-        net = MLPRegressor(hidden_layer_sizes=(16, 8), solver="lbfgs", max_iter=2000,
-                           random_state=0).fit(Xs, ys)
+        net = MLPRegressor(
+            hidden_layer_sizes=(16, 8), solver="lbfgs", max_iter=2000, random_state=0
+        ).fit(Xs, ys)
         export["y_mean"] = y_mean
         export["y_std"] = y_std
-    export["layers"] = [{"W": W.tolist(), "b": b.tolist()} for W, b in zip(net.coefs_, net.intercepts_)]
+    export["layers"] = [
+        {"W": W.tolist(), "b": b.tolist()} for W, b in zip(net.coefs_, net.intercepts_)
+    ]
     export["hidden_activation"] = net.activation
     # For multiclass the out activation is softmax; the UDF takes the argmax of the
     # final layer, and argmax(softmax(z)) == argmax(z), so it leaves logits as-is.
@@ -113,11 +124,17 @@ def train_xgboost(X, y, classify, multiclass, hp):
     if multiclass:
         classes = sorted(set(y))
         yi = [classes.index(v) for v in y]  # xgboost needs labels in [0, num_class)
-        model = xgb.XGBClassifier(objective="multi:softprob", num_class=len(classes), **common).fit(X, yi)
+        model = xgb.XGBClassifier(
+            objective="multi:softprob", num_class=len(classes), **common
+        ).fit(X, yi)
         dumps = model.get_booster().get_dump(dump_format="json")
         trees = [_flatten_tree(json.loads(d), {}) for d in dumps]
-        return {"multiclass": True, "classes": [float(c) for c in classes],
-                "num_class": len(classes), "trees": trees}
+        return {
+            "multiclass": True,
+            "classes": [float(c) for c in classes],
+            "num_class": len(classes),
+            "trees": trees,
+        }
     if classify:
         model = xgb.XGBClassifier(objective="binary:logistic", base_score=0.5, **common)
     else:
@@ -134,27 +151,38 @@ def _fit_scorer(model_type, X, y, classify, multiclass, hp):
     if model_type == "LINEAR_LEARNER":
         from sklearn.linear_model import LinearRegression, LogisticRegression
 
-        return (LogisticRegression(max_iter=1000) if classify else LinearRegression()).fit(X, y)
+        return (
+            LogisticRegression(max_iter=1000) if classify else LinearRegression()
+        ).fit(X, y)
     if model_type == "MLP":
         from sklearn.neural_network import MLPClassifier, MLPRegressor
         from sklearn.pipeline import make_pipeline
         from sklearn.preprocessing import StandardScaler
 
-        mlp_kw = dict(hidden_layer_sizes=(16, 8), solver="lbfgs", max_iter=2000, random_state=0)
+        mlp_kw = dict(
+            hidden_layer_sizes=(16, 8), solver="lbfgs", max_iter=2000, random_state=0
+        )
         if classify:
             return make_pipeline(StandardScaler(), MLPClassifier(**mlp_kw)).fit(X, y)
         from sklearn.compose import TransformedTargetRegressor
 
         reg = make_pipeline(StandardScaler(), MLPRegressor(**mlp_kw))
-        return TransformedTargetRegressor(regressor=reg, transformer=StandardScaler()).fit(X, y)
+        return TransformedTargetRegressor(
+            regressor=reg, transformer=StandardScaler()
+        ).fit(X, y)
+
     # XGBOOST
     import xgboost as xgb
 
     nr, md = int(hp.get("num_round", 100)), int(hp.get("max_depth", 6))
     if multiclass:
         classes = sorted(set(y))
-        clf = xgb.XGBClassifier(objective="multi:softprob", num_class=len(classes),
-                                n_estimators=nr, max_depth=md).fit(X, [classes.index(v) for v in y])
+        clf = xgb.XGBClassifier(
+            objective="multi:softprob",
+            num_class=len(classes),
+            n_estimators=nr,
+            max_depth=md,
+        ).fit(X, [classes.index(v) for v in y])
 
         class _Wrapped:
             def predict(self, Xt):
@@ -162,10 +190,12 @@ def _fit_scorer(model_type, X, y, classify, multiclass, hp):
 
         return _Wrapped()
     if classify:
-        return xgb.XGBClassifier(objective="binary:logistic", base_score=0.5,
-                                 n_estimators=nr, max_depth=md).fit(X, y)
-    return xgb.XGBRegressor(objective="reg:squarederror", base_score=0.5,
-                            n_estimators=nr, max_depth=md).fit(X, y)
+        return xgb.XGBClassifier(
+            objective="binary:logistic", base_score=0.5, n_estimators=nr, max_depth=md
+        ).fit(X, y)
+    return xgb.XGBRegressor(
+        objective="reg:squarederror", base_score=0.5, n_estimators=nr, max_depth=md
+    ).fit(X, y)
 
 
 def _val_score(model_type, X, y, classify, multiclass, hp):
@@ -175,7 +205,9 @@ def _val_score(model_type, X, y, classify, multiclass, hp):
     if len(X) >= 5:
         strat = y if classify else None
         try:
-            Xtr, Xva, ytr, yva = train_test_split(X, y, test_size=0.25, random_state=0, stratify=strat)
+            Xtr, Xva, ytr, yva = train_test_split(
+                X, y, test_size=0.25, random_state=0, stratify=strat
+            )
         except ValueError:  # a class too rare to stratify
             Xtr, Xva, ytr, yva = train_test_split(X, y, test_size=0.25, random_state=0)
     else:
@@ -216,12 +248,19 @@ def main():
     if hp.get("autopilot") == "true":
         export["val_score"] = _val_score(model_type, X, y, classify, multiclass, hp)
 
-    export.update(model_type=model_type, problem_type=problem_type, n_features=len(X[0]), rows=len(y))
+    export.update(
+        model_type=model_type,
+        problem_type=problem_type,
+        n_features=len(X[0]),
+        rows=len(y),
+    )
     os.makedirs(MODEL, exist_ok=True)
     with open(os.path.join(MODEL, "model.json"), "w") as fh:
         json.dump(export, fh)
     score = f" val_score={export['val_score']:.4f}" if "val_score" in export else ""
-    print(f"Trained {model_type}/{problem_type}: {len(y)} rows, {len(X[0])} features{score}")
+    print(
+        f"Trained {model_type}/{problem_type}: {len(y)} rows, {len(X[0])} features{score}"
+    )
 
 
 if __name__ == "__main__":

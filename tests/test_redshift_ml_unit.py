@@ -25,12 +25,18 @@ def _predict(body):
 
 
 def test_parser_model_type_vs_autopilot():
-    single = parse_create_model("CREATE MODEL m FROM (SELECT a,b,t FROM x) "
-                                "TARGET t FUNCTION f MODEL_TYPE XGBOOST")
+    single = parse_create_model(
+        "CREATE MODEL m FROM (SELECT a,b,t FROM x) "
+        "TARGET t FUNCTION f MODEL_TYPE XGBOOST"
+    )
     assert single["model_type"] == "XGBOOST" and single["autopilot"] is False
-    auto = parse_create_model("CREATE MODEL m FROM (SELECT a,b,t FROM x) TARGET t FUNCTION f")
+    auto = parse_create_model(
+        "CREATE MODEL m FROM (SELECT a,b,t FROM x) TARGET t FUNCTION f"
+    )
     assert auto["model_type"] is None and auto["autopilot"] is True
-    auto_on = parse_create_model("CREATE MODEL m FROM (SELECT a,b,t FROM x) TARGET t FUNCTION f AUTO ON")
+    auto_on = parse_create_model(
+        "CREATE MODEL m FROM (SELECT a,b,t FROM x) TARGET t FUNCTION f AUTO ON"
+    )
     assert auto_on["autopilot"] is True
 
 
@@ -38,21 +44,29 @@ def test_parser_auto_off_requires_model_type():
     import pytest
 
     with pytest.raises(ValueError, match="AUTO OFF requires MODEL_TYPE"):
-        parse_create_model("CREATE MODEL m FROM (SELECT a,b,t FROM x) TARGET t FUNCTION f AUTO OFF")
+        parse_create_model(
+            "CREATE MODEL m FROM (SELECT a,b,t FROM x) TARGET t FUNCTION f AUTO OFF"
+        )
 
 
 def test_parser_multiclass_problem_and_objective():
-    p = parse_create_model("CREATE MODEL m FROM (SELECT a,b,t FROM x) TARGET t FUNCTION f "
-                           "MODEL_TYPE MLP PROBLEM_TYPE multiclass_classification")
+    p = parse_create_model(
+        "CREATE MODEL m FROM (SELECT a,b,t FROM x) TARGET t FUNCTION f "
+        "MODEL_TYPE MLP PROBLEM_TYPE multiclass_classification"
+    )
     assert p["problem_type"] == "multiclass_classification"
-    o = parse_create_model("CREATE MODEL m FROM (SELECT a,b,t FROM x) TARGET t FUNCTION f "
-                           "MODEL_TYPE XGBOOST OBJECTIVE 'multi:softprob'")
+    o = parse_create_model(
+        "CREATE MODEL m FROM (SELECT a,b,t FROM x) TARGET t FUNCTION f "
+        "MODEL_TYPE XGBOOST OBJECTIVE 'multi:softprob'"
+    )
     assert o["problem_type"] == "multiclass_classification"
 
 
 def test_detect_problem_type():
     assert _detect_problem_type([0.0, 1.0, 1.0, 0.0]) == "binary_classification"
-    assert _detect_problem_type([0.0, 1.0, 2.0, 1.0, 2.0]) == "multiclass_classification"
+    assert (
+        _detect_problem_type([0.0, 1.0, 2.0, 1.0, 2.0]) == "multiclass_classification"
+    )
     assert _detect_problem_type([1.5, 2.7, 9.1]) == "regression"
 
 
@@ -67,8 +81,11 @@ def test_all_udf_bodies_compile():
 
 def test_linear_multiclass_argmax():
     p = _predict(_linear_body("multiclass_classification"))
-    m = {"classes": [10.0, 20.0, 30.0],
-         "weights": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "intercepts": [0, 0, 0]}
+    m = {
+        "classes": [10.0, 20.0, 30.0],
+        "weights": [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        "intercepts": [0, 0, 0],
+    }
     assert p(m, [5, 1, 1]) == 10.0
     assert p(m, [1, 5, 1]) == 20.0
     assert p(m, [1, 1, 5]) == 30.0
@@ -77,17 +94,23 @@ def test_linear_multiclass_argmax():
 def test_xgb_multiclass_argmax():
     p = _predict(_xgb_body("multiclass_classification"))
     leaf = lambda v: {"0": {"leaf": v}}  # noqa: E731 - tiny single-leaf tree
-    m = {"classes": [7.0, 8.0, 9.0], "num_class": 3,
-         "trees": [leaf(0.1), leaf(0.9), leaf(0.2)]}  # class index 1 wins
+    m = {
+        "classes": [7.0, 8.0, 9.0],
+        "num_class": 3,
+        "trees": [leaf(0.1), leaf(0.9), leaf(0.2)],
+    }  # class index 1 wins
     assert p(m, [0.0, 0.0]) == 8.0
 
 
 def test_mlp_multiclass_argmax():
     p = _predict(_mlp_body("multiclass_classification"))
-    m = {"scaler": {"mean": [0, 0, 0], "std": [1, 1, 1]},
-         "layers": [{"W": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "b": [0, 0, 0]}],
-         "hidden_activation": "relu", "out_activation": "softmax",
-         "classes": [100.0, 200.0, 300.0]}
+    m = {
+        "scaler": {"mean": [0, 0, 0], "std": [1, 1, 1]},
+        "layers": [{"W": [[1, 0, 0], [0, 1, 0], [0, 0, 1]], "b": [0, 0, 0]}],
+        "hidden_activation": "relu",
+        "out_activation": "softmax",
+        "classes": [100.0, 200.0, 300.0],
+    }
     assert p(m, [5, 1, 1]) == 100.0
     assert p(m, [1, 1, 5]) == 300.0
 

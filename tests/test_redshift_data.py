@@ -13,13 +13,16 @@ import pytest
 from oblako.redshift_data import start_in_thread
 from oblako.redshift_data.executor import RedshiftDataExecutor
 
-CREDS = dict(region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test")
+CREDS = dict(
+    region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"
+)
 
 
 @pytest.fixture(scope="module")
 def data_client():
-    executor = RedshiftDataExecutor(host="localhost", port=5439, user="oblako",
-                                    password="oblako", database="oblako")
+    executor = RedshiftDataExecutor(
+        host="localhost", port=5439, user="oblako", password="oblako", database="oblako"
+    )
     url = start_in_thread(port=8011, executor=executor)
     return boto3.client("redshift-data", endpoint_url=url, **CREDS)
 
@@ -31,14 +34,18 @@ def control_client():
 
 @pytest.fixture
 def clean_table(data_client):
-    data_client.execute_statement(Database="oblako", Sql="DROP TABLE IF EXISTS rsd_test")
+    data_client.execute_statement(
+        Database="oblako", Sql="DROP TABLE IF EXISTS rsd_test"
+    )
     sid = data_client.execute_statement(
         Database="oblako",
         Sql="CREATE TABLE rsd_test (id INT, name TEXT, amount FLOAT)",
     )["Id"]
     assert data_client.describe_statement(Id=sid)["Status"] == "FINISHED"
     yield
-    data_client.execute_statement(Database="oblako", Sql="DROP TABLE IF EXISTS rsd_test")
+    data_client.execute_statement(
+        Database="oblako", Sql="DROP TABLE IF EXISTS rsd_test"
+    )
 
 
 def test_execute_and_get_result(data_client, clean_table):
@@ -77,7 +84,9 @@ def test_named_parameters(data_client, clean_table):
 
 
 def test_failed_statement(data_client):
-    sid = data_client.execute_statement(Database="oblako", Sql="SELECT * FROM no_such_table")["Id"]
+    sid = data_client.execute_statement(
+        Database="oblako", Sql="SELECT * FROM no_such_table"
+    )["Id"]
     desc = data_client.describe_statement(Id=sid)
     assert desc["Status"] == "FAILED"
     assert "no_such_table" in desc.get("Error", "")
@@ -107,7 +116,9 @@ def test_redshift_udf_via_data_api(data_client):
 def test_control_plane_cluster_lifecycle(control_client):
     cid = "pytest-dw"
     try:
-        control_client.delete_cluster(ClusterIdentifier=cid, SkipFinalClusterSnapshot=True)
+        control_client.delete_cluster(
+            ClusterIdentifier=cid, SkipFinalClusterSnapshot=True
+        )
     except Exception:
         pass
     control_client.create_cluster(
