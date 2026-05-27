@@ -5,7 +5,6 @@ import Box from '@cloudscape-design/components/box'
 import SpaceBetween from '@cloudscape-design/components/space-between'
 import Button from '@cloudscape-design/components/button'
 import Container from '@cloudscape-design/components/container'
-import ColumnLayout from '@cloudscape-design/components/column-layout'
 import StatusIndicator from '@cloudscape-design/components/status-indicator'
 import Modal from '@cloudscape-design/components/modal'
 import FormField from '@cloudscape-design/components/form-field'
@@ -89,8 +88,8 @@ export default function IamPage() {
         IAM
       </Header>
 
-      <ColumnLayout columns={2}>
-        <Container header={<Header variant="h2" description="Trust-evaluated; cross-account principals welcome">Assume role</Header>}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'stretch' }}>
+        <Container fitHeight header={<Header variant="h2" description="Trust-evaluated; cross-account principals welcome">Assume role</Header>}>
           <SpaceBetween size="s">
             <FormField label="Role"><Select selectedOption={assume.roleArn} options={roleOpts}
               onChange={({ detail }) => setAssume(a => ({ ...a, roleArn: detail.selectedOption }))} placeholder="Select a role" /></FormField>
@@ -105,7 +104,7 @@ export default function IamPage() {
           </SpaceBetween>
         </Container>
 
-        <Container header={<Header variant="h2" description="Does this principal's policies allow the action?">Simulate access</Header>}>
+        <Container fitHeight header={<Header variant="h2" description="Does this principal's policies allow the action?">Simulate access</Header>}>
           <SpaceBetween size="s">
             <FormField label="Principal ARN (user or role)"><Input value={sim.principalArn}
               onChange={({ detail }) => setSim(s => ({ ...s, principalArn: detail.value }))} placeholder="arn:aws:iam::123456789012:role/scorer" /></FormField>
@@ -117,7 +116,7 @@ export default function IamPage() {
               : <Box>Decision: {decisionIndicator(simResult.decision)}</Box>)}
           </SpaceBetween>
         </Container>
-      </ColumnLayout>
+      </div>
 
       <Table
         header={<Header variant="h2" counter={`(${ov.roles.length})`}

@@ -6,7 +6,6 @@ import SpaceBetween from '@cloudscape-design/components/space-between'
 import StatusIndicator from '@cloudscape-design/components/status-indicator'
 import Button from '@cloudscape-design/components/button'
 import Container from '@cloudscape-design/components/container'
-import ColumnLayout from '@cloudscape-design/components/column-layout'
 import Textarea from '@cloudscape-design/components/textarea'
 import Modal from '@cloudscape-design/components/modal'
 import Alert from '@cloudscape-design/components/alert'
@@ -129,11 +128,11 @@ export default function StepFunctionsPage() {
           {machineDetail.name}
         </Header>
 
-        <ColumnLayout columns={2}>
-          <Container header={<Header variant="h2" description="Edit, then Run">Input</Header>}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'stretch' }}>
+          <Container fitHeight header={<Header variant="h2" description="Edit, then Run">Input</Header>}>
             <Textarea value={inputText} onChange={({ detail }) => setInputText(detail.value)} rows={12} spellcheck={false} />
           </Container>
-          <Container header={
+          <Container fitHeight header={
             <Header variant="h2" actions={runResult && <StatusIndicator type={statusType(runResult.status)}>{runResult.status}</StatusIndicator>}>
               Output
             </Header>
@@ -143,7 +142,7 @@ export default function StepFunctionsPage() {
               ? <JsonCode code={outputText} />
               : <Box color="text-status-inactive" padding={{ vertical: 'l' }} textAlign="center">Run the state machine to see output.</Box>}
           </Container>
-        </ColumnLayout>
+        </div>
 
         <Container header={<Header variant="h2" description="States colour by run status; live runs animate the active edge">Visual flow</Header>}>
           <FlowGraph definition={definition} statusByState={statusByState} />
