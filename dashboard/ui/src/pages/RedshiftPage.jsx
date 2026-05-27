@@ -5,6 +5,10 @@ import Box from '@cloudscape-design/components/box'
 import SpaceBetween from '@cloudscape-design/components/space-between'
 import Container from '@cloudscape-design/components/container'
 import Button from '@cloudscape-design/components/button'
+import Modal from '@cloudscape-design/components/modal'
+import FormField from '@cloudscape-design/components/form-field'
+import Input from '@cloudscape-design/components/input'
+import Alert from '@cloudscape-design/components/alert'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-sql'
 import 'prismjs/themes/prism.css'
@@ -52,15 +56,34 @@ export default function RedshiftPage() {
   const [query, setQuery] = useState('SELECT table_name FROM information_schema.tables WHERE table_schema = \'public\'')
   const [result, setResult] = useState(null)
   const [loading, setLoading] = useState(false)
+  const [show, setShow] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [error, setError] = useState(null)
+  const [cform, setCform] = useState({
+    clusterIdentifier: '', nodeType: 'ra3.xlplus', numberOfNodes: '1',
+    dbName: 'dev', masterUsername: 'admin', masterUserPassword: 'Password123',
+  })
+  const setC = (k, v) => setCform(f => ({ ...f, [k]: v }))
+
+  const fetchClusters = () => {
+    fetch(`${API}/api/redshift/clusters`).then(r => r.json()).then(d => setClusters(d.clusters || []))
+  }
 
   useEffect(() => {
-    fetch(`${API}/api/redshift/clusters`)
-      .then(r => r.json())
-      .then(data => setClusters(data.clusters || []))
-    fetch(`${API}/api/redshift/tables`)
-      .then(r => r.json())
-      .then(data => setTables(data.tables || []))
+    fetchClusters()
+    fetch(`${API}/api/redshift/tables`).then(r => r.json()).then(data => setTables(data.tables || []))
   }, [])
+
+  const createCluster = () => {
+    if (!cform.clusterIdentifier) { setError('Cluster identifier is required'); return }
+    setCreating(true); setError(null)
+    fetch(`${API}/api/redshift/clusters`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cform),
+    })
+      .then(r => r.json())
+      .then(d => { setCreating(false); if (d.error) { setError(d.error); return } setShow(false); fetchClusters() })
+      .catch(e => { setCreating(false); setError(String(e)) })
+  }
 
   const runQuery = () => {
     setLoading(true)
@@ -76,7 +99,12 @@ export default function RedshiftPage() {
 
   return (
     <SpaceBetween size="l">
-      <Header variant="h1">Amazon Redshift</Header>
+      <Header
+        variant="h1"
+        actions={<Button iconName="add-plus" onClick={() => { setError(null); setShow(true) }}>Create cluster</Button>}
+      >
+        Amazon Redshift
+      </Header>
 
       <Table
         header={<Header variant="h2" counter={`(${clusters.length})`}>Clusters</Header>}
@@ -127,6 +155,42 @@ export default function RedshiftPage() {
           )}
         </SpaceBetween>
       </Container>
+
+      <Modal
+        visible={show}
+        onDismiss={() => setShow(false)}
+        header="Create Redshift cluster"
+        footer={
+          <Box float="right">
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button variant="link" onClick={() => setShow(false)}>Cancel</Button>
+              <Button variant="primary" loading={creating} onClick={createCluster}>Create</Button>
+            </SpaceBetween>
+          </Box>
+        }
+      >
+        <SpaceBetween size="m">
+          {error && <Alert type="error">{error}</Alert>}
+          <FormField label="Cluster identifier">
+            <Input value={cform.clusterIdentifier} onChange={({ detail }) => setC('clusterIdentifier', detail.value)} placeholder="analytics-cluster" />
+          </FormField>
+          <FormField label="Node type">
+            <Input value={cform.nodeType} onChange={({ detail }) => setC('nodeType', detail.value)} />
+          </FormField>
+          <FormField label="Number of nodes">
+            <Input type="number" value={cform.numberOfNodes} onChange={({ detail }) => setC('numberOfNodes', detail.value)} />
+          </FormField>
+          <FormField label="Database name">
+            <Input value={cform.dbName} onChange={({ detail }) => setC('dbName', detail.value)} />
+          </FormField>
+          <FormField label="Master username">
+            <Input value={cform.masterUsername} onChange={({ detail }) => setC('masterUsername', detail.value)} />
+          </FormField>
+          <FormField label="Master password">
+            <Input type="password" value={cform.masterUserPassword} onChange={({ detail }) => setC('masterUserPassword', detail.value)} />
+          </FormField>
+        </SpaceBetween>
+      </Modal>
     </SpaceBetween>
   )
 }

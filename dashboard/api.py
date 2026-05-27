@@ -311,6 +311,89 @@ def list_clusters():
         return {"clusters": [], "error": str(e)}
 
 
+@app.post("/api/redshift/clusters")
+def create_redshift_cluster(body: dict):
+    """Create a Redshift cluster via the moto control plane."""
+    identifier = body.get("clusterIdentifier")
+    if not identifier:
+        return {"error": "clusterIdentifier is required"}
+    try:
+        rs = oblako.redshift.get_client()
+        kwargs = {
+            "ClusterIdentifier": identifier,
+            "NodeType": body.get("nodeType", "ra3.xlplus"),
+            "MasterUsername": body.get("masterUsername", "admin"),
+            "MasterUserPassword": body.get("masterUserPassword", "Password123"),
+            "DBName": body.get("dbName", "dev"),
+        }
+        nodes = int(body.get("numberOfNodes", 1))
+        if nodes > 1:
+            kwargs["ClusterType"] = "multi-node"
+            kwargs["NumberOfNodes"] = nodes
+        else:
+            kwargs["ClusterType"] = "single-node"
+        resp = rs.create_cluster(**kwargs)
+        return {"clusterIdentifier": resp["Cluster"]["ClusterIdentifier"]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# RDS / Aurora
+@app.get("/api/rds/databases")
+def list_rds_databases():
+    """List RDS instances + Aurora clusters via the moto control plane."""
+    try:
+        rds = oblako.rds.get_client()
+        items = []
+        for c in rds.describe_db_clusters().get("DBClusters", []):
+            items.append({
+                "id": c["DBClusterIdentifier"], "kind": "cluster",
+                "engine": c.get("Engine"), "status": c.get("Status"),
+                "endpoint": c.get("Endpoint"),
+            })
+        for i in rds.describe_db_instances().get("DBInstances", []):
+            items.append({
+                "id": i["DBInstanceIdentifier"], "kind": "instance",
+                "engine": i.get("Engine"), "status": i.get("DBInstanceStatus"),
+                "endpoint": (i.get("Endpoint") or {}).get("Address"),
+                "instanceClass": i.get("DBInstanceClass"),
+            })
+        return {"databases": items}
+    except Exception as e:
+        return {"databases": [], "error": str(e)}
+
+
+@app.post("/api/rds/databases")
+def create_rds_database(body: dict):
+    """Create an RDS DB instance or an Aurora cluster via the moto control plane."""
+    identifier = body.get("identifier")
+    if not identifier:
+        return {"error": "identifier is required"}
+    engine = body.get("engine", "postgres")  # postgres | mysql
+    user = body.get("masterUsername", "admin")
+    password = body.get("masterUserPassword", "Password123")
+    try:
+        rds = oblako.rds.get_client()
+        if body.get("mode") == "cluster":  # Aurora
+            aurora_engine = "aurora-postgresql" if engine == "postgres" else "aurora-mysql"
+            resp = rds.create_db_cluster(
+                DBClusterIdentifier=identifier, Engine=aurora_engine,
+                MasterUsername=user, MasterUserPassword=password,
+                DatabaseName=body.get("dbName", "app"),
+            )
+            return {"id": resp["DBCluster"]["DBClusterIdentifier"], "kind": "cluster"}
+        resp = rds.create_db_instance(
+            DBInstanceIdentifier=identifier, Engine=engine,
+            DBInstanceClass=body.get("instanceClass", "db.t3.micro"),
+            MasterUsername=user, MasterUserPassword=password,
+            AllocatedStorage=int(body.get("allocatedStorage", 20)),
+            DBName=body.get("dbName", "app"),
+        )
+        return {"id": resp["DBInstance"]["DBInstanceIdentifier"], "kind": "instance"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/redshift/tables")
 def list_tables():
     try:
