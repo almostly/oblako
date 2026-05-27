@@ -10,6 +10,7 @@ Bedrock. Two ways in:
 
 import httpx
 
+from oblako import config
 from .base import Service, PortMapping
 
 
@@ -20,7 +21,7 @@ class BedrockService(Service):
         self,
         host_port: int = 11434,
         runtime_port: int = 8004,
-        region: str = "us-east-1",
+        region: str | None = None,
     ):
         """Initialize the Bedrock service with Ollama engine and runtime port."""
         super().__init__(
@@ -31,7 +32,7 @@ class BedrockService(Service):
         )
         self.host_port = host_port
         self.runtime_port = runtime_port
-        self.region = region
+        self.region = region or config.region()
 
     @property
     def url(self) -> str:

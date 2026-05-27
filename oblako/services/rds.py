@@ -14,6 +14,7 @@ The control-plane cluster/instance objects are moto metadata pointing at the one
 local engine — real SQL behavior, simulated topology.
 """
 
+from oblako import config
 from .base import Service, PortMapping
 
 _ENGINES = {
@@ -46,7 +47,7 @@ class RdsService(Service):
         database: str = "oblako",
         control_port: int = 5500,
         data_port: int = 8006,
-        region: str = "us-east-1",
+        region: str | None = None,
     ):
         """Initialize the RDS service for the specified engine (postgres or mysql)."""
         if engine not in _ENGINES:
@@ -84,7 +85,7 @@ class RdsService(Service):
         self.database = database
         self.control_port = control_port
         self.data_port = data_port
-        self.region = region
+        self.region = region or config.region()
 
     def connect(self):
         """Return a DB connection to the engine (psycopg2 for postgres, pymysql for mysql)."""

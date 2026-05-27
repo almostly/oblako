@@ -6,9 +6,10 @@ from pathlib import Path
 import boto3
 import httpx
 
+from oblako import config
 from .base import Service, PortMapping
 
-DUMMY_ROLE = "arn:aws:iam::012345678901:role/DummyRole"
+DUMMY_ROLE = config.arn("iam", "role/DummyRole", region_scoped=False)
 
 # Mounted into the container so executions can run the bundled ML templates in
 # SFN Local mock mode (canned task results). The file is hot-reloaded on each run.
@@ -65,7 +66,7 @@ class StepFunctionsService(Service):
             endpoint_url=self.endpoint_url,
             aws_access_key_id="test",
             aws_secret_access_key="test",
-            region_name="us-east-1",
+            region_name=config.region(),
         )
 
     def create_state_machine(

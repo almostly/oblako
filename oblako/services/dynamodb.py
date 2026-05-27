@@ -2,6 +2,7 @@
 
 import boto3
 
+from oblako import config
 from .base import Service, PortMapping
 
 
@@ -39,7 +40,7 @@ class DynamoDBService(Service):
             endpoint_url=self.endpoint_url,
             aws_access_key_id="test",
             aws_secret_access_key="test",
-            region_name="us-east-1",
+            region_name=config.region(),
         )
 
     def get_resource(self):
@@ -49,7 +50,7 @@ class DynamoDBService(Service):
             endpoint_url=self.endpoint_url,
             aws_access_key_id="test",
             aws_secret_access_key="test",
-            region_name="us-east-1",
+            region_name=config.region(),
         )
 
     def _health_check(self) -> bool:

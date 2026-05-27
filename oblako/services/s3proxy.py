@@ -4,6 +4,7 @@ import httpx
 import boto3
 from botocore.config import Config
 
+from oblako import config
 from .base import Service, PortMapping
 
 
@@ -42,7 +43,7 @@ class S3ProxyService(Service):
             endpoint_url=self.endpoint_url,
             aws_access_key_id="test",
             aws_secret_access_key="test",
-            region_name="us-east-1",
+            region_name=config.region(),
             config=Config(
                 signature_version="s3v4",
                 request_checksum_calculation="when_required",

@@ -15,6 +15,7 @@ Three ways in:
 
 import psycopg2
 
+from oblako import config
 from .base import Service, PortMapping
 
 
@@ -29,7 +30,7 @@ class RedshiftService(Service):
         database: str = "oblako",
         control_port: int = 5500,
         data_port: int = 8002,
-        region: str = "us-east-1",
+        region: str | None = None,
     ):
         """Initialize the Redshift service with connection and port settings."""
         super().__init__(
@@ -53,7 +54,7 @@ class RedshiftService(Service):
         self.database = database
         self.control_port = control_port
         self.data_port = data_port
-        self.region = region
+        self.region = region or config.region()
 
     def connect(self):
         """Return a psycopg2 connection to this instance."""

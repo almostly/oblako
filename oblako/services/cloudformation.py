@@ -9,16 +9,18 @@ via AWS_ENDPOINT_URL_CLOUDFORMATION — at it and stacks land in oblako for real
 
 from __future__ import annotations
 
+from oblako import config
+
 
 class CloudFormationService:
     """Manage the in-process CloudFormation server and hand out boto3 clients."""
 
     name = "cloudformation"
 
-    def __init__(self, port: int = 5601, region: str = "us-east-1"):
+    def __init__(self, port: int = 5601, region: str | None = None):
         """Initialize with the given port and AWS region."""
         self.port = port
-        self.region = region
+        self.region = region or config.region()
 
     @property
     def endpoint_url(self) -> str:
