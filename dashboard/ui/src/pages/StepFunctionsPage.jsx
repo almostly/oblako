@@ -6,31 +6,31 @@ import SpaceBetween from '@cloudscape-design/components/space-between'
 import StatusIndicator from '@cloudscape-design/components/status-indicator'
 import Button from '@cloudscape-design/components/button'
 import Container from '@cloudscape-design/components/container'
-import ExpandableSection from '@cloudscape-design/components/expandable-section'
 import ColumnLayout from '@cloudscape-design/components/column-layout'
-import Tabs from '@cloudscape-design/components/tabs'
+import Textarea from '@cloudscape-design/components/textarea'
 import Modal from '@cloudscape-design/components/modal'
 import Alert from '@cloudscape-design/components/alert'
 import Badge from '@cloudscape-design/components/badge'
+import ExpandableSection from '@cloudscape-design/components/expandable-section'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-json'
 import 'prismjs/themes/prism.css'
+import FlowGraph from '../components/FlowGraph'
 
 const API = 'http://localhost:8000'
+const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
 function JsonCode({ code }) {
   const ref = useRef(null)
-  useEffect(() => {
-    if (ref.current) Prism.highlightElement(ref.current)
-  }, [code])
+  useEffect(() => { if (ref.current) Prism.highlightElement(ref.current) }, [code])
   return (
-    <pre style={{ margin: 0, borderRadius: 6, overflow: 'auto', maxHeight: 500 }}>
+    <pre style={{ margin: 0, borderRadius: 6, overflow: 'auto', maxHeight: 360, background: '#f7f8fa', padding: 10 }}>
       <code ref={ref} className="language-json">{code}</code>
     </pre>
   )
 }
 
-const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+const statusType = (s) => s === 'SUCCEEDED' ? 'success' : s === 'FAILED' ? 'error' : s === 'RUNNING' ? 'in-progress' : 'pending'
 
 export default function StepFunctionsPage() {
   const [machines, setMachines] = useState([])
@@ -43,6 +43,7 @@ export default function StepFunctionsPage() {
   const [creating, setCreating] = useState(null)
   const [running, setRunning] = useState(false)
   const [runResult, setRunResult] = useState(null)
+  const [inputText, setInputText] = useState('{}')
 
   const fetchMachines = () => {
     setLoading(true)
@@ -57,68 +58,58 @@ export default function StepFunctionsPage() {
     fetch(`${API}/api/stepfunctions/templates`).then(r => r.json()).then(d => setTemplates(d.templates || []))
   }, [])
 
-  const openMachine = (arn) => {
-    setSelectedMachine(arn)
-    setRunResult(null)
-    fetch(`${API}/api/stepfunctions/describe/${encodeURIComponent(arn)}`)
-      .then(r => r.json())
-      .then(data => setMachineDetail(data))
-    fetch(`${API}/api/stepfunctions/executions/${encodeURIComponent(arn)}`)
-      .then(r => r.json())
-      .then(data => setExecutions(data.executions || []))
+  const tplFor = (name) => templates.find(t => t.name === name)
+
+  const openMachine = (arn, name) => {
+    setSelectedMachine(arn); setRunResult(null)
+    const tpl = tplFor(name)
+    setInputText(JSON.stringify(tpl?.input ?? {}, null, 2))
+    fetch(`${API}/api/stepfunctions/describe/${encodeURIComponent(arn)}`).then(r => r.json()).then(setMachineDetail)
+    fetch(`${API}/api/stepfunctions/executions/${encodeURIComponent(arn)}`).then(r => r.json()).then(d => setExecutions(d.executions || []))
   }
 
   const createFromTemplate = (id) => {
     setCreating(id)
     fetch(`${API}/api/stepfunctions/create`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ templateId: id }),
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ templateId: id }),
     })
       .then(r => r.json())
-      .then(d => {
-        setCreating(null); setShowCreate(false); fetchMachines()
-        if (d.stateMachineArn) openMachine(d.stateMachineArn)
-      })
+      .then(d => { setCreating(null); setShowCreate(false); fetchMachines(); if (d.stateMachineArn) openMachine(d.stateMachineArn, d.name) })
       .catch(() => setCreating(null))
   }
 
   const runExecution = async (tpl) => {
-    setRunning(true); setRunResult(null)
+    let input
+    try { input = JSON.parse(inputText || '{}') }
+    catch (e) { setRunResult({ status: 'FAILED', error: `Input is not valid JSON: ${e.message}`, steps: [] }); return }
+    setRunning(true); setRunResult({ status: 'RUNNING', steps: [] })
     try {
       const started = await fetch(`${API}/api/stepfunctions/start`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stateMachineArn: selectedMachine, testCase: tpl.testCase, input: tpl.input || {} }),
+        body: JSON.stringify({ stateMachineArn: selectedMachine, testCase: tpl?.testCase || null, input }),
       }).then(r => r.json())
       if (started.error) { setRunResult({ status: 'FAILED', error: started.error, steps: [] }); setRunning(false); return }
-      const exArn = started.executionArn
       let result = null
-      for (let i = 0; i < 25; i++) {
-        result = await fetch(`${API}/api/stepfunctions/execution/${encodeURIComponent(exArn)}`).then(r => r.json())
+      for (let i = 0; i < 40; i++) {
+        result = await fetch(`${API}/api/stepfunctions/execution/${encodeURIComponent(started.executionArn)}`).then(r => r.json())
+        setRunResult(result)
         if (result.status && result.status !== 'RUNNING') break
-        await sleep(500)
+        await sleep(600)
       }
-      setRunResult(result)
-      fetch(`${API}/api/stepfunctions/executions/${encodeURIComponent(selectedMachine)}`)
-        .then(r => r.json()).then(data => setExecutions(data.executions || []))
+      fetch(`${API}/api/stepfunctions/executions/${encodeURIComponent(selectedMachine)}`).then(r => r.json()).then(d => setExecutions(d.executions || []))
     } catch (e) {
       setRunResult({ status: 'FAILED', error: String(e), steps: [] })
     }
     setRunning(false)
   }
 
-  const stepStatus = (s) => s === 'SUCCEEDED' ? 'success' : s === 'FAILED' ? 'error' : 'in-progress'
-
+  // -- Detail view -------------------------------------------------------------------
   if (selectedMachine && machineDetail && !machineDetail.error) {
     const definition = machineDetail.definition || {}
-    const states = definition.States || {}
-    const stateList = Object.entries(states).map(([name, state]) => ({
-      name,
-      type: state.Type,
-      next: state.Next || (state.End ? '(End)' : state.Default || '-'),
-      comment: state.Comment || '-',
-    }))
-    const tpl = templates.find(t => t.name === machineDetail.name)
-    const canRun = tpl && tpl.runnable
+    const tpl = tplFor(machineDetail.name)
+    const statusByState = Object.fromEntries((runResult?.steps || []).map(s => [s.name, s.status]))
+    let outputText = ''
+    if (runResult?.output) { try { outputText = JSON.stringify(JSON.parse(runResult.output), null, 2) } catch { outputText = runResult.output } }
 
     return (
       <SpaceBetween size="l">
@@ -126,143 +117,57 @@ export default function StepFunctionsPage() {
           variant="h1"
           actions={
             <SpaceBetween direction="horizontal" size="xs">
-              {canRun && (
-                <Button variant="primary" iconName="play" loading={running} onClick={() => runExecution(tpl)}>
-                  Run (mock)
-                </Button>
-              )}
+              <Button variant="primary" iconName="play" loading={running} disabled={!tpl?.runnable}
+                onClick={() => runExecution(tpl)}>
+                {tpl?.execMode === 'live' ? 'Run (live)' : 'Run (mock)'}
+              </Button>
               <Button onClick={() => { setSelectedMachine(null); setMachineDetail(null); setRunResult(null) }}>Back</Button>
             </SpaceBetween>
           }
+          description={tpl?.note}
         >
           {machineDetail.name}
         </Header>
 
-        {tpl && !tpl.runnable && (
-          <Alert type="info" header="Inspect only on the local engine">{tpl.note}</Alert>
-        )}
-
-        {runResult && (
-          <Container header={<Header variant="h2">Run result</Header>}>
-            <SpaceBetween size="m">
-              <StatusIndicator type={stepStatus(runResult.status)}>{runResult.status}</StatusIndicator>
-              {runResult.error && <Alert type="error">{runResult.cause || runResult.error}</Alert>}
-              {(runResult.steps || []).map(s => (
-                <Box key={s.name}>
-                  <StatusIndicator type={stepStatus(s.status)}>
-                    <Box variant="span" fontWeight="bold">{s.name}</Box> <Box variant="span" color="text-status-inactive">({s.type})</Box>
-                  </StatusIndicator>
-                </Box>
-              ))}
-              {runResult.output && (
-                <ExpandableSection headerText="Output" variant="container">
-                  <JsonCode code={JSON.stringify(JSON.parse(runResult.output), null, 2)} />
-                </ExpandableSection>
-              )}
-            </SpaceBetween>
+        <ColumnLayout columns={2}>
+          <Container header={<Header variant="h2" description="Edit, then Run">Input</Header>}>
+            <Textarea value={inputText} onChange={({ detail }) => setInputText(detail.value)} rows={12} spellcheck={false} />
           </Container>
-        )}
-
-        <ColumnLayout columns={3}>
-          <Container>
-            <Box variant="awsui-key-label">Status</Box>
-            <StatusIndicator type="success">{machineDetail.status}</StatusIndicator>
-          </Container>
-          <Container>
-            <Box variant="awsui-key-label">Start state</Box>
-            <Box variant="awsui-value-large">{definition.StartAt}</Box>
-          </Container>
-          <Container>
-            <Box variant="awsui-key-label">Total states</Box>
-            <Box variant="awsui-value-large">{stateList.length}</Box>
+          <Container header={
+            <Header variant="h2" actions={runResult && <StatusIndicator type={statusType(runResult.status)}>{runResult.status}</StatusIndicator>}>
+              Output
+            </Header>
+          }>
+            {runResult?.error && <Alert type="error">{runResult.cause || runResult.error}</Alert>}
+            {outputText
+              ? <JsonCode code={outputText} />
+              : <Box color="text-status-inactive" padding={{ vertical: 'l' }} textAlign="center">Run the state machine to see output.</Box>}
           </Container>
         </ColumnLayout>
 
-        <Tabs tabs={[
-          {
-            id: 'definition',
-            label: 'Definition',
-            content: (
-              <SpaceBetween size="m">
-                <Table
-                  header={<Header variant="h2">States</Header>}
-                  items={stateList}
-                  columnDefinitions={[
-                    { id: 'name', header: 'State', cell: item => <Box fontWeight="bold">{item.name}</Box> },
-                    { id: 'type', header: 'Type', cell: item => (
-                      <StatusIndicator type={
-                        item.type === 'Task' ? 'info' :
-                        item.type === 'Choice' ? 'warning' :
-                        item.type === 'Pass' ? 'success' :
-                        item.type === 'Succeed' ? 'success' :
-                        item.type === 'Fail' ? 'error' : 'info'
-                      }>{item.type}</StatusIndicator>
-                    )},
-                    { id: 'next', header: 'Next', cell: item => item.next },
-                    { id: 'comment', header: 'Comment', cell: item => item.comment },
-                  ]}
-                />
-                <ExpandableSection headerText="ASL JSON" variant="container">
-                  <JsonCode code={JSON.stringify(definition, null, 2)} />
-                </ExpandableSection>
-              </SpaceBetween>
-            ),
-          },
-          {
-            id: 'executions',
-            label: `Executions (${executions.length})`,
-            content: (
-              <Table
-                header={<Header variant="h2">Executions</Header>}
-                items={executions}
-                columnDefinitions={[
-                  { id: 'name', header: 'Name', cell: item => item.name },
-                  { id: 'status', header: 'Status', cell: item => (
-                    <StatusIndicator type={item.status === 'SUCCEEDED' ? 'success' : item.status === 'RUNNING' ? 'in-progress' : 'error'}>
-                      {item.status}
-                    </StatusIndicator>
-                  )},
-                  { id: 'started', header: 'Started', cell: item => item.startDate },
-                ]}
-                empty={<Box textAlign="center">No executions yet.</Box>}
-              />
-            ),
-          },
-          {
-            id: 'flow',
-            label: 'Flow',
-            content: (
-              <Container>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: 16 }}>
-                  {stateList.map((state, i) => (
-                    <div key={state.name} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <div style={{
-                        border: `2px solid ${state.type === 'Choice' ? '#ff9900' : state.type === 'Task' ? '#0073bb' : state.type === 'Succeed' ? '#1d8102' : '#545b64'}`,
-                        borderRadius: state.type === 'Choice' ? 0 : 8,
-                        transform: state.type === 'Choice' ? 'rotate(45deg)' : 'none',
-                        padding: state.type === 'Choice' ? 16 : '8px 24px',
-                        background: '#fff',
-                        minWidth: state.type === 'Choice' ? 0 : 160,
-                        textAlign: 'center',
-                      }}>
-                        <span style={{ transform: state.type === 'Choice' ? 'rotate(-45deg)' : 'none', display: 'block', fontSize: 13 }}>
-                          {state.name}
-                        </span>
-                      </div>
-                      {i < stateList.length - 1 && (
-                        <div style={{ width: 2, height: 24, background: '#545b64' }} />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </Container>
-            ),
-          },
-        ]} />
+        <Container header={<Header variant="h2" description="States colour by run status; live runs animate the active edge">Visual flow</Header>}>
+          <FlowGraph definition={definition} statusByState={statusByState} />
+        </Container>
+
+        <Table
+          header={<Header variant="h2" counter={`(${executions.length})`}>Execution runs</Header>}
+          items={executions}
+          columnDefinitions={[
+            { id: 'name', header: 'Name', cell: i => <Box variant="code" fontSize="body-s">{i.name}</Box> },
+            { id: 'status', header: 'Status', cell: i => <StatusIndicator type={statusType(i.status)}>{i.status}</StatusIndicator> },
+            { id: 'started', header: 'Started', cell: i => i.startDate },
+          ]}
+          empty={<Box textAlign="center">No runs yet.</Box>}
+        />
+
+        <ExpandableSection headerText="ASL definition (JSON)">
+          <JsonCode code={JSON.stringify(definition, null, 2)} />
+        </ExpandableSection>
       </SpaceBetween>
     )
   }
 
+  // -- List view ---------------------------------------------------------------------
   return (
     <SpaceBetween size="l">
       <Header
@@ -282,51 +187,32 @@ export default function StepFunctionsPage() {
         loading={loading}
         items={machines}
         columnDefinitions={[
-          { id: 'name', header: 'Name', cell: item => (
-            <Button variant="link" onClick={() => openMachine(item.stateMachineArn)}>{item.name}</Button>
-          )},
+          { id: 'name', header: 'Name', cell: item => <Button variant="link" onClick={() => openMachine(item.stateMachineArn, item.name)}>{item.name}</Button> },
           { id: 'arn', header: 'ARN', cell: item => <Box variant="code" fontSize="body-s">{item.stateMachineArn}</Box> },
           { id: 'created', header: 'Created', cell: item => item.creationDate },
         ]}
         empty={<Box textAlign="center">No state machines yet. Create one from a template.</Box>}
       />
 
-      <Modal
-        visible={showCreate}
-        onDismiss={() => setShowCreate(false)}
-        header="Create a state machine from a template"
-        size="large"
-      >
+      <Modal visible={showCreate} onDismiss={() => setShowCreate(false)} header="Create a state machine from a template" size="large">
         <SpaceBetween size="m">
           <Box color="text-body-secondary">
             ML-focused credit-risk workflows adapted from aws-samples/credit-risk-modeling-on-aws.
-            Runnable templates execute locally via Step Functions Local mock mode.
+            Mock templates execute via Step Functions Local mock mode; the Bedrock template runs live against your local model.
           </Box>
           {templates.map(t => (
             <Container
               key={t.id}
               header={
-                <Header
-                  variant="h3"
-                  actions={
-                    <Button
-                      variant="primary"
-                      loading={creating === t.id}
-                      onClick={() => createFromTemplate(t.id)}
-                    >
-                      Create
-                    </Button>
-                  }
-                >
+                <Header variant="h3"
+                  actions={<Button variant="primary" loading={creating === t.id} onClick={() => createFromTemplate(t.id)}>Create</Button>}>
                   {t.name}{' '}
-                  {t.runnable
-                    ? <Badge color="green">runnable</Badge>
-                    : <Badge color="grey">inspect only</Badge>}
+                  {t.execMode === 'live' ? <Badge color="blue">live</Badge> : <Badge color="green">mock-runnable</Badge>}
                 </Header>
               }
             >
               <Box>{t.comment}</Box>
-              {!t.runnable && t.note && <Box color="text-status-inactive" fontSize="body-s" padding={{ top: 'xs' }}>{t.note}</Box>}
+              {t.note && <Box color="text-status-inactive" fontSize="body-s" padding={{ top: 'xs' }}>{t.note}</Box>}
             </Container>
           ))}
         </SpaceBetween>
