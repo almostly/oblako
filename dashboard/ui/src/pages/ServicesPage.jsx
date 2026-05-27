@@ -5,7 +5,6 @@ import Box from '@cloudscape-design/components/box'
 import SpaceBetween from '@cloudscape-design/components/space-between'
 import StatusIndicator from '@cloudscape-design/components/status-indicator'
 import Container from '@cloudscape-design/components/container'
-import ColumnLayout from '@cloudscape-design/components/column-layout'
 import Button from '@cloudscape-design/components/button'
 
 const API = 'http://localhost:8000'
@@ -37,21 +36,21 @@ export default function ServicesPage() {
         oblako Console
       </Header>
 
-      <ColumnLayout columns={3}>
-        <Container>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'stretch' }}>
+        <Container fitHeight>
           <Box variant="awsui-key-label">Services running</Box>
           <Box variant="awsui-value-large">{running} / {total}</Box>
         </Container>
-        <Container>
+        <Container fitHeight>
           <Box variant="awsui-key-label">Region / account</Box>
           <Box variant="awsui-value-large">{cfg.region}</Box>
           <Box color="text-status-inactive" fontSize="body-s">{cfg.accountId}</Box>
         </Container>
-        <Container>
+        <Container fitHeight>
           <Box variant="awsui-key-label">Version</Box>
           <Box variant="awsui-value-large">0.1.0</Box>
         </Container>
-      </ColumnLayout>
+      </div>
 
       <Table
         header={<Header variant="h2">Services</Header>}
