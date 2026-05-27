@@ -17,15 +17,39 @@ import os
 DEFAULT_REGION = "us-east-1"
 DEFAULT_ACCOUNT_ID = "123456789012"
 
+# Common AWS regions offered in the dashboard region picker.
+REGIONS = [
+    "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+    "eu-west-1", "eu-west-2", "eu-central-1",
+    "ap-south-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1",
+    "sa-east-1", "ca-central-1",
+]
+
+# Runtime overrides (set by the dashboard region picker); take precedence over env.
+_region_override: str | None = None
+_account_override: str | None = None
+
 
 def region() -> str:
-    """Return the configured AWS region from OBLAKO_REGION, default us-east-1."""
-    return os.environ.get("OBLAKO_REGION") or DEFAULT_REGION
+    """Return the active AWS region: runtime override, then OBLAKO_REGION, then default."""
+    return _region_override or os.environ.get("OBLAKO_REGION") or DEFAULT_REGION
 
 
 def account_id() -> str:
-    """Return the configured AWS account id (OBLAKO_ACCOUNT_ID, default 123456789012)."""
-    return os.environ.get("OBLAKO_ACCOUNT_ID") or DEFAULT_ACCOUNT_ID
+    """Return the active AWS account id: runtime override, then env, then default."""
+    return _account_override or os.environ.get("OBLAKO_ACCOUNT_ID") or DEFAULT_ACCOUNT_ID
+
+
+def set_region(value: str | None) -> None:
+    """Set (or clear, with None) the runtime region override."""
+    global _region_override
+    _region_override = value or None
+
+
+def set_account(value: str | None) -> None:
+    """Set (or clear, with None) the runtime account override."""
+    global _account_override
+    _account_override = value or None
 
 
 def arn(service: str, resource: str, *, region_scoped: bool = True) -> str:

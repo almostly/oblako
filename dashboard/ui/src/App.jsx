@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import AppLayout from '@cloudscape-design/components/app-layout'
 import SideNavigation from '@cloudscape-design/components/side-navigation'
 import TopNavigation from '@cloudscape-design/components/top-navigation'
@@ -44,9 +44,27 @@ const PAGES = {
   '#iam': IamPage,
 }
 
+const API = 'http://localhost:8000'
+
 export default function App() {
   const [activePage, setActivePage] = useState('#services')
+  const [region, setRegion] = useState('us-east-1')
+  const [regions, setRegions] = useState(['us-east-1'])
   const PageComponent = PAGES[activePage] || ServicesPage
+
+  useEffect(() => {
+    fetch(`${API}/api/config`).then(r => r.json())
+      .then(c => { setRegion(c.region); setRegions(c.regions || [c.region]) })
+      .catch(() => {})
+  }, [])
+
+  const changeRegion = (next) => {
+    if (next === region) return
+    setRegion(next)
+    fetch(`${API}/api/config`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ region: next }),
+    }).then(() => window.location.reload())  // reload so every page refetches for the new region
+  }
 
   return (
     <>
@@ -61,6 +79,14 @@ export default function App() {
             },
           }}
           utilities={[
+            {
+              type: 'menu-dropdown',
+              text: region,
+              ariaLabel: 'Region',
+              title: 'Region',
+              items: regions.map(r => ({ id: r, text: r })),
+              onItemClick: ({ detail }) => changeRegion(detail.id),
+            },
             { type: 'button', text: 'v0.1.0' },
           ]}
         />

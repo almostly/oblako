@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from oblako.services.platform import Oblako
 from oblako.services import sfn_templates
+from oblako import config
 
 oblako = Oblako()
 DIST_DIR = Path(__file__).parent / "ui" / "dist"
@@ -41,6 +42,25 @@ app.add_middleware(
 # -----------------------------------------------------------------------------------------------
 # Services
 # -----------------------------------------------------------------------------------------------
+@app.get("/api/config")
+def get_config():
+    """Return the active region + account and the selectable regions."""
+    return {"region": config.region(), "accountId": config.account_id(), "regions": config.REGIONS}
+
+
+@app.post("/api/config")
+def set_config(body: dict):
+    """Set the active region (and optionally account); live clients pick it up."""
+    if body.get("region"):
+        config.set_region(body["region"])
+        # Services that cached region at construction follow the new selection.
+        for svc in (oblako.bedrock, oblako.redshift, oblako.rds, oblako.cloudformation):
+            svc.region = config.region()
+    if body.get("accountId"):
+        config.set_account(body["accountId"])
+    return {"region": config.region(), "accountId": config.account_id()}
+
+
 @app.get("/api/services")
 def get_services():
     """Service status overview."""
