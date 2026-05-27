@@ -21,7 +21,7 @@ def s3():
 
 @pytest.fixture
 def bucket(s3):
-    name = "test-oblako-ml"
+    name = "test-oblako"
     try:
         s3.create_bucket(Bucket=name)
     except s3.exceptions.BucketAlreadyOwnedByYou:

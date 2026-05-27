@@ -10,7 +10,7 @@ Prerequisites:
 import json
 import time
 
-from oblako_ml.services import StepFunctionsService
+from oblako.services import StepFunctionsService
 
 sf = StepFunctionsService()
 sfn = sf.get_client()

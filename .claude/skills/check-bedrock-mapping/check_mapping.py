@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check oblako's Bedrock -> OpenRouter model map against the LIVE OpenRouter catalog.
 
-`OPENROUTER_MODEL_MAP` (oblako_ml/bedrock/models.py) is pinned to OpenRouter's
+`OPENROUTER_MODEL_MAP` (oblako/bedrock/models.py) is pinned to OpenRouter's
 catalog, which drifts as models are added/retired. This flags any mapped slug
 that OpenRouter no longer offers and suggests same-provider alternatives so the
 map can be refreshed. Exits non-zero if anything is stale (CI-friendly).
@@ -13,7 +13,7 @@ import json
 import sys
 import urllib.request
 
-from oblako_ml.bedrock.models import OPENROUTER_MODEL_MAP
+from oblako.bedrock.models import OPENROUTER_MODEL_MAP
 
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 
@@ -50,7 +50,7 @@ def main() -> int:
         print(f"  {slug}")
         print(f"      used by Bedrock id(s): {bedrock_ids}")
         print(f"      same-provider alternatives: {alternatives}")
-    print("\nUpdate OPENROUTER_MODEL_MAP in oblako_ml/bedrock/models.py, then re-run.")
+    print("\nUpdate OPENROUTER_MODEL_MAP in oblako/bedrock/models.py, then re-run.")
     return 1
 
 

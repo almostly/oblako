@@ -1,5 +1,5 @@
 {
-  "Comment": "Bedrock prompt chaining - oblako-ml local version. Three prompts chained sequentially, each building on the previous response.",
+  "Comment": "Bedrock prompt chaining - oblako local version. Three prompts chained sequentially, each building on the previous response.",
   "StartAt": "Prompt1",
   "States": {
     "Prompt1": {

@@ -11,9 +11,9 @@ import time
 import boto3
 import pytest
 
-from oblako_ml.bedrock.ollama_client import OllamaClient
-from oblako_ml.bedrock_runtime import start_in_thread
-from oblako_ml.services import S3ProxyService
+from oblako.bedrock.ollama_client import OllamaClient
+from oblako.bedrock_runtime import start_in_thread
+from oblako.services import S3ProxyService
 
 CREDS = dict(region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test")
 

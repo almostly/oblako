@@ -8,7 +8,7 @@ Prerequisites:
 """
 
 import json
-from oblako_ml.bedrock.adapter import BedrockAdapter
+from oblako.bedrock.adapter import BedrockAdapter
 
 adapter = BedrockAdapter()
 

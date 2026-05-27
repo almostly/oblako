@@ -30,7 +30,7 @@ class PortMapping:
 
 @dataclass
 class Service:
-    """Base class for all oblako-ml services."""
+    """Base class for all oblako services."""
 
     name: str
     image: str

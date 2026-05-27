@@ -5,7 +5,7 @@ local mode (instance_type='local'): a REAL Docker container trains on local
 data (file://) and writes a model artifact. No S3, no ECR, no AWS calls.
 
 Prerequisites:
-    pip install 'oblako-ml[sagemaker]'
+    pip install 'oblako[sagemaker]'
     Docker running
 """
 
@@ -18,7 +18,7 @@ import tempfile
 
 from sagemaker.estimator import Estimator
 
-from oblako_ml.services import SageMakerService
+from oblako.services import SageMakerService
 
 # Local mode still constructs a boto3 session; give it a region + dummy creds.
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")

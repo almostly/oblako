@@ -1,15 +1,15 @@
-# oblako-ml
+# oblako
 
 [![CI](https://github.com/almostly/oblako/actions/workflows/ci.yml/badge.svg)](https://github.com/almostly/oblako/actions/workflows/ci.yml)
 
-Local AWS ML platform. Run Bedrock, SageMaker, Step Functions, and more on your laptop, no cloud required.
+Local AWS platform. Run Bedrock, SageMaker, Step Functions, and more on your laptop, no cloud required.
 
-Unlike LocalStack, oblako-ml wires together **real local modes** of AWS services and open-source alternatives:
+Unlike LocalStack, oblako wires together **real local modes** of AWS services and open-source alternatives:
 
 | AWS Service | Local replacement | How |
 |---|---|---|
 | Bedrock (LLMs) | Ollama (or OpenRouter) | boto3 `bedrock-runtime` invoke/converse; OpenRouter backend hits real models with your key |
-| Bedrock (control plane) | oblako-ml server | boto3 `bedrock`: foundation-model catalog + batch model-invocation jobs |
+| Bedrock (control plane) | oblako server | boto3 `bedrock`: foundation-model catalog + batch model-invocation jobs |
 | Bedrock (embeddings) | Ollama + nomic-embed-text | Vector embeddings for RAG |
 | Bedrock Agents | Ollama + SAM local | Agent loop with local tool calls |
 | Bedrock AgentCore (Runtime) | bedrock-agentcore SDK | Local agent on the `/invocations` + `/ping` contract |
@@ -22,13 +22,13 @@ Unlike LocalStack, oblako-ml wires together **real local modes** of AWS services
 | DynamoDB | dynamodb-local | Official AWS Docker image |
 | Redshift (storage) | pgredshift | PostgreSQL 10 + Redshift system tables, `SET query_group`, and UDFs |
 | Redshift (management API) | moto | boto3 `redshift` control plane: clusters, nodes, endpoints |
-| Redshift Data API | oblako-ml server | boto3 `redshift-data`, executes real SQL against pgredshift |
+| Redshift Data API | oblako server | boto3 `redshift-data`, executes real SQL against pgredshift |
 | Redshift ML | SageMaker local + plpython3u | `CREATE MODEL` trains in a real container; predict UDF runs in-DB |
 | RDS | moto + PostgreSQL | boto3 `rds` control plane (instances) + real Postgres engine |
 | Aurora | moto + PostgreSQL | boto3 `rds` clusters (writer/reader endpoints) + real Postgres engine |
-| RDS Data API | oblako-ml server | boto3 `rds-data`: synchronous SQL + transactions against the engine |
-| CloudFormation | oblako-ml server | boto3 `cloudformation` (+ `aws cloudformation deploy` / `sam deploy`): templates provision **real** oblako resources |
-| AppConfig | oblako-ml agent | Python reimplementation |
+| RDS Data API | oblako server | boto3 `rds-data`: synchronous SQL + transactions against the engine |
+| CloudFormation | oblako server | boto3 `cloudformation` (+ `aws cloudformation deploy` / `sam deploy`): templates provision **real** oblako resources |
+| AppConfig | oblako agent | Python reimplementation |
 
 ## Quick start
 
@@ -113,9 +113,9 @@ The OpenRouter backend lets you test Bedrock-style code (`invoke_model`/`convers
 The boto3-compatible way — a real `bedrock-runtime` client against the local endpoint (port 8004; `oblako.bedrock.get_client()` auto-starts the server):
 
 ```python
-from oblako_ml.services import BedrockService
+from oblako.services import BedrockService
 
-br = BedrockService().get_client()   # boto3.client("bedrock-runtime")
+br = BedrockService().get_client()  # boto3.client("bedrock-runtime")
 
 resp = br.converse(
     modelId="qwen2.5:0.5b",
@@ -125,13 +125,16 @@ resp = br.converse(
 print(resp["output"]["message"]["content"][0]["text"])
 
 import json
+
 resp = br.invoke_model(
     modelId="anthropic.claude-3-haiku-20240307-v1:0",
-    body=json.dumps({
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 256,
-        "messages": [{"role": "user", "content": "Hello"}],
-    }),
+    body=json.dumps(
+        {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 256,
+            "messages": [{"role": "user", "content": "Hello"}],
+        }
+    ),
 )
 print(json.loads(resp["body"].read())["content"][0]["text"])
 ```
@@ -139,7 +142,7 @@ print(json.loads(resp["body"].read())["content"][0]["text"])
 Or call the translation layer (`BedrockAdapter`) directly, without the HTTP server:
 
 ```python
-from oblako_ml.bedrock.adapter import BedrockAdapter
+from oblako.bedrock.adapter import BedrockAdapter
 
 adapter = BedrockAdapter()
 result = adapter.converse(
@@ -153,7 +156,7 @@ print(result["output"]["message"]["content"][0]["text"])
 Run the Bedrock Runtime server standalone (for boto3 clients in other processes):
 
 ```bash
-oblako bedrock-runtime          # serves boto3 'bedrock-runtime' (+ 'bedrock' control plane) on :8004
+oblako bedrock-runtime  # serves boto3 'bedrock-runtime' (+ 'bedrock' control plane) on :8004
 ```
 
 ### Bedrock control plane (foundation models + batch inference)
@@ -161,12 +164,14 @@ oblako bedrock-runtime          # serves boto3 'bedrock-runtime' (+ 'bedrock' co
 The same server also speaks the `bedrock` control plane. `oblako.bedrock.get_control_client()` returns a boto3 `bedrock` client.
 
 ```python
-bedrock = BedrockService().get_control_client()   # boto3.client("bedrock")
+bedrock = BedrockService().get_control_client()  # boto3.client("bedrock")
 
 # Foundation-model catalog (real Bedrock IDs + your locally-available Ollama models)
 for m in bedrock.list_foundation_models()["modelSummaries"]:
     print(m["modelId"], m["providerName"])
-bedrock.get_foundation_model(modelIdentifier="anthropic.claude-3-5-sonnet-20241022-v2:0")
+bedrock.get_foundation_model(
+    modelIdentifier="anthropic.claude-3-5-sonnet-20241022-v2:0"
+)
 
 # Pass a model directly with the `ollama.` prefix (or just the raw name)
 br.converse(modelId="ollama.qwen2.5:0.5b", messages=[...])
@@ -177,39 +182,49 @@ br.converse(modelId="ollama.qwen2.5:0.5b", messages=[...])
 ```python
 # input JSONL: one {"recordId", "modelInput"} per line in s3://bucket/in/
 job = bedrock.create_model_invocation_job(
-    jobName="score-batch", roleArn="arn:aws:iam::000000000000:role/Dummy",
+    jobName="score-batch",
+    roleArn="arn:aws:iam::000000000000:role/Dummy",
     modelId="qwen2.5:0.5b",
     inputDataConfig={"s3InputDataConfig": {"s3Uri": "s3://my-in/in/"}},
     outputDataConfig={"s3OutputDataConfig": {"s3Uri": "s3://my-out/out/"}},
 )
-bedrock.get_model_invocation_job(jobIdentifier=job["jobArn"])["status"]  # Submitted -> InProgress -> Completed
+bedrock.get_model_invocation_job(jobIdentifier=job["jobArn"])[
+    "status"
+]  # Submitted -> InProgress -> Completed
 # output JSONL ({"recordId","modelInput","modelOutput"}) lands under s3://my-out/out/<jobId>/
 ```
 
 ### Bedrock AgentCore (local runtime)
 
-The AgentCore Runtime contract — `POST /invocations` + `GET /ping` — runs locally with the `bedrock-agentcore` SDK. Write an agent, point it at local Bedrock, and run it offline. Install the extra: `pip install 'oblako-ml[agentcore]'`.
+The AgentCore Runtime contract — `POST /invocations` + `GET /ping` — runs locally with the `bedrock-agentcore` SDK. Write an agent, point it at local Bedrock, and run it offline. Install the extra: `pip install 'oblako[agentcore]'`.
 
 ```python
-# my_agent.py
 import boto3
-from oblako_ml.agentcore import BedrockAgentCoreApp
+from oblako.agentcore import BedrockAgentCoreApp
 
 app = BedrockAgentCoreApp()
-bedrock = boto3.client("bedrock-runtime", endpoint_url="http://localhost:8004",
-                       region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test")
+bedrock = boto3.client(
+    "bedrock-runtime",
+    endpoint_url="http://localhost:8004",
+    region_name="us-east-1",
+    aws_access_key_id="test",
+    aws_secret_access_key="test",
+)
+
 
 @app.entrypoint
 def handler(payload):
-    r = bedrock.converse(modelId="qwen2.5:0.5b",
-        messages=[{"role": "user", "content": [{"text": payload["prompt"]}]}])
+    r = bedrock.converse(
+        modelId="qwen2.5:0.5b",
+        messages=[{"role": "user", "content": [{"text": payload["prompt"]}]}],
+    )
     return {"reply": r["output"]["message"]["content"][0]["text"]}
 ```
 
 ```bash
-oblako bedrock-runtime &                       # local Bedrock on :8004
-oblako agentcore run my_agent.py               # serves the agent on :8080
-oblako agentcore invoke '{"prompt": "Hi"}'     # POST /invocations
+oblako bedrock-runtime &  # local Bedrock on :8004
+oblako agentcore run my_agent.py  # serves the agent on :8080
+oblako agentcore invoke '{"prompt": "Hi"}'  # POST /invocations
 ```
 
 See `examples/08_agentcore_agent.py`. (Only the AgentCore *Runtime* is local; Gateway/Memory/Identity remain managed services.)
@@ -219,29 +234,34 @@ See `examples/08_agentcore_agent.py`. (Only the AgentCore *Runtime* is local; Ga
 SageMaker local mode (`instance_type="local"`) launches a **real Docker container** that trains your code — the SDK even generates a throwaway `docker-compose.yml` per job. It's not a long-running service, so it isn't in `docker-compose.yml`; `SageMakerService` provides helpers (build images, list/cleanup `sagemaker-local-*` containers) and a `LocalSession` factory. Install the extra:
 
 ```bash
-pip install 'oblako-ml[sagemaker]'    # pins the v2 SDK (v3 dropped local mode)
+pip install 'oblako[sagemaker]'    # pins the v2 SDK (v3 dropped local mode)
 ```
 
 Fully local — no S3, no ECR — using a bring-your-own-container image and `file://` paths:
 
 ```python
 from sagemaker.estimator import Estimator
-from oblako_ml.services import SageMakerService
+from oblako.services import SageMakerService
 
 sm = SageMakerService()
-sm.build_image(path="examples/sagemaker", tag="oblako-sagemaker-train:latest")  # build locally
+sm.build_image(
+    path="examples/sagemaker", tag="oblako-sagemaker-train:latest"
+)  # build locally
 
 estimator = Estimator(
     image_uri="oblako-sagemaker-train:latest",
     role="arn:aws:iam::000000000000:role/dummy",
-    instance_count=1, instance_type="local",
+    instance_count=1,
+    instance_type="local",
     sagemaker_session=sm.get_session(),
     output_path="file:///tmp/sm-out",
 )
-estimator.fit({"train": "file:///tmp/sm-train"})   # real container trains; writes model.tar.gz
+estimator.fit(
+    {"train": "file:///tmp/sm-train"}
+)  # real container trains; writes model.tar.gz
 
-sm.list_training_containers()   # docker-py view of sagemaker-local-* containers
-sm.cleanup()                    # remove stopped ones
+sm.list_training_containers()  # docker-py view of sagemaker-local-* containers
+sm.cleanup()  # remove stopped ones
 ```
 
 See `examples/11_sagemaker_local.py` (end-to-end: builds the image, trains `y = 2x + 1` in a real container, reads back the model artifact).
@@ -265,8 +285,13 @@ DynamoDB Local runs on port 8001:
 ```python
 import boto3
 
-ddb = boto3.client("dynamodb", endpoint_url="http://localhost:8001",
-    aws_access_key_id="test", aws_secret_access_key="test", region_name="us-east-1")
+ddb = boto3.client(
+    "dynamodb",
+    endpoint_url="http://localhost:8001",
+    aws_access_key_id="test",
+    aws_secret_access_key="test",
+    region_name="us-east-1",
+)
 ddb.create_table(
     TableName="MyTable",
     KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
@@ -285,41 +310,55 @@ Redshift comes in three layers, all local and boto3-compatible:
 import psycopg2
 
 conn = psycopg2.connect(
-    host="localhost", port=5439,
-    user="oblako", password="oblako", dbname="oblako",
+    host="localhost",
+    port=5439,
+    user="oblako",
+    password="oblako",
+    dbname="oblako",
 )
 ```
 
 **2. Management API (control plane).** Clusters, nodes, endpoints, snapshots — served by a local `motoserver/moto` container on port 5500. Use a real boto3 `redshift` client:
 
 ```python
-from oblako_ml.services import RedshiftService
+from oblako.services import RedshiftService
 
-redshift = RedshiftService().get_client()   # boto3.client("redshift")
+redshift = RedshiftService().get_client()  # boto3.client("redshift")
 redshift.create_cluster(
-    ClusterIdentifier="credit-dw", NodeType="ra3.xlplus", NumberOfNodes=2,
-    MasterUsername="oblako", MasterUserPassword="Oblako123", DBName="oblako",
+    ClusterIdentifier="credit-dw",
+    NodeType="ra3.xlplus",
+    NumberOfNodes=2,
+    MasterUsername="oblako",
+    MasterUserPassword="Oblako123",
+    DBName="oblako",
 )
-cluster = redshift.describe_clusters(ClusterIdentifier="credit-dw")["Clusters"][0]
+cluster = redshift.describe_clusters(ClusterIdentifier="credit-dw")["Clusters"][
+    0
+]
 print(cluster["NumberOfNodes"], cluster["NodeType"], cluster["ClusterStatus"])
 ```
 
 **3. Redshift Data API (data plane).** Run SQL over HTTP — but unlike moto's mock, statements execute **for real** against the pgredshift container and return real rows. Served on port 8002. Use a real boto3 `redshift-data` client:
 
 ```python
-rd = RedshiftService().get_data_client()     # boto3.client("redshift-data"); auto-starts the server
+rd = (
+    RedshiftService().get_data_client()
+)  # boto3.client("redshift-data"); auto-starts the server
 
 q = rd.execute_statement(
-    ClusterIdentifier="credit-dw", Database="oblako",
+    ClusterIdentifier="credit-dw",
+    Database="oblako",
     Sql="SELECT segment, count(*) FROM customer_scores GROUP BY segment",
 )
-rd.describe_statement(Id=q["Id"])["Status"]   # "FINISHED"
+rd.describe_statement(Id=q["Id"])["Status"]  # "FINISHED"
 rd.get_statement_result(Id=q["Id"])["Records"]  # real rows in Field format
 
 # named parameters, like the real API
-rd.execute_statement(Database="oblako",
+rd.execute_statement(
+    Database="oblako",
     Sql="SELECT * FROM customer_scores WHERE segment = :seg",
-    Parameters=[{"name": "seg", "value": "prime"}])
+    Parameters=[{"name": "seg", "value": "prime"}],
+)
 ```
 
 For an external process (not the one that called `get_data_client`), run the Data API server standalone:
@@ -330,7 +369,7 @@ oblako redshift-data            # serves boto3 'redshift-data' on http://localho
 
 ### Redshift ML (CREATE MODEL)
 
-Real `CREATE MODEL` SQL, fully local: the `redshift-data` server intercepts it, exports the `FROM (SELECT …)` rows, **trains in a real SageMaker local container** (scikit-learn), stores the coefficients, and generates a **`plpython3u` prediction UDF** in pgredshift. Then `SELECT my_predict(...)` is real in-database inference. Needs `pip install 'oblako-ml[sagemaker]'` + Docker.
+Real `CREATE MODEL` SQL, fully local: the `redshift-data` server intercepts it, exports the `FROM (SELECT …)` rows, **trains in a real SageMaker local container** (scikit-learn), stores the coefficients, and generates a **`plpython3u` prediction UDF** in pgredshift. Then `SELECT my_predict(...)` is real in-database inference. Needs `pip install 'oblako[sagemaker]'` + Docker.
 
 ```sql
 CREATE MODEL price_model
@@ -345,17 +384,17 @@ Binary **and multiclass** classification work too — `PROBLEM_TYPE binary_class
 
 ```sql
 CREATE MODEL species_model
-  FROM (SELECT petal, sepal, species FROM plants)   -- species in {0, 1, 2}
-  TARGET species FUNCTION predict_species
-  PROBLEM_TYPE multiclass_classification;            -- or just omit it (auto-detected)
+FROM (SELECT petal, sepal, species FROM plants)  -- species in {0, 1, 2}
+TARGET species FUNCTION predict_species
+PROBLEM_TYPE multiclass_classification;  -- or just omit it (auto-detected)
 ```
 
 **Autopilot** (`AUTO ON`, the default when no `MODEL_TYPE` is given) trains all three model types, scores each on a holdout split, and keeps the best; `MODEL_TYPE` (or `AUTO OFF`) pins a single type:
 
 ```sql
 CREATE MODEL best_model
-  FROM (SELECT sqft, beds, price FROM homes)
-  TARGET price FUNCTION predict_best;   -- trains LINEAR_LEARNER + MLP + XGBOOST, keeps the winner
+FROM (SELECT sqft, beds, price FROM homes)
+TARGET price FUNCTION predict_best;  -- trains LINEAR_LEARNER + MLP + XGBOOST, keeps the winner
 ```
 
 All three of Redshift ML's supervised model types work — for regression, binary, and multiclass — trained in the SageMaker container, exported to a pure-Python UDF (pgredshift's `plpython3u` has no numpy/sklearn/xgboost):
@@ -373,67 +412,117 @@ XGBoost accepts Redshift's `AUTO OFF MODEL_TYPE xgboost OBJECTIVE 'reg:squareder
 Same shape as Redshift: a real PostgreSQL engine (port 5432) for the data plane, and moto for the `rds` control plane. `oblako.rds` (alias `oblako.aurora`) gives you both — real SQL behavior, simulated cluster/instance topology.
 
 ```python
-from oblako_ml.services import RdsService
+from oblako.services import RdsService
 
 svc = RdsService()
-rds = svc.get_client()           # boto3.client("rds")
+rds = svc.get_client()  # boto3.client("rds")
 
 # RDS: a standalone instance
 rds.create_db_instance(
-    DBInstanceIdentifier="app-db", Engine="postgres", DBInstanceClass="db.t3.micro",
-    MasterUsername="oblako", MasterUserPassword="Oblako123", AllocatedStorage=20, DBName="oblako",
+    DBInstanceIdentifier="app-db",
+    Engine="postgres",
+    DBInstanceClass="db.t3.micro",
+    MasterUsername="oblako",
+    MasterUserPassword="Oblako123",
+    AllocatedStorage=20,
+    DBName="oblako",
 )
-rds.describe_db_instances(DBInstanceIdentifier="app-db")["DBInstances"][0]["Endpoint"]
+rds.describe_db_instances(DBInstanceIdentifier="app-db")["DBInstances"][0][
+    "Endpoint"
+]
 
 # Aurora: a cluster with a writer (writer + reader endpoints, members)
 rds.create_db_cluster(
-    DBClusterIdentifier="analytics", Engine="aurora-postgresql",
-    MasterUsername="oblako", MasterUserPassword="Oblako123", DatabaseName="oblako",
+    DBClusterIdentifier="analytics",
+    Engine="aurora-postgresql",
+    MasterUsername="oblako",
+    MasterUserPassword="Oblako123",
+    DatabaseName="oblako",
 )
 rds.create_db_instance(
-    DBInstanceIdentifier="analytics-1", DBClusterIdentifier="analytics",
-    Engine="aurora-postgresql", DBInstanceClass="db.r6g.large",
+    DBInstanceIdentifier="analytics-1",
+    DBClusterIdentifier="analytics",
+    Engine="aurora-postgresql",
+    DBInstanceClass="db.r6g.large",
 )
-rds.describe_db_clusters(DBClusterIdentifier="analytics")["DBClusters"][0]["ReaderEndpoint"]
+rds.describe_db_clusters(DBClusterIdentifier="analytics")["DBClusters"][0][
+    "ReaderEndpoint"
+]
 
 # Data plane: real SQL against the engine
-conn = svc.connect()             # psycopg2 connection (port 5432)
+conn = svc.connect()  # psycopg2 connection (port 5432)
 ```
 
 **RDS Data API (`rds-data`)** — a real boto3 `rds-data` client (port 8006; `get_data_client()` auto-starts the server). Unlike `redshift-data` it's **synchronous** (ExecuteStatement returns rows directly) and supports **transactions**:
 
 ```python
-rd = svc.get_data_client()       # boto3.client("rds-data")
-arn = dict(resourceArn="arn:aws:rds:us-east-1:0:cluster:analytics",
-           secretArn="arn:aws:secretsmanager:us-east-1:0:secret:db", database="oblako")
+rd = svc.get_data_client()  # boto3.client("rds-data")
+arn = dict(
+    resourceArn="arn:aws:rds:us-east-1:0:cluster:analytics",
+    secretArn="arn:aws:secretsmanager:us-east-1:0:secret:db",
+    database="oblako",
+)
 
-r = rd.execute_statement(sql="SELECT id, name FROM widgets ORDER BY id",
-                         includeResultMetadata=True, **arn)
-r["records"]            # real rows in Field format, returned immediately
+r = rd.execute_statement(
+    sql="SELECT id, name FROM widgets ORDER BY id",
+    includeResultMetadata=True,
+    **arn,
+)
+r["records"]  # real rows in Field format, returned immediately
 
 # transactions
-tx = rd.begin_transaction(resourceArn=arn["resourceArn"], secretArn=arn["secretArn"], database="oblako")["transactionId"]
-rd.execute_statement(sql="INSERT INTO widgets VALUES (:id, :n)",
-    parameters=[{"name": "id", "value": {"longValue": 9}}, {"name": "n", "value": {"stringValue": "z"}}],
-    transactionId=tx, **arn)
-rd.commit_transaction(resourceArn=arn["resourceArn"], secretArn=arn["secretArn"], transactionId=tx)
+tx = rd.begin_transaction(
+    resourceArn=arn["resourceArn"],
+    secretArn=arn["secretArn"],
+    database="oblako",
+)["transactionId"]
+rd.execute_statement(
+    sql="INSERT INTO widgets VALUES (:id, :n)",
+    parameters=[
+        {"name": "id", "value": {"longValue": 9}},
+        {"name": "n", "value": {"stringValue": "z"}},
+    ],
+    transactionId=tx,
+    **arn,
+)
+rd.commit_transaction(
+    resourceArn=arn["resourceArn"], secretArn=arn["secretArn"], transactionId=tx
+)
 ```
 
 See `examples/10_rds_aurora.py`. Run the Data API server standalone with `oblako rds-data`.
 
-**Engine choice.** `RdsService(engine="mysql")` runs a MySQL 8 engine instead of Postgres (`connect()` then uses PyMySQL — install `pip install 'oblako-ml[mysql]'`). The control plane is engine-agnostic (`create_db_cluster(Engine="aurora-mysql")` works), and **`rds-data` supports both engines** — `get_data_client()` runs SQL against whichever engine the `RdsService` uses.
+**Engine choice.** `RdsService(engine="mysql")` runs a MySQL 8 engine instead of Postgres (`connect()` then uses PyMySQL — install `pip install 'oblako[mysql]'`). The control plane is engine-agnostic (`create_db_cluster(Engine="aurora-mysql")` works), and **`rds-data` supports both engines** — `get_data_client()` runs SQL against whichever engine the `RdsService` uses.
 
 **Seeding.** Control-plane objects live in moto (in-memory), so they vanish on restart. `RdsService().seed(...)` recreates them idempotently:
 
 ```python
 RdsService().seed(
-    instances=[{"DBInstanceIdentifier": "app-db", "Engine": "postgres",
-                "DBInstanceClass": "db.t3.micro", "MasterUsername": "oblako",
-                "MasterUserPassword": "Oblako123", "AllocatedStorage": 20}],
-    clusters=[{"DBClusterIdentifier": "analytics", "Engine": "aurora-postgresql",
-               "MasterUsername": "oblako", "MasterUserPassword": "Oblako123",
-               "instances": [{"DBInstanceIdentifier": "analytics-1",
-                              "Engine": "aurora-postgresql", "DBInstanceClass": "db.r6g.large"}]}],
+    instances=[
+        {
+            "DBInstanceIdentifier": "app-db",
+            "Engine": "postgres",
+            "DBInstanceClass": "db.t3.micro",
+            "MasterUsername": "oblako",
+            "MasterUserPassword": "Oblako123",
+            "AllocatedStorage": 20,
+        }
+    ],
+    clusters=[
+        {
+            "DBClusterIdentifier": "analytics",
+            "Engine": "aurora-postgresql",
+            "MasterUsername": "oblako",
+            "MasterUserPassword": "Oblako123",
+            "instances": [
+                {
+                    "DBInstanceIdentifier": "analytics-1",
+                    "Engine": "aurora-postgresql",
+                    "DBInstanceClass": "db.r6g.large",
+                }
+            ],
+        }
+    ],
 )  # safe to re-run; only creates what's missing
 ```
 
@@ -501,7 +590,7 @@ sam deploy --stack-name demo --no-confirm-changeset     # for plain CFN resource
 ```
 
 ```python
-from oblako_ml.services import CloudFormationService
+from oblako.services import CloudFormationService
 
 cfn = CloudFormationService().get_client()   # boto3.client("cloudformation"); auto-starts the server
 cfn.create_change_set(StackName="demo", TemplateBody=template, ChangeSetName="cs", ChangeSetType="CREATE")
@@ -520,27 +609,33 @@ The **SAM transform** (`AWS::Serverless-2016-10-31`) is expanded server-side, so
 All services are also available programmatically:
 
 ```python
-from oblako_ml.services import Oblako
+from oblako.services import Oblako
 
 oblako = Oblako()
-oblako.up()                              # start everything
-oblako.wait_ready()                      # block until healthy
-print(oblako.status())                   # {'bedrock': 'running', ...}
+oblako.up()  # start everything
+oblako.wait_ready()  # block until healthy
+print(oblako.status())  # {'bedrock': 'running', ...}
 
-s3 = oblako.s3.get_client()              # boto3 S3 client
-br = oblako.bedrock.get_client()         # boto3 'bedrock-runtime' (-> Ollama)
-conn = oblako.redshift.connect()         # psycopg2 connection to pgredshift
-rs = oblako.redshift.get_client()        # boto3 'redshift' (clusters/nodes via moto)
-rd = oblako.redshift.get_data_client()   # boto3 'redshift-data' (real SQL execution)
-rds = oblako.rds.get_client()            # boto3 'rds' (RDS instances + Aurora clusters)
-rdb = oblako.rds.get_data_client()       # boto3 'rds-data' (synchronous SQL + transactions)
-dbconn = oblako.rds.connect()            # psycopg2 connection to the RDS/Aurora engine
+s3 = oblako.s3.get_client()  # boto3 S3 client
+br = oblako.bedrock.get_client()  # boto3 'bedrock-runtime' (-> Ollama)
+conn = oblako.redshift.connect()  # psycopg2 connection to pgredshift
+rs = oblako.redshift.get_client()  # boto3 'redshift' (clusters/nodes via moto)
+rd = (
+    oblako.redshift.get_data_client()
+)  # boto3 'redshift-data' (real SQL execution)
+rds = oblako.rds.get_client()  # boto3 'rds' (RDS instances + Aurora clusters)
+rdb = (
+    oblako.rds.get_data_client()
+)  # boto3 'rds-data' (synchronous SQL + transactions)
+dbconn = oblako.rds.connect()  # psycopg2 connection to the RDS/Aurora engine
 sfn = oblako.stepfunctions.get_client()  # boto3 SFN client
-ddb = oblako.dynamodb.get_client()       # boto3 DynamoDB client
-cfn = oblako.cloudformation.get_client() # boto3 'cloudformation' (stacks -> real oblako resources)
+ddb = oblako.dynamodb.get_client()  # boto3 DynamoDB client
+cfn = (
+    oblako.cloudformation.get_client()
+)  # boto3 'cloudformation' (stacks -> real oblako resources)
 oblako.bedrock.pull_model("qwen2.5:0.5b")  # pull a model into the engine
 
-oblako.down()                            # stop everything
+oblako.down()  # stop everything
 ```
 
 ## Docker socket
@@ -550,8 +645,8 @@ SageMaker local mode and Ollama both need Docker. The docker-compose.yml mounts 
 ## Tests
 
 ```bash
-oblako test                # unit tests (no services needed)
-oblako test-integration    # integration tests (requires oblako up)
+oblako test  # unit tests (no services needed)
+oblako test-integration  # integration tests (requires oblako up)
 ```
 
 ## Roadmap

@@ -14,8 +14,8 @@ import pytest
 if not os.environ.get("OPENROUTER_API_KEY"):
     pytest.skip("OPENROUTER_API_KEY not set", allow_module_level=True)
 
-from oblako_ml.bedrock.adapter import BedrockAdapter
-from oblako_ml.bedrock.backends import OpenRouterBackend
+from oblako.bedrock.adapter import BedrockAdapter
+from oblako.bedrock.backends import OpenRouterBackend
 
 
 def test_live_converse():

@@ -10,7 +10,7 @@ Prerequisites:
 import json
 import pickle
 
-from oblako_ml.services import S3ProxyService
+from oblako.services import S3ProxyService
 
 s3_svc = S3ProxyService()
 s3 = s3_svc.get_client()

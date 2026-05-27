@@ -133,5 +133,5 @@ def create_app(executor: RdsDataExecutor | None = None) -> Starlette:
     )
 
 
-# Module-level app for `uvicorn oblako_ml.rds_data.app:app`
+# Module-level app for `uvicorn oblako.rds_data.app:app`
 app = create_app()

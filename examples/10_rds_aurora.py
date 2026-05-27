@@ -8,7 +8,7 @@ Prerequisites:
     make up        # starts the rds (postgres) engine + moto
 """
 
-from oblako_ml.services import RdsService
+from oblako.services import RdsService
 
 
 def ignore_exists(fn):

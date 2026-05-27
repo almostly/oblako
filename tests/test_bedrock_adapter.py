@@ -21,7 +21,7 @@ class FakeBackend:
 
 
 def _make_adapter():
-    from oblako_ml.bedrock.adapter import BedrockAdapter
+    from oblako.bedrock.adapter import BedrockAdapter
 
     return BedrockAdapter(backend=FakeBackend())
 

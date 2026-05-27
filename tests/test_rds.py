@@ -11,7 +11,7 @@ import boto3
 import psycopg2
 import pytest
 
-from oblako_ml.services import RdsService
+from oblako.services import RdsService
 
 CREDS = dict(region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test")
 PG = dict(host="localhost", port=5432, user="oblako", password="oblako", dbname="oblako")

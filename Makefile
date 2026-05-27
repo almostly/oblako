@@ -41,10 +41,10 @@ test-rds-data:
 	python -m pytest tests/test_rds_data.py -v
 
 test-sagemaker:
-	python -m pytest tests/test_sagemaker.py -v   # needs: pip install 'oblako-ml[sagemaker]'
+	python -m pytest tests/test_sagemaker.py -v   # needs: pip install 'oblako[sagemaker]'
 
 test-redshift-ml:
-	python -m pytest tests/test_redshift_ml.py -v   # needs: pip install 'oblako-ml[sagemaker]'
+	python -m pytest tests/test_redshift_ml.py -v   # needs: pip install 'oblako[sagemaker]'
 
 test-openrouter:
 	python -m pytest tests/test_bedrock_openrouter_live.py -v   # needs OPENROUTER_API_KEY (live, paid)

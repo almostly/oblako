@@ -89,7 +89,7 @@ class RdsService(Service):
                 import pymysql
             except ImportError as e:
                 raise ImportError(
-                    "The MySQL engine needs pymysql: pip install 'oblako-ml[mysql]'"
+                    "The MySQL engine needs pymysql: pip install 'oblako[mysql]'"
                 ) from e
             return pymysql.connect(
                 host="localhost", port=self.host_port, user=self.user,
@@ -152,7 +152,7 @@ class RdsService(Service):
     # -- RDS Data API (postgres or mysql engine) ---------------------------
     def start_data_server(self):
         """Start the rds-data server in-process (idempotent). Returns its URL."""
-        from oblako_ml.rds_data import RdsDataExecutor, start_in_thread
+        from oblako.rds_data import RdsDataExecutor, start_in_thread
 
         executor = RdsDataExecutor(
             host="localhost", port=self.host_port, user=self.user,
@@ -163,7 +163,7 @@ class RdsService(Service):
     def get_data_client(self, autostart: bool = True):
         """boto3 ``rds-data`` client executing real SQL against the engine."""
         import boto3
-        from oblako_ml import rds_data
+        from oblako import rds_data
 
         if autostart and not rds_data.is_running(self.data_port):
             self.start_data_server()

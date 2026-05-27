@@ -1,4 +1,4 @@
-"""Oblako: start/stop all oblako-ml services together."""
+"""Oblako: start/stop all oblako services together."""
 
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ from .stepfunctions import StepFunctionsService
 
 
 class Oblako:
-    """Manage the full oblako-ml service stack."""
+    """Manage the full oblako service stack."""
 
     def __init__(self):
-        """Initialize all oblako-ml services."""
+        """Initialize all oblako services."""
         self.bedrock = BedrockService()
         self.ollama = self.bedrock  # backwards-compatible alias (engine is Ollama)
         self.opensearch = OpenSearchService()

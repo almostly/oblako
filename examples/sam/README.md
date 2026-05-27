@@ -42,7 +42,7 @@ build bundled it.)
 The object/item are really in oblako (verify from the host):
 
 ```python
-from oblako_ml.services import S3ProxyService, DynamoDBService
+from oblako.services import S3ProxyService, DynamoDBService
 S3ProxyService().get_client().get_object(Bucket="sam-oblako", Key="demo.txt")
 DynamoDBService(host_port=8001).get_client().get_item(TableName="SamOblako", Key={"id": {"S": "demo.txt"}})
 ```

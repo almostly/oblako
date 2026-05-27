@@ -6,7 +6,7 @@ inference math of the generated plpython3u UDF bodies — including multiclass.
 
 import textwrap
 
-from oblako_ml.redshift_ml import (
+from oblako.redshift_ml import (
     _detect_problem_type,
     _linear_body,
     _mlp_body,

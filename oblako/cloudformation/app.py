@@ -78,7 +78,7 @@ def _fetch_template_url(url):
         return ""
     from urllib.parse import unquote, urlparse
 
-    from oblako_ml.services import S3ProxyService
+    from oblako.services import S3ProxyService
 
     p = urlparse(url)
     path = unquote(p.path).lstrip("/")

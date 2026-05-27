@@ -7,11 +7,11 @@ Prerequisites:
     Docker running
 """
 
-from oblako_ml.services import Oblako
+from oblako.services import Oblako
 
 oblako = Oblako()
 
-print("Starting oblako-ml...")
+print("Starting oblako...")
 oblako.up()
 
 print("\nWaiting for services to be ready...")

@@ -3,9 +3,9 @@
 import json
 
 import pytest
-from oblako_ml.bedrock.adapter import BedrockAdapter
-from oblako_ml.bedrock.backends import OllamaBackend
-from oblako_ml.bedrock.ollama_client import OllamaClient
+from oblako.bedrock.adapter import BedrockAdapter
+from oblako.bedrock.backends import OllamaBackend
+from oblako.bedrock.ollama_client import OllamaClient
 
 
 @pytest.fixture

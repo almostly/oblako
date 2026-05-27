@@ -11,7 +11,7 @@ Prerequisites:
 import json
 import time
 
-from oblako_ml.services import BedrockService, S3ProxyService
+from oblako.services import BedrockService, S3ProxyService
 
 MODEL = "qwen2.5:0.5b"
 

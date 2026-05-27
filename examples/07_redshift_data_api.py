@@ -9,7 +9,7 @@ Prerequisites:
     make up           # starts pgredshift + moto
 """
 
-from oblako_ml.services import RedshiftService
+from oblako.services import RedshiftService
 
 rs = RedshiftService()
 

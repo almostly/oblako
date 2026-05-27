@@ -17,7 +17,7 @@ jobs:
           enable-cache: true
 
       - name: Lint (ruff)
-        run: uv run --python 3.12 --extra dev ruff check oblako_ml tests
+        run: uv run --python 3.12 --extra dev ruff check oblako tests
 
       # Docker-free subset (parsing, inference math, in-process servers).
       - name: Unit tests
@@ -46,7 +46,7 @@ jobs:
       # NEXT_STEPS): they need large model downloads / extra build steps.
       - name: Start services
         run: >
-          uv run --python 3.12 --extra dev python -c "from oblako_ml.services import Oblako as O; import sys;
+          uv run --python 3.12 --extra dev python -c "from oblako.services import Oblako as O; import sys;
           o = O(); svcs = [o.s3, o.dynamodb, o.moto, o.stepfunctions, o.redshift, o.rds, o.opensearch];
           [s.start() for s in svcs];
           r = {s.name: s.wait_ready(timeout=180) for s in svcs};

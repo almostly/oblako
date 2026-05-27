@@ -76,8 +76,8 @@ class OpenRouterBackend:
             json=payload,
             headers={
                 "Authorization": f"Bearer {self.api_key}",
-                "HTTP-Referer": "https://github.com/oblako-ml",
-                "X-Title": "oblako-ml",
+                "HTTP-Referer": "https://github.com/oblako",
+                "X-Title": "oblako",
             },
             timeout=self.timeout,
         )

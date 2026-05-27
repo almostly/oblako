@@ -1,13 +1,13 @@
 {
-  "Comment": "SageMaker hyperparameter tuning + save best model + batch transform - oblako-ml local version.",
+  "Comment": "SageMaker hyperparameter tuning + save best model + batch transform - oblako local version.",
   "StartAt": "GenerateDataset",
   "States": {
     "GenerateDataset": {
       "Type": "Pass",
       "Result": {
-        "train_uri": "s3://oblako-ml/csv/train.csv",
-        "validation_uri": "s3://oblako-ml/csv/validation.csv",
-        "test_uri": "s3://oblako-ml/csv/test.csv"
+        "train_uri": "s3://oblako/csv/train.csv",
+        "validation_uri": "s3://oblako/csv/validation.csv",
+        "test_uri": "s3://oblako/csv/test.csv"
       },
       "Next": "HyperparameterTuning"
     },
@@ -42,7 +42,7 @@
       "Comment": "Simulates SageMaker createModel from best HPO result",
       "Parameters": {
         "ModelName.$": "$.BestTrainingJob.TrainingJobName",
-        "ModelDataUrl": "s3://oblako-ml/models/xgboost-hpo-best-002/output/model.tar.gz",
+        "ModelDataUrl": "s3://oblako/models/xgboost-hpo-best-002/output/model.tar.gz",
         "BestMetric.$": "$.BestTrainingJob.FinalHyperParameterTuningJobObjectiveMetric",
         "status": "Created"
       },
@@ -53,8 +53,8 @@
       "Comment": "Simulates SageMaker createTransformJob.sync using best model",
       "Parameters": {
         "ModelName.$": "$.ModelName",
-        "input_uri": "s3://oblako-ml/csv/test.csv",
-        "output_uri": "s3://oblako-ml/output/test.csv.out",
+        "input_uri": "s3://oblako/csv/test.csv",
+        "output_uri": "s3://oblako/output/test.csv.out",
         "status": "Completed"
       },
       "End": true

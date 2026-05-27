@@ -1,7 +1,7 @@
 """Integration test for SageMaker local mode.
 
 Requires the sagemaker extra and Docker:
-    pip install 'oblako-ml[sagemaker]'
+    pip install 'oblako[sagemaker]'
 
 Builds a bring-your-own-container training image and runs a real local-mode
 training job (no cloud / ECR), then checks the produced model artifact.
@@ -23,7 +23,7 @@ try:
 except Exception:  # pragma: no cover - sagemaker v3 has no local mode
     pytest.skip("sagemaker local mode unavailable", allow_module_level=True)
 
-from oblako_ml.services import SageMakerService
+from oblako.services import SageMakerService
 
 EXAMPLE_IMAGE_DIR = pathlib.Path(__file__).resolve().parent.parent / "examples" / "sagemaker"
 

@@ -10,7 +10,7 @@ description: >-
 
 # Check Bedrock → OpenRouter mapping
 
-`OPENROUTER_MODEL_MAP` in `oblako_ml/bedrock/models.py` maps Bedrock model ids to
+`OPENROUTER_MODEL_MAP` in `oblako/bedrock/models.py` maps Bedrock model ids to
 OpenRouter slugs. It is **pinned** to OpenRouter's catalog, which changes over
 time (models get added and retired), so mapped slugs can go stale.
 

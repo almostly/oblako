@@ -10,8 +10,8 @@ SQL against pgredshift) clients.
 import boto3
 import pytest
 
-from oblako_ml.redshift_data import start_in_thread
-from oblako_ml.redshift_data.executor import RedshiftDataExecutor
+from oblako.redshift_data import start_in_thread
+from oblako.redshift_data.executor import RedshiftDataExecutor
 
 CREDS = dict(region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test")
 

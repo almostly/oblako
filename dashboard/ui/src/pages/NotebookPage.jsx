@@ -42,7 +42,7 @@ conn.close()`,
   },
   {
     label: 'Bedrock: Chat with Ollama',
-    value: `from oblako_ml.bedrock.adapter import BedrockAdapter
+    value: `from oblako.bedrock.adapter import BedrockAdapter
 adapter = BedrockAdapter()
 result = adapter.converse(
     model_id="qwen2.5:0.5b",

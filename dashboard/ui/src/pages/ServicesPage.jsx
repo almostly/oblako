@@ -30,7 +30,7 @@ export default function ServicesPage() {
   return (
     <SpaceBetween size="l">
       <Header variant="h1" actions={<Button onClick={fetchServices} iconName="refresh">Refresh</Button>}>
-        oblako-ml Console
+        oblako Console
       </Header>
 
       <ColumnLayout columns={3}>

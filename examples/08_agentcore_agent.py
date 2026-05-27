@@ -4,7 +4,7 @@ The agent runs on the AgentCore Runtime contract (POST /invocations, GET /ping)
 and calls oblako's local Bedrock (boto3 'bedrock-runtime' -> Ollama). No cloud.
 
 Run it:
-    pip install 'oblako-ml[agentcore]'
+    pip install 'oblako[agentcore]'
     make up && oblako pull qwen2.5:0.5b
     oblako bedrock-runtime &                                  # local Bedrock on :8004
     oblako agentcore run examples/08_agentcore_agent.py       # serves agent on :8080
@@ -13,7 +13,7 @@ Run it:
 
 import boto3
 
-from oblako_ml.agentcore import BedrockAgentCoreApp
+from oblako.agentcore import BedrockAgentCoreApp
 
 app = BedrockAgentCoreApp()
 

@@ -11,10 +11,10 @@ import json
 import boto3
 import pytest
 
-from oblako_ml.cloudformation import create_app, start_in_thread
-from oblako_ml.cloudformation.engine import StackStore, _ordered, _resolve, parse_template
-from oblako_ml.cloudformation.transform import is_sam, transform_sam
-from oblako_ml.services import DynamoDBService, S3ProxyService
+from oblako.cloudformation import create_app, start_in_thread
+from oblako.cloudformation.engine import StackStore, _ordered, _resolve, parse_template
+from oblako.cloudformation.transform import is_sam, transform_sam
+from oblako.services import DynamoDBService, S3ProxyService
 
 CREDS = dict(region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test")
 
@@ -133,8 +133,8 @@ def test_change_set_emits_stack_level_event():
 
 
 def test_template_url_parsing(monkeypatch):
-    import oblako_ml.services as svc
-    from oblako_ml.cloudformation.app import _fetch_template_url
+    import oblako.services as svc
+    from oblako.cloudformation.app import _fetch_template_url
 
     captured = {}
 
@@ -167,7 +167,7 @@ def _serve(store=None):
 
     threading.Thread(target=server.run, daemon=True).start()
     for _ in range(100):
-        from oblako_ml.cloudformation import is_running
+        from oblako.cloudformation import is_running
 
         if is_running(_PORT):
             break
@@ -282,7 +282,7 @@ def test_sam_deploy_function_to_moto_and_table_to_dynamodb():
 
 def _sfn_up() -> bool:
     try:
-        from oblako_ml.services import StepFunctionsService
+        from oblako.services import StepFunctionsService
         StepFunctionsService().get_client().list_state_machines()
         return True
     except Exception:
@@ -301,7 +301,7 @@ def _opensearch_up() -> bool:
 def test_deploy_statemachine_and_opensearch_domain():
     import time
 
-    from oblako_ml.services import StepFunctionsService
+    from oblako.services import StepFunctionsService
 
     cfn = boto3.client("cloudformation", endpoint_url=start_in_thread(), **CREDS)
     sfn = StepFunctionsService().get_client()
@@ -348,7 +348,7 @@ def test_deploy_all_resource_types_one_stack():
     (S3Proxy, DynamoDB Local, Step Functions Local, moto). OpenSearch::Domain is
     exercised separately (it needs the OpenSearch container) in the test above.
     """
-    from oblako_ml.services import StepFunctionsService
+    from oblako.services import StepFunctionsService
 
     cfn = boto3.client("cloudformation", endpoint_url=start_in_thread(), **CREDS)
     s3 = S3ProxyService().get_client()

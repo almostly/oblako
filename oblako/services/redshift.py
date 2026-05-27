@@ -77,7 +77,7 @@ class RedshiftService(Service):
 
     def start_data_server(self):
         """Start the redshift-data server in-process (idempotent). Returns its URL."""
-        from oblako_ml.redshift_data import RedshiftDataExecutor, start_in_thread
+        from oblako.redshift_data import RedshiftDataExecutor, start_in_thread
 
         executor = RedshiftDataExecutor(
             host="localhost",
@@ -91,7 +91,7 @@ class RedshiftService(Service):
     def get_data_client(self, autostart: bool = True):
         """boto3 ``redshift-data`` client executing real SQL against pgredshift."""
         import boto3
-        from oblako_ml import redshift_data
+        from oblako import redshift_data
 
         if autostart and not redshift_data.is_running(self.data_port):
             self.start_data_server()

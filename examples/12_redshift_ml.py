@@ -6,13 +6,13 @@ a plpython3u prediction UDF in pgredshift. Then `SELECT fn(...)` is real
 in-database inference. Fully local — no cloud.
 
 Prerequisites:
-    pip install 'oblako-ml[sagemaker]'
+    pip install 'oblako[sagemaker]'
     make up          # pgredshift engine (5439) + Docker for SageMaker local
 """
 
 import time
 
-from oblako_ml.services import RedshiftService
+from oblako.services import RedshiftService
 
 rs = RedshiftService()
 

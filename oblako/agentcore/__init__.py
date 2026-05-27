@@ -6,9 +6,9 @@ and ``GET /ping`` on port 8080 — the same contract it uses in the cloud. The
 agent runs locally with no cloud at all. Pair it with oblako's local Bedrock
 (Ollama) for a fully offline agent loop.
 
-    pip install 'oblako-ml[agentcore]'
+    pip install 'oblako[agentcore]'
 
-    from oblako_ml.agentcore import BedrockAgentCoreApp
+    from oblako.agentcore import BedrockAgentCoreApp
     app = BedrockAgentCoreApp()
 
     @app.entrypoint
@@ -33,7 +33,7 @@ DEFAULT_PORT = 8080
 
 _INSTALL_HINT = (
     "bedrock-agentcore is not installed. Install the AgentCore extra:\n"
-    "    pip install 'oblako-ml[agentcore]'   (or: uv pip install bedrock-agentcore)"
+    "    pip install 'oblako[agentcore]'   (or: uv pip install bedrock-agentcore)"
 )
 
 
@@ -47,7 +47,7 @@ def _agentcore_app_class():
 
 
 def __getattr__(name: str):
-    # Lazy re-export so `from oblako_ml.agentcore import BedrockAgentCoreApp` works
+    # Lazy re-export so `from oblako.agentcore import BedrockAgentCoreApp` works
     # without importing the optional dependency until it's actually used.
     if name == "BedrockAgentCoreApp":
         return _agentcore_app_class()

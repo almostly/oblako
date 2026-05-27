@@ -12,7 +12,7 @@ Prerequisites:
 
 import random
 
-from oblako_ml.services import RedshiftService
+from oblako.services import RedshiftService
 
 rs = RedshiftService()
 conn = rs.connect()

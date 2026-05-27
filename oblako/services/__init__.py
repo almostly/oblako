@@ -1,4 +1,4 @@
-"""oblako-ml services: Pythonic Docker-based AWS service management."""
+"""oblako services: Pythonic Docker-based AWS service management."""
 
 from .base import Service, ServiceStatus
 from .bedrock import BedrockService, OllamaService

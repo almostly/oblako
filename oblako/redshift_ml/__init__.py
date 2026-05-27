@@ -213,7 +213,7 @@ def _train_local(X: list[list[float]], y: list[float], hyperparameters: dict) ->
     os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test")
     from sagemaker.estimator import Estimator
 
-    from oblako_ml.services import SageMakerService
+    from oblako.services import SageMakerService
 
     data_dir = tempfile.mkdtemp(prefix="rsml-train-")
     out_dir = tempfile.mkdtemp(prefix="rsml-out-")

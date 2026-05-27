@@ -143,7 +143,7 @@ class RedshiftDataExecutor:
         }
         start = datetime.datetime.now()
         try:
-            from oblako_ml import redshift_ml
+            from oblako import redshift_ml
 
             if redshift_ml.is_create_model(sql):
                 # Redshift ML: train via SageMaker local + create an in-DB predict UDF.

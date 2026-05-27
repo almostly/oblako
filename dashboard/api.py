@@ -1,4 +1,4 @@
-"""oblako-ml dashboard API: exposes local services to the Cloudscape frontend."""
+"""oblako dashboard API: exposes local services to the Cloudscape frontend."""
 
 import json
 from contextlib import asynccontextmanager
@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from oblako_ml.services.platform import Oblako
+from oblako.services.platform import Oblako
 
 oblako = Oblako()
 DIST_DIR = Path(__file__).parent / "ui" / "dist"
@@ -19,7 +19,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="oblako-ml", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="oblako", version="0.1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -283,7 +283,7 @@ def list_models():
 
 @app.post("/api/bedrock/converse")
 def converse(body: dict):
-    from oblako_ml.bedrock.adapter import BedrockAdapter
+    from oblako.bedrock.adapter import BedrockAdapter
 
     adapter = BedrockAdapter()
     try:
@@ -348,7 +348,7 @@ def cleanup_sagemaker():
 # -----------------------------------------------------------------------------------------------
 @app.post("/api/notebook/run")
 def run_code(body: dict):
-    """Execute a Python snippet against the local oblako-ml stack."""
+    """Execute a Python snippet against the local oblako stack."""
     import io
     import sys
     import traceback

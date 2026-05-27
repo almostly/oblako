@@ -2,9 +2,9 @@
 
 import pytest
 
-from oblako_ml.bedrock import backends
-from oblako_ml.bedrock.backends import OpenRouterBackend, make_backend
-from oblako_ml.bedrock.models import resolve_openrouter
+from oblako.bedrock import backends
+from oblako.bedrock.backends import OpenRouterBackend, make_backend
+from oblako.bedrock.models import resolve_openrouter
 
 
 def test_resolve_openrouter():
@@ -89,7 +89,7 @@ def test_adapter_with_openrouter_backend(monkeypatch):
         })
 
     monkeypatch.setattr(backends.httpx, "post", fake_post)
-    from oblako_ml.bedrock.adapter import BedrockAdapter
+    from oblako.bedrock.adapter import BedrockAdapter
 
     adapter = BedrockAdapter(backend=OpenRouterBackend(api_key="sk-test"))
     r = adapter.converse(

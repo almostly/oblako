@@ -17,7 +17,7 @@ import re
 import threading
 import uuid
 
-from oblako_ml.redshift_data.executor import RedshiftDataExecutor
+from oblako.redshift_data.executor import RedshiftDataExecutor
 
 _encode_field = RedshiftDataExecutor._encode_field  # generic PG/py value -> Field
 _NAMED_PARAM = re.compile(r"(?<!:):([a-zA-Z_][a-zA-Z0-9_]*)")
@@ -63,7 +63,7 @@ class RdsDataExecutor:
                 import pymysql
             except ImportError as e:
                 raise ImportError(
-                    "rds-data over MySQL needs pymysql: pip install 'oblako-ml[mysql]'"
+                    "rds-data over MySQL needs pymysql: pip install 'oblako[mysql]'"
                 ) from e
             conn = pymysql.connect(host=self.host, port=self.port, user=self.user,
                                    password=self.password, database=db)

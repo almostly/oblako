@@ -25,7 +25,7 @@ def sfn():
 def state_machine(sfn):
     name = f"test-scoring-{uuid.uuid4().hex[:8]}"
     definition = {
-        "Comment": "oblako-ml test workflow",
+        "Comment": "oblako test workflow",
         "StartAt": "Score",
         "States": {
             "Score": {

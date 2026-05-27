@@ -18,7 +18,7 @@ Prerequisites:
 
 import json
 
-from oblako_ml.services import CloudFormationService, DynamoDBService, S3ProxyService
+from oblako.services import CloudFormationService, DynamoDBService, S3ProxyService
 
 cfn = CloudFormationService().get_client()  # auto-starts the in-process server
 

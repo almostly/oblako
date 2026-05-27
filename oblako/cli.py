@@ -15,7 +15,7 @@ Usage:
 import argparse
 import sys
 
-from oblako_ml.services.platform import Oblako
+from oblako.services.platform import Oblako
 
 
 def _check_docker():
@@ -83,7 +83,7 @@ def cmd_logs(args):
 def cmd_pull(args):
     """Pull a model into the Ollama engine."""
     _check_docker()
-    from oblako_ml.bedrock.models import DEFAULT_MODEL
+    from oblako.bedrock.models import DEFAULT_MODEL
     oblako = Oblako()
     model = args.model or DEFAULT_MODEL
     print(f"Pulling {model}...")
@@ -111,7 +111,7 @@ def cmd_dashboard(args):
     import subprocess
     import webbrowser
     port = args.port or 8000
-    print(f"Starting oblako-ml dashboard on http://localhost:{port}")
+    print(f"Starting oblako dashboard on http://localhost:{port}")
     webbrowser.open(f"http://localhost:{port}")
     subprocess.call([sys.executable, "-m", "uvicorn", "dashboard.api:app", "--host", "0.0.0.0", "--port", str(port)])
 
@@ -125,7 +125,7 @@ def cmd_redshift_data(args):
     port = args.port or 8002
     print(f"Starting Redshift Data API on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('redshift-data', endpoint_url=...)")
-    uvicorn.run("oblako_ml.redshift_data.app:app", host="0.0.0.0", port=port)
+    uvicorn.run("oblako.redshift_data.app:app", host="0.0.0.0", port=port)
 
 
 def cmd_bedrock_runtime(args):
@@ -134,7 +134,7 @@ def cmd_bedrock_runtime(args):
     port = args.port or 8004
     print(f"Starting Bedrock Runtime on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('bedrock-runtime', endpoint_url=...)")
-    uvicorn.run("oblako_ml.bedrock_runtime.app:app", host="0.0.0.0", port=port)
+    uvicorn.run("oblako.bedrock_runtime.app:app", host="0.0.0.0", port=port)
 
 
 def cmd_rds_data(args):
@@ -143,7 +143,7 @@ def cmd_rds_data(args):
     port = args.port or 8006
     print(f"Starting RDS Data API on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('rds-data', endpoint_url=...)")
-    uvicorn.run("oblako_ml.rds_data.app:app", host="0.0.0.0", port=port)
+    uvicorn.run("oblako.rds_data.app:app", host="0.0.0.0", port=port)
 
 
 # CloudFormation
@@ -159,7 +159,7 @@ def cmd_cloudformation(args):
     print("point the AWS CLI / SAM at it:")
     print(f"export AWS_ENDPOINT_URL_CLOUDFORMATION=http://localhost:{port}")
     print("supported resources: S3::Bucket, DynamoDB::Table, Redshift::Cluster, RDS::DBInstance")
-    uvicorn.run("oblako_ml.cloudformation.app:app", host="0.0.0.0", port=port)
+    uvicorn.run("oblako.cloudformation.app:app", host="0.0.0.0", port=port)
 
 
 #-----------------------------------------------------------------------------------------------
@@ -167,7 +167,7 @@ def cmd_cloudformation(args):
 #-----------------------------------------------------------------------------------------------
 def cmd_agentcore(args):
     """Run or invoke a local Bedrock AgentCore agent."""
-    from oblako_ml import agentcore
+    from oblako import agentcore
     if args.action == "run":
         agentcore.run(args.target, port=args.port)
     else:  # invoke
@@ -223,7 +223,7 @@ def _get_service(oblako: Oblako, name: str):
 
 def main():
     """Parse arguments and dispatch to the appropriate command handler."""
-    parser = argparse.ArgumentParser(prog="oblako", description="Local AWS ML platform")
+    parser = argparse.ArgumentParser(prog="oblako", description="Local AWS platform")
     sub = parser.add_subparsers(dest="command")
 
     p_up = sub.add_parser("up", help="Start services")

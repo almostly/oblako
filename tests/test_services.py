@@ -2,7 +2,7 @@
 
 from unittest.mock import MagicMock
 
-from oblako_ml.services.base import Service, PortMapping, ServiceStatus
+from oblako.services.base import Service, PortMapping, ServiceStatus
 
 
 def test_service_container_name():
@@ -39,7 +39,7 @@ def test_service_status_running():
 
 
 def test_bedrock_service_defaults():
-    from oblako_ml.services.bedrock import BedrockService, OllamaService
+    from oblako.services.bedrock import BedrockService, OllamaService
     svc = BedrockService()
     assert svc.name == "bedrock"
     assert svc.image == "ollama/ollama:latest"  # Ollama is the engine
@@ -48,7 +48,7 @@ def test_bedrock_service_defaults():
 
 
 def test_bedrock_service_runtime_client():
-    from oblako_ml.services.bedrock import BedrockService
+    from oblako.services.bedrock import BedrockService
     svc = BedrockService(runtime_port=8055)
     br = svc.get_client(autostart=False)
     assert br.meta.endpoint_url == "http://localhost:8055"
@@ -60,7 +60,7 @@ def test_bedrock_service_runtime_client():
 
 
 def test_redshift_service_connect_params():
-    from oblako_ml.services.redshift import RedshiftService
+    from oblako.services.redshift import RedshiftService
     svc = RedshiftService(host_port=5555, user="myuser", password="mypass", database="mydb")
     assert svc.user == "myuser"
     assert svc.host_port == 5555
@@ -68,7 +68,7 @@ def test_redshift_service_connect_params():
 
 
 def test_redshift_service_client_endpoints():
-    from oblako_ml.services.redshift import RedshiftService
+    from oblako.services.redshift import RedshiftService
     svc = RedshiftService(control_port=5599, data_port=8099)
     rs = svc.get_client()
     assert rs.meta.endpoint_url == "http://localhost:5599"
@@ -80,7 +80,7 @@ def test_redshift_service_client_endpoints():
 
 
 def test_rds_service_defaults():
-    from oblako_ml.services.rds import RdsService
+    from oblako.services.rds import RdsService
     svc = RdsService()
     assert svc.name == "rds"
     assert svc.image == "postgres:16"
@@ -88,7 +88,7 @@ def test_rds_service_defaults():
 
 
 def test_rds_service_control_client():
-    from oblako_ml.services.rds import RdsService
+    from oblako.services.rds import RdsService
     svc = RdsService(control_port=5511)
     rds = svc.get_client()
     assert rds.meta.endpoint_url == "http://localhost:5511"
@@ -96,7 +96,7 @@ def test_rds_service_control_client():
 
 
 def test_rds_service_mysql_engine():
-    from oblako_ml.services.rds import RdsService
+    from oblako.services.rds import RdsService
     svc = RdsService(engine="mysql")
     assert svc.engine == "mysql"
     assert svc.image == "mysql:8.0"
@@ -107,14 +107,14 @@ def test_rds_service_mysql_engine():
 
 def test_rds_invalid_engine():
     import pytest
-    from oblako_ml.services.rds import RdsService
+    from oblako.services.rds import RdsService
     with pytest.raises(ValueError):
         RdsService(engine="oracle")
 
 
 def test_rds_data_executor_engines():
     import pytest
-    from oblako_ml.rds_data.executor import RdsDataExecutor
+    from oblako.rds_data.executor import RdsDataExecutor
     assert RdsDataExecutor().engine == "postgres"
     assert RdsDataExecutor(engine="mysql", port=3306).engine == "mysql"
     with pytest.raises(ValueError):
@@ -123,7 +123,7 @@ def test_rds_data_executor_engines():
 
 def test_redshift_ml_parse_create_model():
     import pytest
-    from oblako_ml.redshift_ml import is_create_model, parse_create_model
+    from oblako.redshift_ml import is_create_model, parse_create_model
 
     sql = ("CREATE MODEL m FROM (SELECT a, b, y FROM t) TARGET y FUNCTION predict_y "
            "AUTO OFF MODEL_TYPE xgboost OBJECTIVE 'binary:logistic' "
@@ -145,7 +145,7 @@ def test_redshift_ml_parse_create_model():
 
 
 def test_moto_service_defaults():
-    from oblako_ml.services.moto import MotoService
+    from oblako.services.moto import MotoService
     svc = MotoService(host_port=5577)
     assert svc.name == "moto"
     assert svc.image == "motoserver/moto:latest"
@@ -156,7 +156,7 @@ def test_moto_service_defaults():
 def test_redshift_data_field_encoding():
     import datetime
     import decimal
-    from oblako_ml.redshift_data.executor import RedshiftDataExecutor, _to_pg_array
+    from oblako.redshift_data.executor import RedshiftDataExecutor, _to_pg_array
 
     enc = RedshiftDataExecutor._encode_field
     assert enc(None) == {"isNull": True}
@@ -174,19 +174,19 @@ def test_redshift_data_field_encoding():
 
 
 def test_s3proxy_service_endpoint():
-    from oblako_ml.services.s3proxy import S3ProxyService
+    from oblako.services.s3proxy import S3ProxyService
     svc = S3ProxyService(host_port=8888)
     assert svc.endpoint_url == "http://localhost:8888"
 
 
 def test_stepfunctions_service_endpoint():
-    from oblako_ml.services.stepfunctions import StepFunctionsService
+    from oblako.services.stepfunctions import StepFunctionsService
     svc = StepFunctionsService(host_port=9999)
     assert svc.endpoint_url == "http://localhost:9999"
 
 
 def test_sagemaker_image_exists():
-    from oblako_ml.services.sagemaker import SageMakerService
+    from oblako.services.sagemaker import SageMakerService
     svc = SageMakerService()
     mock_client = MagicMock()
     svc._client = mock_client
@@ -195,7 +195,7 @@ def test_sagemaker_image_exists():
 
 
 def test_oblako_status():
-    from oblako_ml.services import Oblako
+    from oblako.services import Oblako
     oblako = Oblako()
     mock_client = MagicMock()
     from docker.errors import NotFound

@@ -12,13 +12,13 @@ import uuid
 
 
 def _s3_client():
-    from oblako_ml.services import S3ProxyService
+    from oblako.services import S3ProxyService
 
     return S3ProxyService().get_client()
 
 
 def _dynamodb_client():
-    from oblako_ml.services import DynamoDBService
+    from oblako.services import DynamoDBService
 
     return DynamoDBService(host_port=8001).get_client()
 
@@ -179,7 +179,7 @@ def _apigw_delete(physical_id, props):
 
 # AWS::StepFunctions::StateMachine -> Step Functions Local (real engine)
 def _sfn_create(logical_id, props, ctx):
-    from oblako_ml.services import StepFunctionsService
+    from oblako.services import StepFunctionsService
 
     name = props.get("StateMachineName") or f"{ctx['stack']}-{logical_id}"
     definition = props.get("DefinitionString")
@@ -195,7 +195,7 @@ def _sfn_create(logical_id, props, ctx):
 
 
 def _sfn_delete(physical_id, props):
-    from oblako_ml.services import StepFunctionsService
+    from oblako.services import StepFunctionsService
 
     try:
         StepFunctionsService().get_client().delete_state_machine(stateMachineArn=physical_id)
@@ -210,7 +210,7 @@ def _sfn_delete(physical_id, props):
 def _opensearch_create(logical_id, props, ctx):
     import httpx
 
-    from oblako_ml.services import OpenSearchService
+    from oblako.services import OpenSearchService
 
     svc = OpenSearchService()
     name = (props.get("DomainName") or f"{ctx['stack']}-{logical_id}").lower()

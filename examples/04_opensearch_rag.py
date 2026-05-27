@@ -13,7 +13,7 @@ import random
 
 from opensearchpy import OpenSearch
 
-from oblako_ml.services import OpenSearchService
+from oblako.services import OpenSearchService
 
 os_svc = OpenSearchService()
 client = OpenSearch(hosts=[{"host": "localhost", "port": 9200}], use_ssl=False)

@@ -198,5 +198,5 @@ def create_app(executor: RedshiftDataExecutor | None = None) -> Starlette:
     return Starlette(routes=[Route("/", dispatcher.handle, methods=["POST"])])
 
 
-# Module-level app for `uvicorn oblako_ml.redshift_data.app:app`
+# Module-level app for `uvicorn oblako.redshift_data.app:app`
 app = create_app()
