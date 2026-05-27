@@ -15,8 +15,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
-import time
 
 # container status normalised across backends
 RUNNING = "running"
@@ -281,29 +281,24 @@ class KubernetesBackend(ContainerBackend):
 
     def _start_port_forward(self, name: str, ports: dict) -> None:
         self._stop_port_forward(name)
-        procs = [self._spawn_forward(name, host_port, int(str(spec).split("/")[0]))
-                 for spec, host_port in ports.items()]
+        procs = []
+        for spec, host_port in ports.items():
+            container_port = int(str(spec).split("/")[0])
+            # Self-healing: a Deployment reports "available" before the pod is
+            # actually serving, and a port-forward that races the Service's
+            # endpoints just exits. A shell loop restarts it until it sticks; the
+            # wait_ready health check then succeeds once the pod serves.
+            loop = (f"while true; do {self.kubectl} -n {self.namespace} port-forward "
+                    f"service/{name} {host_port}:{container_port} >/dev/null 2>&1; sleep 1; done")
+            procs.append(subprocess.Popen(["sh", "-c", loop], start_new_session=True))
         _port_forwards[name] = procs
-
-    def _spawn_forward(self, name: str, host_port: int, container_port: int):
-        # port-forward can exit if it races ahead of the Service's endpoints being
-        # ready; retry a few times until it stays up.
-        proc = None
-        for _ in range(4):
-            proc = subprocess.Popen(
-                [self.kubectl, "-n", self.namespace, "port-forward",
-                 f"service/{name}", f"{host_port}:{container_port}"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            time.sleep(1.5)
-            if proc.poll() is None:  # still running -> forwarding established
-                return proc
-            time.sleep(1)
-        return proc
 
     def _stop_port_forward(self, name: str) -> None:
         for proc in _port_forwards.pop(name, []):
-            proc.terminate()
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)  # kill the loop + kubectl
+            except (ProcessLookupError, PermissionError):
+                pass
 
     def status(self, name: str) -> str:
         """Return RUNNING/STOPPED/ABSENT from the deployment's ready replicas."""
