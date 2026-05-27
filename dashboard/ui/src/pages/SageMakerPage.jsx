@@ -8,9 +8,11 @@ import Button from '@cloudscape-design/components/button'
 import Container from '@cloudscape-design/components/container'
 import ColumnLayout from '@cloudscape-design/components/column-layout'
 import Alert from '@cloudscape-design/components/alert'
+import Tabs from '@cloudscape-design/components/tabs'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-python'
 import 'prismjs/themes/prism.css'
+import NotebookPage from './NotebookPage'
 
 const API = 'http://localhost:8000'
 
@@ -69,17 +71,8 @@ export default function SageMakerPage() {
 
   const totalContainers = containers.training.length + containers.endpoints.length
 
-  return (
+  const trainingTab = (
     <SpaceBetween size="l">
-      <Header variant="h1" actions={
-        <SpaceBetween direction="horizontal" size="s">
-          <Button onClick={fetchData} iconName="refresh">Refresh</Button>
-          <Button onClick={cleanup}>Cleanup stopped</Button>
-        </SpaceBetween>
-      }>
-        Amazon SageMaker
-      </Header>
-
       {cleanupResult && (
         <Alert type="success" dismissible onDismiss={() => setCleanupResult(null)}>
           Removed {cleanupResult.removed} stopped container(s).
@@ -146,6 +139,23 @@ export default function SageMakerPage() {
       <Container header={<Header variant="h2">Quick start</Header>}>
         <PythonCode code={SAGEMAKER_CODE} />
       </Container>
+    </SpaceBetween>
+  )
+
+  return (
+    <SpaceBetween size="l">
+      <Header variant="h1" actions={
+        <SpaceBetween direction="horizontal" size="s">
+          <Button onClick={fetchData} iconName="refresh">Refresh</Button>
+          <Button onClick={cleanup}>Cleanup stopped</Button>
+        </SpaceBetween>
+      }>
+        Amazon SageMaker
+      </Header>
+      <Tabs tabs={[
+        { id: 'notebook', label: 'Notebook', content: <NotebookPage embedded /> },
+        { id: 'training', label: 'Training & endpoints', content: trainingTab },
+      ]} />
     </SpaceBetween>
   )
 }

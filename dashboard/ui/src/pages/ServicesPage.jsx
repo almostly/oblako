@@ -13,6 +13,7 @@ const API = 'http://localhost:8000'
 export default function ServicesPage() {
   const [services, setServices] = useState([])
   const [loading, setLoading] = useState(true)
+  const [cfg, setCfg] = useState({ region: '—', accountId: '—' })
 
   const fetchServices = () => {
     setLoading(true)
@@ -22,7 +23,10 @@ export default function ServicesPage() {
       .catch(() => setLoading(false))
   }
 
-  useEffect(() => { fetchServices() }, [])
+  useEffect(() => {
+    fetchServices()
+    fetch(`${API}/api/config`).then(r => r.json()).then(setCfg).catch(() => {})
+  }, [])
 
   const running = services.filter(s => s.status === 'running').length
   const total = services.length
@@ -39,8 +43,9 @@ export default function ServicesPage() {
           <Box variant="awsui-value-large">{running} / {total}</Box>
         </Container>
         <Container>
-          <Box variant="awsui-key-label">Region</Box>
-          <Box variant="awsui-value-large">local</Box>
+          <Box variant="awsui-key-label">Region / account</Box>
+          <Box variant="awsui-value-large">{cfg.region}</Box>
+          <Box color="text-status-inactive" fontSize="body-s">{cfg.accountId}</Box>
         </Container>
         <Container>
           <Box variant="awsui-key-label">Version</Box>

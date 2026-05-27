@@ -11,13 +11,11 @@ import RedshiftPage from './pages/RedshiftPage'
 
 import DynamoDBPage from './pages/DynamoDBPage'
 import SageMakerPage from './pages/SageMakerPage'
-import NotebookPage from './pages/NotebookPage'
 import RdsPage from './pages/RdsPage'
 import IamPage from './pages/IamPage'
 
 const NAV_ITEMS = [
   { type: 'link', text: 'Services', href: '#services' },
-  { type: 'link', text: 'Notebook', href: '#notebook' },
   { type: 'divider' },
   { type: 'link', text: 'Bedrock', href: '#bedrock' },
   { type: 'link', text: 'SageMaker', href: '#sagemaker' },
@@ -32,7 +30,6 @@ const NAV_ITEMS = [
 
 const PAGES = {
   '#services': ServicesPage,
-  '#notebook': NotebookPage,
   '#bedrock': BedrockPage,
   '#sagemaker': SageMakerPage,
   '#s3': S3Page,

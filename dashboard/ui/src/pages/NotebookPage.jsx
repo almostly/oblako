@@ -259,8 +259,21 @@ function CellRunner() {
   )
 }
 
-export default function NotebookPage() {
+export default function NotebookPage({ embedded = false }) {
   const [activeTabId, setActiveTabId] = useState('cells')
+
+  const tabs = (
+    <Tabs
+      activeTabId={activeTabId}
+      onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
+      tabs={[
+        { id: 'cells', label: 'Quick cells', content: <CellRunner /> },
+        { id: 'jupyterlab', label: 'JupyterLab', content: <JupyterLabTab /> },
+      ]}
+    />
+  )
+
+  if (embedded) return tabs
 
   return (
     <SpaceBetween size="l">
@@ -270,14 +283,7 @@ export default function NotebookPage() {
       >
         Notebook
       </Header>
-      <Tabs
-        activeTabId={activeTabId}
-        onChange={({ detail }) => setActiveTabId(detail.activeTabId)}
-        tabs={[
-          { id: 'cells', label: 'Quick cells', content: <CellRunner /> },
-          { id: 'jupyterlab', label: 'JupyterLab', content: <JupyterLabTab /> },
-        ]}
-      />
+      {tabs}
     </SpaceBetween>
   )
 }
