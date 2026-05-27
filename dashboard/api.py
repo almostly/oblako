@@ -388,6 +388,20 @@ def run_code(body: dict):
         sys.stdout, sys.stderr = old_stdout, old_stderr
 
 
+@app.post("/api/notebook/launch")
+def launch_notebook():
+    """Spawn JupyterLab (pre-wired to oblako) and return its URL for the UI to open."""
+    try:
+        import jupyterlab  # noqa: F401
+    except ImportError:
+        return {"error": "JupyterLab isn't installed. Run: pip install 'oblako[notebook]'"}
+    try:
+        from oblako import notebook
+        return notebook.spawn(port=8888)
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
 # CloudFormation
 @app.get("/api/cloudformation/stacks")
 def list_stacks():

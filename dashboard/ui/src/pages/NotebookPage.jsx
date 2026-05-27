@@ -153,6 +153,19 @@ export default function NotebookPage() {
   const [cells, setCells] = useState([])
   const [loading, setLoading] = useState(false)
   const [selectedSnippet, setSelectedSnippet] = useState({ label: SNIPPETS[0].label, value: '0' })
+  const [launching, setLaunching] = useState(false)
+
+  const openJupyterLab = () => {
+    setLaunching(true)
+    fetch(`${API}/api/notebook/launch`, { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        setLaunching(false)
+        if (data.url) window.open(data.url, '_blank')
+        else alert(data.error || 'Failed to launch JupyterLab')
+      })
+      .catch(e => { setLaunching(false); alert(e.message) })
+  }
 
   const runCode = () => {
     if (!code.trim()) return
@@ -176,7 +189,13 @@ export default function NotebookPage() {
 
   return (
     <SpaceBetween size="l">
-      <Header variant="h1">Notebook</Header>
+      <Header
+        variant="h1"
+        actions={<Button iconName="external" loading={launching} onClick={openJupyterLab}>Open in JupyterLab</Button>}
+        description="Run quick cells here, or open the full JupyterLab — its kernel is pre-wired so plain boto3 hits oblako."
+      >
+        Notebook
+      </Header>
 
       <Container header={<Header variant="h2" actions={
         <ColumnLayout columns={2}>
