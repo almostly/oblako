@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from oblako.services.platform import Oblako
+from oblako.services import sfn_templates
 
 oblako = Oblako()
 DIST_DIR = Path(__file__).parent / "ui" / "dist"
@@ -145,6 +146,92 @@ def list_executions(arn: str):
         return {"executions": executions}
     except Exception as e:
         return {"executions": [], "error": str(e)}
+
+
+@app.get("/api/stepfunctions/templates")
+def stepfunctions_templates():
+    """List the bundled ML-focused state-machine templates."""
+    return {"templates": sfn_templates.public_templates()}
+
+
+@app.post("/api/stepfunctions/create")
+def create_state_machine(body: dict):
+    """Create a state machine from a bundled template id, or from a raw name + definition."""
+    sfn = oblako.stepfunctions.get_client()
+    template_id = body.get("templateId")
+    if template_id:
+        tpl = sfn_templates.TEMPLATES.get(template_id)
+        if not tpl:
+            return {"error": f"Unknown template '{template_id}'"}
+        name, definition = tpl["name"], tpl["definition"]
+        extra = {"testCase": tpl["testCase"], "runnable": tpl.get("runnable", False), "input": tpl["input"]}
+    else:
+        name, definition = body.get("name"), body.get("definition")
+        if not name or not definition:
+            return {"error": "Provide a templateId, or both name and definition."}
+        extra = {"testCase": None, "runnable": False, "input": {}}
+    try:
+        arn = sfn.create_state_machine(name=name, definition=json.dumps(definition),
+                                       roleArn=sfn_templates.DUMMY_ROLE)["stateMachineArn"]
+    except sfn.exceptions.StateMachineAlreadyExists:
+        arn = next(m["stateMachineArn"] for m in sfn.list_state_machines()["stateMachines"]
+                   if m["name"] == name)
+    except Exception as e:
+        return {"error": str(e)}
+    return {"stateMachineArn": arn, "name": name, **extra}
+
+
+@app.post("/api/stepfunctions/start")
+def start_execution(body: dict):
+    """Start an execution; pass a testCase to run in SFN Local mock mode."""
+    sfn = oblako.stepfunctions.get_client()
+    arn = body.get("stateMachineArn")
+    if not arn:
+        return {"error": "stateMachineArn is required"}
+    test_case = body.get("testCase")
+    target = f"{arn}#{test_case}" if test_case else arn
+    raw = body.get("input", {})
+    payload = raw if isinstance(raw, str) else json.dumps(raw)
+    try:
+        resp = sfn.start_execution(stateMachineArn=target, input=payload)
+        return {"executionArn": resp["executionArn"]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/stepfunctions/execution/{arn:path}")
+def describe_execution(arn: str):
+    """Return an execution's status, output, and per-state progress."""
+    sfn = oblako.stepfunctions.get_client()
+    try:
+        d = sfn.describe_execution(executionArn=arn)
+        steps, seen = [], {}
+        for e in sfn.get_execution_history(executionArn=arn)["events"]:
+            t = e["type"]
+            if t.endswith("StateEntered"):
+                name = e["stateEnteredEventDetails"]["name"]
+                seen[name] = {"name": name, "type": t[: -len("StateEntered")], "status": "RUNNING"}
+                steps.append(seen[name])
+            elif t.endswith("StateExited"):
+                name = e["stateExitedEventDetails"]["name"]
+                if name in seen:
+                    seen[name]["status"] = "SUCCEEDED"
+            elif "Failed" in t:
+                for s in reversed(steps):
+                    if s["status"] == "RUNNING":
+                        s["status"] = "FAILED"
+                        break
+        return {
+            "status": d["status"],
+            "output": d.get("output"),
+            "error": d.get("error"),
+            "cause": d.get("cause"),
+            "startDate": str(d.get("startDate", "")),
+            "stopDate": str(d.get("stopDate", "")),
+            "steps": steps,
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # -----------------------------------------------------------------------------------------------

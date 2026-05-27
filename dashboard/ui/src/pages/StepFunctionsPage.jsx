@@ -9,6 +9,9 @@ import Container from '@cloudscape-design/components/container'
 import ExpandableSection from '@cloudscape-design/components/expandable-section'
 import ColumnLayout from '@cloudscape-design/components/column-layout'
 import Tabs from '@cloudscape-design/components/tabs'
+import Modal from '@cloudscape-design/components/modal'
+import Alert from '@cloudscape-design/components/alert'
+import Badge from '@cloudscape-design/components/badge'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-json'
 import 'prismjs/themes/prism.css'
@@ -27,12 +30,19 @@ function JsonCode({ code }) {
   )
 }
 
+const sleep = (ms) => new Promise(r => setTimeout(r, ms))
+
 export default function StepFunctionsPage() {
   const [machines, setMachines] = useState([])
+  const [templates, setTemplates] = useState([])
   const [selectedMachine, setSelectedMachine] = useState(null)
   const [machineDetail, setMachineDetail] = useState(null)
   const [executions, setExecutions] = useState([])
   const [loading, setLoading] = useState(true)
+  const [showCreate, setShowCreate] = useState(false)
+  const [creating, setCreating] = useState(null)
+  const [running, setRunning] = useState(false)
+  const [runResult, setRunResult] = useState(null)
 
   const fetchMachines = () => {
     setLoading(true)
@@ -42,10 +52,14 @@ export default function StepFunctionsPage() {
       .catch(() => setLoading(false))
   }
 
-  useEffect(() => { fetchMachines() }, [])
+  useEffect(() => {
+    fetchMachines()
+    fetch(`${API}/api/stepfunctions/templates`).then(r => r.json()).then(d => setTemplates(d.templates || []))
+  }, [])
 
   const openMachine = (arn) => {
     setSelectedMachine(arn)
+    setRunResult(null)
     fetch(`${API}/api/stepfunctions/describe/${encodeURIComponent(arn)}`)
       .then(r => r.json())
       .then(data => setMachineDetail(data))
@@ -53,6 +67,46 @@ export default function StepFunctionsPage() {
       .then(r => r.json())
       .then(data => setExecutions(data.executions || []))
   }
+
+  const createFromTemplate = (id) => {
+    setCreating(id)
+    fetch(`${API}/api/stepfunctions/create`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templateId: id }),
+    })
+      .then(r => r.json())
+      .then(d => {
+        setCreating(null); setShowCreate(false); fetchMachines()
+        if (d.stateMachineArn) openMachine(d.stateMachineArn)
+      })
+      .catch(() => setCreating(null))
+  }
+
+  const runExecution = async (tpl) => {
+    setRunning(true); setRunResult(null)
+    try {
+      const started = await fetch(`${API}/api/stepfunctions/start`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ stateMachineArn: selectedMachine, testCase: tpl.testCase, input: tpl.input || {} }),
+      }).then(r => r.json())
+      if (started.error) { setRunResult({ status: 'FAILED', error: started.error, steps: [] }); setRunning(false); return }
+      const exArn = started.executionArn
+      let result = null
+      for (let i = 0; i < 25; i++) {
+        result = await fetch(`${API}/api/stepfunctions/execution/${encodeURIComponent(exArn)}`).then(r => r.json())
+        if (result.status && result.status !== 'RUNNING') break
+        await sleep(500)
+      }
+      setRunResult(result)
+      fetch(`${API}/api/stepfunctions/executions/${encodeURIComponent(selectedMachine)}`)
+        .then(r => r.json()).then(data => setExecutions(data.executions || []))
+    } catch (e) {
+      setRunResult({ status: 'FAILED', error: String(e), steps: [] })
+    }
+    setRunning(false)
+  }
+
+  const stepStatus = (s) => s === 'SUCCEEDED' ? 'success' : s === 'FAILED' ? 'error' : 'in-progress'
 
   if (selectedMachine && machineDetail && !machineDetail.error) {
     const definition = machineDetail.definition || {}
@@ -63,12 +117,51 @@ export default function StepFunctionsPage() {
       next: state.Next || (state.End ? '(End)' : state.Default || '-'),
       comment: state.Comment || '-',
     }))
+    const tpl = templates.find(t => t.name === machineDetail.name)
+    const canRun = tpl && tpl.runnable
 
     return (
       <SpaceBetween size="l">
-        <Header variant="h1" actions={<Button onClick={() => { setSelectedMachine(null); setMachineDetail(null) }}>Back</Button>}>
+        <Header
+          variant="h1"
+          actions={
+            <SpaceBetween direction="horizontal" size="xs">
+              {canRun && (
+                <Button variant="primary" iconName="play" loading={running} onClick={() => runExecution(tpl)}>
+                  Run (mock)
+                </Button>
+              )}
+              <Button onClick={() => { setSelectedMachine(null); setMachineDetail(null); setRunResult(null) }}>Back</Button>
+            </SpaceBetween>
+          }
+        >
           {machineDetail.name}
         </Header>
+
+        {tpl && !tpl.runnable && (
+          <Alert type="info" header="Inspect only on the local engine">{tpl.note}</Alert>
+        )}
+
+        {runResult && (
+          <Container header={<Header variant="h2">Run result</Header>}>
+            <SpaceBetween size="m">
+              <StatusIndicator type={stepStatus(runResult.status)}>{runResult.status}</StatusIndicator>
+              {runResult.error && <Alert type="error">{runResult.cause || runResult.error}</Alert>}
+              {(runResult.steps || []).map(s => (
+                <Box key={s.name}>
+                  <StatusIndicator type={stepStatus(s.status)}>
+                    <Box variant="span" fontWeight="bold">{s.name}</Box> <Box variant="span" color="text-status-inactive">({s.type})</Box>
+                  </StatusIndicator>
+                </Box>
+              ))}
+              {runResult.output && (
+                <ExpandableSection headerText="Output" variant="container">
+                  <JsonCode code={JSON.stringify(JSON.parse(runResult.output), null, 2)} />
+                </ExpandableSection>
+              )}
+            </SpaceBetween>
+          </Container>
+        )}
 
         <ColumnLayout columns={3}>
           <Container>
@@ -172,9 +265,18 @@ export default function StepFunctionsPage() {
 
   return (
     <SpaceBetween size="l">
-      <Header variant="h1" actions={<Button onClick={fetchMachines} iconName="refresh">Refresh</Button>}>
+      <Header
+        variant="h1"
+        actions={
+          <SpaceBetween direction="horizontal" size="xs">
+            <Button iconName="add-plus" onClick={() => setShowCreate(true)}>Create from template</Button>
+            <Button onClick={fetchMachines} iconName="refresh">Refresh</Button>
+          </SpaceBetween>
+        }
+      >
         AWS Step Functions
       </Header>
+
       <Table
         header={<Header variant="h2">State machines</Header>}
         loading={loading}
@@ -186,8 +288,49 @@ export default function StepFunctionsPage() {
           { id: 'arn', header: 'ARN', cell: item => <Box variant="code" fontSize="body-s">{item.stateMachineArn}</Box> },
           { id: 'created', header: 'Created', cell: item => item.creationDate },
         ]}
-        empty={<Box textAlign="center">No state machines. Deploy one first.</Box>}
+        empty={<Box textAlign="center">No state machines yet. Create one from a template.</Box>}
       />
+
+      <Modal
+        visible={showCreate}
+        onDismiss={() => setShowCreate(false)}
+        header="Create a state machine from a template"
+        size="large"
+      >
+        <SpaceBetween size="m">
+          <Box color="text-body-secondary">
+            ML-focused credit-risk workflows adapted from aws-samples/credit-risk-modeling-on-aws.
+            Runnable templates execute locally via Step Functions Local mock mode.
+          </Box>
+          {templates.map(t => (
+            <Container
+              key={t.id}
+              header={
+                <Header
+                  variant="h3"
+                  actions={
+                    <Button
+                      variant="primary"
+                      loading={creating === t.id}
+                      onClick={() => createFromTemplate(t.id)}
+                    >
+                      Create
+                    </Button>
+                  }
+                >
+                  {t.name}{' '}
+                  {t.runnable
+                    ? <Badge color="green">runnable</Badge>
+                    : <Badge color="grey">inspect only</Badge>}
+                </Header>
+              }
+            >
+              <Box>{t.comment}</Box>
+              {!t.runnable && t.note && <Box color="text-status-inactive" fontSize="body-s" padding={{ top: 'xs' }}>{t.note}</Box>}
+            </Container>
+          ))}
+        </SpaceBetween>
+      </Modal>
     </SpaceBetween>
   )
 }

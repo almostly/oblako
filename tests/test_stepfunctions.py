@@ -60,6 +60,7 @@ def test_execute_pass_state(sfn, state_machine):
 
     # Poll for completion
     import time
+
     for _ in range(10):
         desc = sfn.describe_execution(executionArn=execution_arn)
         if desc["status"] != "RUNNING":
@@ -115,6 +116,7 @@ def test_choice_state(sfn):
     )
 
     import time
+
     for _ in range(10):
         desc = sfn.describe_execution(executionArn=exec_resp["executionArn"])
         if desc["status"] != "RUNNING":
@@ -125,4 +127,37 @@ def test_choice_state(sfn):
     output = json.loads(desc["output"])
     assert output["decision"] == "APPROVED"
 
+    sfn.delete_state_machine(stateMachineArn=arn)
+
+
+def test_ml_template_runs_in_mock_mode(sfn):
+    """A bundled SageMaker template runs end to end via SFN Local mock mode."""
+    import time
+
+    from oblako.services import sfn_templates
+    from oblako.services.stepfunctions import StepFunctionsService
+
+    if not StepFunctionsService().mock_config_path.exists():
+        pytest.skip("SFN mock config not mounted; start stepfunctions via the platform")
+
+    tpl = sfn_templates.TEMPLATES["preprocess-train"]
+    try:
+        arn = sfn.create_state_machine(
+            name=tpl["name"], definition=json.dumps(tpl["definition"]), roleArn=DUMMY_ROLE,
+        )["stateMachineArn"]
+    except sfn.exceptions.StateMachineAlreadyExists:
+        arn = next(m["stateMachineArn"] for m in sfn.list_state_machines()["stateMachines"]
+                   if m["name"] == tpl["name"])
+
+    resp = sfn.start_execution(
+        stateMachineArn=f"{arn}#{tpl['testCase']}", input=json.dumps(tpl["input"]),
+    )
+    for _ in range(20):
+        desc = sfn.describe_execution(executionArn=resp["executionArn"])
+        if desc["status"] != "RUNNING":
+            break
+        time.sleep(0.5)
+
+    assert desc["status"] == "SUCCEEDED", desc.get("cause")
+    assert json.loads(desc["output"])["TrainingJobStatus"] == "Completed"
     sfn.delete_state_machine(stateMachineArn=arn)

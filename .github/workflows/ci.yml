@@ -29,6 +29,7 @@ jobs:
           tests/test_redshift_ml_unit.py
           tests/test_cloudformation.py
           tests/test_notebook.py
+          tests/test_sfn_templates.py
 
   integration:
     name: integration tests (Docker services)
