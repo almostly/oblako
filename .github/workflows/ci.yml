@@ -23,16 +23,16 @@ jobs:
       - name: Unit tests
         run: >
           uv run --python 3.12 --extra dev python -m pytest -v
-          tests/test_bedrock_adapter.py
-          tests/test_bedrock_backends.py
-          tests/test_services.py
-          tests/test_redshift_ml_unit.py
-          tests/test_cloudformation.py
-          tests/test_notebook.py
-          tests/test_sfn_templates.py
-          tests/test_config.py
-          tests/test_iam_evaluator.py
-          tests/test_backends.py
+          tests/bedrock/test_bedrock_adapter.py
+          tests/bedrock/test_bedrock_backends.py
+          tests/services/test_services.py
+          tests/services/test_backends.py
+          tests/services/test_config.py
+          tests/redshift/test_redshift_ml_unit.py
+          tests/cloudformation/test_cloudformation.py
+          tests/notebook/test_notebook.py
+          tests/stepfunctions/test_sfn_templates.py
+          tests/iam/test_iam_evaluator.py
 
   integration:
     name: integration tests (Docker services)
@@ -62,11 +62,11 @@ jobs:
       - name: Integration tests
         run: >
           uv run --python 3.12 --extra dev python -m pytest -v
-          tests/test_s3proxy.py
-          tests/test_stepfunctions.py
-          tests/test_redshift.py
-          tests/test_redshift_data.py
-          tests/test_rds.py
-          tests/test_rds_data.py
-          tests/test_opensearch.py
-          tests/test_cloudformation.py
+          tests/s3/test_s3proxy.py
+          tests/stepfunctions/test_stepfunctions.py
+          tests/redshift/test_redshift.py
+          tests/redshift/test_redshift_data.py
+          tests/rds/test_rds.py
+          tests/rds/test_rds_data.py
+          tests/opensearch/test_opensearch.py
+          tests/cloudformation/test_cloudformation.py
