@@ -17,6 +17,14 @@ DIST_DIR = Path(__file__).parent / "ui" / "dist"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Bring up the Lambda shim so Step Functions lambda:invoke tasks (e.g. the
+    # Bedrock prompt-chain -> local model) can run live against oblako services.
+    try:
+        from oblako import lambda_shim
+
+        lambda_shim.start_in_thread()
+    except Exception:  # noqa: BLE001 - dashboard still works without live SFN runs
+        pass
     yield
 
 

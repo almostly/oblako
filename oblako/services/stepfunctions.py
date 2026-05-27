@@ -34,6 +34,9 @@ class StepFunctionsService(Service):
                 "SFN_MOCK_CONFIG": f"{MOCK_CONFIG_MOUNT}/MockConfigFile.json",
             },
             volumes={str(mock_dir): {"bind": MOCK_CONFIG_MOUNT, "mode": "ro"}},
+            # Reach the host lambda shim (oblako.lambda_shim on :3001) for live
+            # lambda:invoke tasks — e.g. the Bedrock prompt-chain -> local model.
+            extra_hosts={"host.docker.internal": "host-gateway"},
         )
         self.host_port = host_port
         self.mock_config_path = mock_dir / "MockConfigFile.json"

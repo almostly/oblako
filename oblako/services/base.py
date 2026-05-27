@@ -37,6 +37,7 @@ class Service:
     ports: list[PortMapping] = field(default_factory=list)
     environment: dict[str, str] = field(default_factory=dict)
     volumes: dict[str, dict] = field(default_factory=dict)
+    extra_hosts: dict[str, str] = field(default_factory=dict)
     command: str | list[str] | None = None
     working_dir: str | None = None
     container_user: str | None = None  # OS user inside the container (not a DB user)
@@ -55,17 +56,14 @@ class Service:
         return f"oblako-ml-{self.name}"
 
     def _port_bindings(self) -> dict:
-        return {
-            f"{p.container_port}/{p.protocol}": p.host_port
-            for p in self.ports
-        }
+        return {f"{p.container_port}/{p.protocol}": p.host_port for p in self.ports}
 
     def _exposed_ports(self) -> list:
         return [f"{p.container_port}/{p.protocol}" for p in self.ports]
 
-    #-----------------------------------------------------------------------------------------------
+    # -----------------------------------------------------------------------------------------------
     # Lifecycle
-    #-----------------------------------------------------------------------------------------------
+    # -----------------------------------------------------------------------------------------------
     def start(self) -> None:
         """Pull image if needed and start the container."""
         try:
@@ -93,6 +91,7 @@ class Service:
             ports=self._port_bindings(),
             environment=self.environment,
             volumes=self.volumes,
+            extra_hosts=self.extra_hosts,
             command=self.command,
             working_dir=self.working_dir,
             user=self.container_user,
@@ -108,9 +107,9 @@ class Service:
         except NotFound:
             pass
 
-    #-----------------------------------------------------------------------------------------------
+    # -----------------------------------------------------------------------------------------------
     # Status and Health
-    #-----------------------------------------------------------------------------------------------
+    # -----------------------------------------------------------------------------------------------
     def status(self) -> ServiceStatus:
         """Get current service status."""
         try:
@@ -151,4 +150,6 @@ class Service:
 
     def __repr__(self) -> str:
         """Return a concise string representation of the service."""
-        return f"{type(self).__name__}(name={self.name!r}, status={self.status().value})"
+        return (
+            f"{type(self).__name__}(name={self.name!r}, status={self.status().value})"
+        )

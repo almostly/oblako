@@ -363,45 +363,44 @@ TEMPLATES["hpo-batch-transform"] = {
     },
 }
 
+# Live template: runs un-mocked against the real local model. The engine can't
+# schedule bedrock:invokeModel, but it can schedule lambda:invoke against the host
+# shim (oblako.lambda_shim), whose `bedrock-invoke` function forwards to Ollama.
 TEMPLATES["bedrock-reason-codes"] = {
     "name": "credit-bedrock-reason-codes",
-    "runnable": False,
-    "note": (
-        "The local Step Functions engine (amazon/aws-stepfunctions-local) predates the "
-        "Bedrock service integration, so it can't schedule bedrock:invokeModel — even mocked. "
-        "Create and inspect the flow here; run it against real AWS (or a newer engine)."
-    ),
+    "runnable": True,
+    "note": "Runs live against your local Bedrock model (Ollama) via the lambda shim — no mock.",
     "comment": "Chain Bedrock prompts: summarize an applicant, then draft adverse-action reason codes.",
     "input": {
-        "prompt": "Summarize this applicant: app_score=610, dti=0.46, tenure_months=7, status=Tenant"
+        "modelId": "qwen2.5:0.5b",
+        "prompt": "Summarize this credit applicant in two sentences: application_score=610, "
+                  "bureau_score=640, debt_to_income=0.46, months_at_employer=7, residential_status=Tenant.",
     },
     "definition": {
-        "Comment": "Prompt-chain a credit decision narrative.",
+        "Comment": "Prompt-chain a credit decision narrative against the local model.",
         "StartAt": "Summarize applicant",
         "States": {
             "Summarize applicant": {
                 "Type": "Task",
-                "Resource": "arn:aws:states:::bedrock:invokeModel",
+                "Resource": "arn:aws:states:::lambda:invoke",
                 "Parameters": {
-                    "ModelId": "cohere.command-text-v14",
-                    "Body": {"prompt.$": "$.prompt", "max_tokens": 250},
-                    "ContentType": "application/json",
-                    "Accept": "*/*",
+                    "FunctionName": "bedrock-invoke",
+                    "Payload": {"modelId.$": "$.modelId", "prompt.$": "$.prompt"},
                 },
                 "ResultPath": "$.summary",
                 "Next": "Draft reason codes",
             },
             "Draft reason codes": {
                 "Type": "Task",
-                "Resource": "arn:aws:states:::bedrock:invokeModel",
+                "Resource": "arn:aws:states:::lambda:invoke",
                 "Parameters": {
-                    "ModelId": "cohere.command-text-v14",
-                    "Body": {
-                        "prompt": "List the top adverse-action reason codes for that applicant.",
-                        "max_tokens": 250,
+                    "FunctionName": "bedrock-invoke",
+                    "Payload": {
+                        "modelId.$": "$.modelId",
+                        "prompt": "Based on that summary, list the top adverse-action reason codes "
+                                  "as a short numbered list.",
+                        "context.$": "$.summary.Payload.text",
                     },
-                    "ContentType": "application/json",
-                    "Accept": "*/*",
                 },
                 "ResultPath": "$.reasons",
                 "Next": "Done",
@@ -409,29 +408,7 @@ TEMPLATES["bedrock-reason-codes"] = {
             "Done": {"Type": "Succeed"},
         },
     },
-    "testCase": "happy-path",
-    "mock": {"Summarize applicant": "Summary", "Draft reason codes": "Reasons"},
-    "responses": {
-        "Summary": {
-            "Body": {
-                "generations": [
-                    {
-                        "text": "Thin-file applicant: high debt-to-income, short employment tenure, renting."
-                    }
-                ]
-            }
-        },
-        "Reasons": {
-            "Body": {
-                "generations": [
-                    {
-                        "text": "1) Debt-to-income too high  2) Insufficient employment history  "
-                        "3) Limited credit history  4) Residential stability"
-                    }
-                ]
-            }
-        },
-    },
+    "testCase": None,
 }
 
 
@@ -446,7 +423,7 @@ def build_mock_config(names: list[str] | None = None) -> dict:
     responses: dict[str, dict] = {}
     for tpl in TEMPLATES.values():
         sm = tpl["name"]
-        if not tpl.get("runnable"):
+        if not tpl.get("mock"):  # live templates (e.g. Bedrock) run un-mocked
             continue
         if want is not None and sm not in want:
             continue
@@ -467,6 +444,7 @@ def public_templates() -> list[dict]:
             "name": t["name"],
             "comment": t["comment"],
             "runnable": t.get("runnable", False),
+            "execMode": "mock" if t.get("testCase") else "live",
             "note": t.get("note"),
             "testCase": t["testCase"],
             "input": t["input"],
