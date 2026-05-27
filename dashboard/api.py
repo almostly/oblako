@@ -394,6 +394,81 @@ def create_rds_database(body: dict):
         return {"error": str(e)}
 
 
+# IAM (moto control plane + oblako policy evaluator)
+@app.get("/api/iam/overview")
+def iam_overview():
+    """List IAM users, roles, and customer-managed policies."""
+    try:
+        iam = oblako.iam.get_client()
+        return {
+            "users": [{"name": u["UserName"], "arn": u["Arn"]} for u in iam.list_users()["Users"]],
+            "roles": [{"name": r["RoleName"], "arn": r["Arn"]} for r in iam.list_roles()["Roles"]],
+            "policies": [{"name": p["PolicyName"], "arn": p["Arn"]}
+                         for p in iam.list_policies(Scope="Local")["Policies"]],
+        }
+    except Exception as e:
+        return {"users": [], "roles": [], "policies": [], "error": str(e)}
+
+
+@app.post("/api/iam/users")
+def iam_create_user(body: dict):
+    """Create an IAM user."""
+    try:
+        return {"arn": oblako.iam.create_user(body["name"])["Arn"]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/iam/roles")
+def iam_create_role(body: dict):
+    """Create an IAM role with a trust policy."""
+    try:
+        return {"arn": oblako.iam.create_role(body["name"], body["trustPolicy"])["Arn"]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/iam/policies")
+def iam_create_policy(body: dict):
+    """Create a customer-managed policy."""
+    try:
+        return {"arn": oblako.iam.create_policy(body["name"], body["document"])["Arn"]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/iam/attach")
+def iam_attach(body: dict):
+    """Attach a managed policy to a role or user."""
+    try:
+        if body.get("roleName"):
+            oblako.iam.attach_role_policy(body["roleName"], body["policyArn"])
+        else:
+            oblako.iam.attach_user_policy(body["userName"], body["policyArn"])
+        return {"ok": True}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/iam/assume-role")
+def iam_assume_role(body: dict):
+    """Trust-evaluate then sts:AssumeRole as the given principal."""
+    try:
+        return oblako.iam.assume_role(body["roleArn"], body["principalArn"])
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/iam/simulate")
+def iam_simulate(body: dict):
+    """Decide whether a principal may perform an action on a resource."""
+    try:
+        decision = oblako.iam.authorize(body["principalArn"], body["action"], body["resource"])
+        return {"decision": decision}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/api/redshift/tables")
 def list_tables():
     try:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from .bedrock import BedrockService
 from .cloudformation import CloudFormationService
 from .dynamodb import DynamoDBService
+from .iam import IamService
 from .moto import MotoService
 from .opensearch import OpenSearchService
 from .rds import RdsService
@@ -26,6 +27,7 @@ class Oblako:
         self.rds = RdsService()
         self.aurora = self.rds  # Aurora shares the rds control plane + engine
         self.moto = MotoService()
+        self.iam = IamService(moto=self.moto)  # IAM/STS control plane + policy evaluator
         self.s3 = S3ProxyService()
         self.dynamodb = DynamoDBService(host_port=8001)
         self.stepfunctions = StepFunctionsService()

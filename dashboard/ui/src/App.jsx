@@ -13,6 +13,7 @@ import DynamoDBPage from './pages/DynamoDBPage'
 import SageMakerPage from './pages/SageMakerPage'
 import NotebookPage from './pages/NotebookPage'
 import RdsPage from './pages/RdsPage'
+import IamPage from './pages/IamPage'
 
 const NAV_ITEMS = [
   { type: 'link', text: 'Services', href: '#services' },
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { type: 'link', text: 'CloudFormation', href: '#cloudformation' },
   { type: 'link', text: 'Redshift', href: '#redshift' },
   { type: 'link', text: 'RDS / Aurora', href: '#rds' },
+  { type: 'link', text: 'IAM', href: '#iam' },
 ]
 
 const PAGES = {
@@ -39,6 +41,7 @@ const PAGES = {
   '#cloudformation': CloudFormationPage,
   '#redshift': RedshiftPage,
   '#rds': RdsPage,
+  '#iam': IamPage,
 }
 
 export default function App() {
