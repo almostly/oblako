@@ -1,0 +1,16 @@
+# Run on demand: uvx pre-commit run --all-files
+# Install the git hook: uvx pre-commit install
+repos:
+  - repo: https://github.com/PyCQA/pydocstyle
+    rev: 6.3.0
+    hooks:
+      - id: pydocstyle
+        # scope to the package; tests/examples/dashboard aren't docstring-checked
+        files: ^oblako/.*\.py$
+
+  - repo: https://github.com/aws-cloudformation/cfn-lint
+    rev: v1.47.1
+    hooks:
+      - id: cfn-lint
+        # the only tracked CloudFormation/SAM template (build artifacts are gitignored)
+        files: ^examples/sam/template\.yaml$
