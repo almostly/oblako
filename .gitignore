@@ -36,3 +36,6 @@ node_modules/
 # `oblako notebook` launch artifacts (generated per launch in the working dir)
 .oblako-aws-config
 oblako-welcome.ipynb
+
+# Jupyter
+.ipynb_checkpoints/

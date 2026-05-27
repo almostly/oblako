@@ -1,12 +1,12 @@
-"""Serve credit scores over SageMaker's container contract (GET /ping, POST /invocations).
+"""Serve the CatBoost scorecard over SageMaker's contract (GET /ping, POST /invocations).
 
-Loads the trained PD model + scorecard metadata, turns each application's
-probability of default into a scorecard score, and returns an APPROVE/DECLINE
-decision against the cutoff.
+For each application: P(default) from the model, and a credit score from CatBoost's
+native SHAP values — `score = offset + factor * (-log_odds)`, where log_odds is the
+sum of the SHAP feature contributions plus the base value (so higher score = better
+credit). Mirrors the reference's inference.py.
 """
 
 import json
-import math
 import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -19,26 +19,36 @@ def _load():
     global _model, _meta
     import joblib
 
-    _model = joblib.load(os.path.join(MODEL, "model.joblib"))
+    _model = joblib.load(os.path.join(MODEL, "catboost_model.joblib"))
     _meta = json.load(open(os.path.join(MODEL, "model_metadata.json")))
 
 
 def _score(instances):
-    feats, factor, offset, cutoff = (_meta["features"], _meta["factor"], _meta["offset"], _meta["cutoff"])
-    rows = [[float(inst[f]) for f in feats] for inst in instances]
+    import pandas as pd
+    from catboost import Pool
+
+    feats, cats = _meta["feature_names"], _meta["categorical_features"]
+    factor, offset = _meta["factor"], _meta["offset"]
+    cat_idx = [feats.index(c) for c in cats]
     out = []
-    for proba in _model.predict_proba(rows):
-        pd = min(max(float(proba[1]), 1e-6), 1 - 1e-6)  # P(default)
-        score = int(round(offset + factor * math.log((1 - pd) / pd)))
-        out.append({"pd": round(pd, 4), "score": score,
-                    "decision": "APPROVE" if score >= cutoff else "DECLINE"})
+    for inst in instances:
+        X = pd.DataFrame([{f: inst.get(f, 0) for f in feats}])
+        for col in cats:
+            X[col] = X[col].astype(str)
+        pool = Pool(X, cat_features=cat_idx)
+        proba = float(_model.predict_proba(pool)[0, 1])           # P(default)
+        shap = _model.get_feature_importance(type="ShapValues", data=pool)
+        log_odds = float(shap[0, :-1].sum() + shap[0, -1])        # contributions + base
+        out.append({"proba": round(proba, 4), "score": int(offset + factor * (-log_odds))})
     return out
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802 - SageMaker health check
-        self.send_response(200 if self.path == "/ping" else 404)
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
         self.end_headers()
+        self.wfile.write(b'{"status": "healthy"}')
 
     def do_POST(self):  # noqa: N802 - SageMaker /invocations
         if self.path != "/invocations":
@@ -59,6 +69,6 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def run():
-    """Load the model and serve the scoring HTTP contract on :8080."""
+    """Load the model and serve the scoring contract on :8080."""
     _load()
     HTTPServer(("0.0.0.0", 8080), Handler).serve_forever()

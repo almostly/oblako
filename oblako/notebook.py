@@ -44,6 +44,17 @@ _AWS_CONFIG = (
 )
 
 
+def _workspace() -> Path:
+    """Return the dedicated notebooks workspace directory.
+
+    JupyterLab roots here so it shows only relevant notebooks, not the whole repo;
+    override with $OBLAKO_NOTEBOOK_DIR.
+    """
+    path = Path(os.environ.get("OBLAKO_NOTEBOOK_DIR") or Path.home() / ".oblako" / "notebooks")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def make_env(workdir: Path) -> dict[str, str]:
     """Return an environment dict that points unmodified boto3 at oblako's services."""
     config = workdir / ".oblako-aws-config"
@@ -113,11 +124,24 @@ def write_starter(workdir: Path) -> Path:
     return path
 
 
+def seed_workspace(workdir: Path) -> Path:
+    """Seed the workspace with the welcome notebook + the SageMaker example notebooks."""
+    import shutil
+
+    write_starter(workdir)
+    example = Path(__file__).resolve().parents[1] / "examples" / "sagemaker_credit_risk"
+    dst = workdir / "sagemaker_credit_risk"
+    if example.exists() and not dst.exists():
+        shutil.copytree(example, dst,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".aws-sam"))
+    return workdir
+
+
 def launch(port: int = 8888, workdir: Path | None = None) -> int:
     """Launch JupyterLab (blocking) with the oblako-wired environment."""
-    workdir = Path(workdir or Path.cwd())
+    workdir = Path(workdir) if workdir else _workspace()
     workdir.mkdir(parents=True, exist_ok=True)
-    write_starter(workdir)
+    seed_workspace(workdir)
     env = make_env(workdir)
     return subprocess.run(
         [sys.executable, "-m", "jupyterlab", "--port", str(port)],
@@ -144,9 +168,9 @@ def spawn(port: int = 8888, token: str = "oblako", workdir: Path | None = None) 
     """
     import time
 
-    workdir = Path(workdir or Path.cwd())
+    workdir = Path(workdir) if workdir else _workspace()
     workdir.mkdir(parents=True, exist_ok=True)
-    write_starter(workdir)
+    seed_workspace(workdir)
     url = f"http://localhost:{port}/lab?token={token}"
     if is_running(port):
         return {"url": url, "port": port, "already_running": True}

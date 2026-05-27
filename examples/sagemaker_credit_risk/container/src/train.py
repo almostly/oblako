@@ -1,58 +1,51 @@
-"""Train a credit-default classifier and bake in PDO scorecard scaling.
+"""Train a CatBoost credit model and store it with PDO scorecard scaling.
 
-Reads CSV training data (feature columns + a final 0/1 `default` column) from
-SageMaker's input channel, fits a logistic-regression PD model, and writes the
-model + scorecard metadata (factor/offset) to the model dir. Hyperparameters
-(target score/odds, points-to-double-odds, cutoff) come from SageMaker.
+Mirrors the reference (aws-samples/credit-risk-modeling-on-aws): CatBoostClassifier
+over 7 numeric + 5 categorical application features, predicting P(default). The
+score is computed at serving time from SHAP log-odds; here we just persist the
+model + the scaling metadata (factor/offset) SageMaker hands us as hyperparameters.
 """
 
-import csv
 import glob
 import json
-import math
 import os
 
 INPUT = "/opt/ml/input/data/train"
 MODEL = "/opt/ml/model"
 CONFIG = "/opt/ml/input/config/hyperparameters.json"
 
-
-def _load():
-    X, y, header = [], [], []
-    for path in sorted(glob.glob(os.path.join(INPUT, "*.csv"))):
-        with open(path) as fh:
-            reader = csv.reader(fh)
-            header = next(reader)
-            for row in reader:
-                *feats, label = row
-                X.append([float(v) for v in feats])
-                y.append(int(float(label)))
-    if not X:
-        raise SystemExit(f"no training CSVs in {INPUT}")
-    return X, y, header[:-1]
+NUMERIC = ["Application_Score", "Bureau_Score", "Loan_Amount", "Time_with_Bank",
+           "Time_in_Employment", "Loan_to_income", "Gross_Annual_Income"]
+CATEGORICAL = ["Loan_Payment_Frequency", "Residential_Status", "Cheque_Card_Flag",
+               "Existing_Customer_Flag", "Home_Telephone_Number"]
+FEATURES = NUMERIC + CATEGORICAL
 
 
 def run():
-    """Fit the PD model, compute the scorecard scaling, and save the artifacts."""
-    from sklearn.linear_model import LogisticRegression
+    """Fit CatBoost on the training channel and save the model + scorecard metadata."""
+    import joblib
+    import pandas as pd
+    from catboost import CatBoostClassifier
 
     hp = json.load(open(CONFIG)) if os.path.exists(CONFIG) else {}
-    X, y, features = _load()
-    model = LogisticRegression(max_iter=1000).fit(X, y)
+    df = pd.read_csv(sorted(glob.glob(os.path.join(INPUT, "*.csv")))[0])
+    target = next(c for c in ("target", "is_bad", "default", "y") if c in df.columns)
+    X = df[FEATURES].copy()
+    for col in CATEGORICAL:
+        X[col] = X[col].astype(str)
+    y = df[target]
 
-    # PDO scorecard scaling: score = offset + factor * ln(odds), odds = P(good)/P(bad).
-    target_score = float(hp.get("target-score", 600))
-    target_odds = float(hp.get("target-odds", 30))
-    pdo = float(hp.get("pts-double-odds", 20))
-    factor = pdo / math.log(2)
-    offset = target_score - factor * math.log(target_odds)
+    model = CatBoostClassifier(
+        iterations=int(hp.get("iterations", 200)), depth=int(hp.get("depth", 6)),
+        learning_rate=float(hp.get("learning-rate", 0.1)), random_seed=42, verbose=False,
+    )
+    model.fit(X, y, cat_features=[FEATURES.index(c) for c in CATEGORICAL])
 
     os.makedirs(MODEL, exist_ok=True)
-    import joblib
-
-    joblib.dump(model, os.path.join(MODEL, "model.joblib"))
+    joblib.dump(model, os.path.join(MODEL, "catboost_model.joblib"))
     with open(os.path.join(MODEL, "model_metadata.json"), "w") as fh:
-        json.dump({"features": features, "factor": factor, "offset": offset,
-                   "cutoff": float(hp.get("cutoff", target_score))}, fh)
-    print(f"trained on {len(y)} rows, {len(features)} features "
-          f"(default rate {sum(y) / len(y):.2f}); factor={factor:.1f} offset={offset:.1f}")
+        json.dump({"feature_names": FEATURES, "categorical_features": CATEGORICAL,
+                   "factor": float(hp.get("factor", 20.0)),
+                   "offset": float(hp.get("offset", 600.0))}, fh)
+    print(f"trained CatBoost on {len(y)} rows, {len(FEATURES)} features "
+          f"(default rate {y.mean():.2f})")

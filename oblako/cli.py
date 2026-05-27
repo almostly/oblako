@@ -128,7 +128,7 @@ def cmd_notebook(args):
     port = args.port or 8888
     print(f"Launching JupyterLab on http://localhost:{port}")
     print("kernel is pre-wired: boto3.client('s3') etc. hit oblako (run 'oblako up' for the services)")
-    sys.exit(notebook.launch(port=port))
+    sys.exit(notebook.launch(port=port, workdir=args.dir))
 
 
 #-----------------------------------------------------------------------------------------------
@@ -276,6 +276,7 @@ def main():
 
     p_nb = sub.add_parser("notebook", help="Launch JupyterLab wired to oblako's services")
     p_nb.add_argument("-p", "--port", type=int, default=8888, help="Port (default: 8888)")
+    p_nb.add_argument("--dir", help="Notebook workspace dir (default: ~/.oblako/notebooks)")
     p_nb.set_defaults(func=cmd_notebook)
 
     p_rsd = sub.add_parser("redshift-data", help="Run the Redshift Data API server")

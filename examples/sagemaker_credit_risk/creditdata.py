@@ -1,43 +1,67 @@
-"""Synthetic credit-application data for the SageMaker credit-risk example."""
+"""Synthetic credit applications (7 numeric + 5 categorical) for the SageMaker example.
+
+Matches the reference's feature schema (aws-samples/credit-risk-modeling-on-aws).
+"""
 
 import csv
 import math
 import random
 
-FEATURES = ["income", "debt_ratio", "credit_util", "num_delinquencies", "employment_years"]
+NUMERIC = ["Application_Score", "Bureau_Score", "Loan_Amount", "Time_with_Bank",
+           "Time_in_Employment", "Loan_to_income", "Gross_Annual_Income"]
+CATEGORICAL = ["Loan_Payment_Frequency", "Residential_Status", "Cheque_Card_Flag",
+               "Existing_Customer_Flag", "Home_Telephone_Number"]
 
 
 def _row(rng):
-    income = rng.uniform(20_000, 200_000)
-    debt_ratio = rng.uniform(0.0, 0.8)
-    credit_util = rng.uniform(0.0, 1.0)
-    num_delinq = rng.choice([0, 0, 0, 1, 1, 2, 3])
-    employment_years = rng.uniform(0, 30)
-    # latent risk: high utilization/debt/delinquencies + low income/tenure -> default
-    risk = (1.5 * credit_util + 1.2 * debt_ratio + 0.5 * num_delinq
-            - 4e-6 * income - 0.04 * employment_years)
-    pd = 1 / (1 + math.exp(-(risk - 1.2) * 2))  # centered for a ~18% default rate
-    default = 1 if rng.random() < pd else 0
-    return [round(income), round(debt_ratio, 3), round(credit_util, 3), num_delinq,
-            round(employment_years, 1)], default
+    app = rng.uniform(300, 900)
+    bureau = rng.uniform(300, 900)
+    income = rng.uniform(15_000, 200_000)
+    loan = rng.uniform(1_000, 60_000)
+    l2i = round(loan / max(income, 1) * 100, 2)
+    twb = rng.uniform(0, 30)
+    tie = rng.uniform(0, 40)
+    res = rng.choice(["Owner", "Tenant", "Living with parents"])
+    row = {
+        "Application_Score": round(app), "Bureau_Score": round(bureau),
+        "Loan_Amount": round(loan), "Time_with_Bank": round(twb, 1),
+        "Time_in_Employment": round(tie, 1), "Loan_to_income": l2i,
+        "Gross_Annual_Income": round(income),
+        "Loan_Payment_Frequency": rng.choice(["Monthly", "Weekly", "Fortnightly"]),
+        "Residential_Status": res,
+        "Cheque_Card_Flag": rng.choice(["Y", "N"]),
+        "Existing_Customer_Flag": rng.choice(["Y", "N"]),
+        "Home_Telephone_Number": rng.choice(["Y", "N"]),
+    }
+    # latent default risk: low scores + high loan-to-income + tenant + short tenure
+    risk = (-0.005 * app - 0.005 * bureau + 0.03 * l2i + (0.6 if res == "Tenant" else 0.0)
+            - 0.03 * twb + 4.2)
+    row["is_bad"] = 1 if rng.random() < 1 / (1 + math.exp(-risk)) else 0
+    return row
 
 
-def write_training_csv(path, n=500, seed=0):
-    """Write n labeled credit applications (features + 0/1 default) to a CSV."""
+def write_training_csv(path, n=600, seed=0):
+    """Write n labeled credit applications (12 features + `is_bad`) to a CSV."""
     rng = random.Random(seed)
+    cols = [*NUMERIC, *CATEGORICAL, "is_bad"]
     with open(path, "w", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow([*FEATURES, "default"])
+        writer = csv.DictWriter(fh, fieldnames=cols)
+        writer.writeheader()
         for _ in range(n):
-            feats, label = _row(rng)
-            writer.writerow([*feats, label])
+            writer.writerow(_row(rng))
 
 
 def sample_applications():
-    """Return a clearly-prime and a clearly-subprime applicant to score."""
+    """Return a prime and a subprime applicant (all 12 features) to score."""
     return [
-        {"income": 150000, "debt_ratio": 0.10, "credit_util": 0.05,
-         "num_delinquencies": 0, "employment_years": 12},
-        {"income": 28000, "debt_ratio": 0.70, "credit_util": 0.95,
-         "num_delinquencies": 3, "employment_years": 0.5},
+        {"Application_Score": 820, "Bureau_Score": 800, "Loan_Amount": 8000,
+         "Time_with_Bank": 14, "Time_in_Employment": 12, "Loan_to_income": 8.0,
+         "Gross_Annual_Income": 100000, "Loan_Payment_Frequency": "Monthly",
+         "Residential_Status": "Owner", "Cheque_Card_Flag": "Y",
+         "Existing_Customer_Flag": "Y", "Home_Telephone_Number": "Y"},
+        {"Application_Score": 420, "Bureau_Score": 450, "Loan_Amount": 45000,
+         "Time_with_Bank": 1, "Time_in_Employment": 0.5, "Loan_to_income": 150.0,
+         "Gross_Annual_Income": 30000, "Loan_Payment_Frequency": "Weekly",
+         "Residential_Status": "Tenant", "Cheque_Card_Flag": "N",
+         "Existing_Customer_Flag": "N", "Home_Telephone_Number": "N"},
     ]
