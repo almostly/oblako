@@ -1560,6 +1560,7 @@ notebook = [
     { name = "jupyterlab" },
 ]
 sagemaker = [
+    { name = "pytz" },
     { name = "sagemaker" },
 ]
 
@@ -1575,6 +1576,7 @@ requires-dist = [
     { name = "psycopg2-binary", specifier = ">=2.9" },
     { name = "pymysql", marker = "extra == 'mysql'", specifier = ">=1.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytz", marker = "extra == 'sagemaker'" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "sagemaker", marker = "extra == 'sagemaker'", specifier = ">=2.200,<3" },
