@@ -116,6 +116,21 @@ def cmd_dashboard(args):
     subprocess.call([sys.executable, "-m", "uvicorn", "dashboard.api:app", "--host", "0.0.0.0", "--port", str(port)])
 
 
+# Notebook
+def cmd_notebook(args):
+    """Launch JupyterLab pre-wired so unmodified boto3 hits oblako's local services."""
+    try:
+        import jupyterlab  # noqa: F401
+    except ImportError:
+        print("JupyterLab isn't installed. Install the extra: pip install 'oblako[notebook]'")
+        sys.exit(1)
+    from oblako import notebook
+    port = args.port or 8888
+    print(f"Launching JupyterLab on http://localhost:{port}")
+    print("kernel is pre-wired: boto3.client('s3') etc. hit oblako (run 'oblako up' for the services)")
+    sys.exit(notebook.launch(port=port))
+
+
 #-----------------------------------------------------------------------------------------------
 # Redshift Data API
 #-----------------------------------------------------------------------------------------------
@@ -258,6 +273,10 @@ def main():
     p_dash = sub.add_parser("dashboard", help="Start the web dashboard")
     p_dash.add_argument("-p", "--port", type=int, default=8000, help="Port (default: 8000)")
     p_dash.set_defaults(func=cmd_dashboard)
+
+    p_nb = sub.add_parser("notebook", help="Launch JupyterLab wired to oblako's services")
+    p_nb.add_argument("-p", "--port", type=int, default=8888, help="Port (default: 8888)")
+    p_nb.set_defaults(func=cmd_notebook)
 
     p_rsd = sub.add_parser("redshift-data", help="Run the Redshift Data API server")
     p_rsd.add_argument("-p", "--port", type=int, default=8002, help="Port (default: 8002)")

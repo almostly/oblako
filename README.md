@@ -45,6 +45,7 @@ oblako up [service]        Start all services (or a specific one)
 oblako down [service]      Stop all services (or a specific one)
 oblako status              Show service status
 oblako dashboard [-p PORT] Start the web dashboard (default: port 8000)
+oblako notebook [-p PORT]  Launch JupyterLab wired to oblako's services (default: port 8888)
 oblako redshift-data [-p PORT] Start the Redshift Data API server (default: port 8002)
 oblako bedrock-runtime [-p PORT] Start the Bedrock Runtime server (default: port 8004)
 oblako rds-data [-p PORT]  Start the RDS Data API server (default: port 8006)
@@ -96,6 +97,27 @@ Pages:
 - **Step Functions** - state machines, ASL JSON viewer, execution history, flow diagram
 - **CloudFormation** - stacks deployed to the local CloudFormation, with resources, outputs, and events
 - **Redshift** - cluster list (management API), table list, and SQL query editor with results
+
+## Notebook (JupyterLab)
+
+`oblako notebook` launches **JupyterLab** with the kernel pre-wired to oblako, so you write the AWS code you normally would and it runs against your local services — no `endpoint_url`, no config:
+
+```bash
+oblako up              # start the services
+pip install 'oblako[notebook]'
+oblako notebook        # opens JupyterLab on http://localhost:8888 with a welcome notebook
+```
+
+```python
+import boto3
+s3 = boto3.client("s3")          # transparently hits S3Proxy — no endpoint_url
+s3.create_bucket(Bucket="from-notebook")
+
+ddb = boto3.client("dynamodb")   # DynamoDB Local
+ddb.list_tables()
+```
+
+How it works: the kernel gets `AWS_ENDPOINT_URL_*` for every service (S3, DynamoDB, CloudFormation, Step Functions, Redshift/RDS control planes, Lambda/IAM/API Gateway, Bedrock) plus test creds and S3 path-style/checksum config. The always-on Docker services work immediately; the in-process servers (CloudFormation, redshift-data, rds-data, bedrock-runtime) start on first use via the helpers, e.g. `from oblako.services import Oblako; Oblako().cloudformation.get_client()`.
 
 ## Services
 

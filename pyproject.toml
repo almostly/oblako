@@ -26,6 +26,9 @@ agentcore = [
 mysql = [
     "pymysql>=1.1",
 ]
+notebook = [
+    "jupyterlab>=4",
+]
 sagemaker = [
     # v2 SDK has classic local mode (LocalSession, Estimator instance_type="local");
     # v3 restructured the package and dropped it.
