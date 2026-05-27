@@ -32,3 +32,7 @@ node_modules/
 # Local env files
 .env
 .env.*
+
+# `oblako notebook` launch artifacts (generated per launch in the working dir)
+.oblako-aws-config
+oblako-welcome.ipynb
