@@ -38,6 +38,7 @@ jobs:
           tests/services/test_kinesis.py
           tests/services/test_iceberg.py
           tests/services/test_aws_namespacing.py
+          tests/services/test_glue.py
 
   integration:
     name: integration tests (Docker services)

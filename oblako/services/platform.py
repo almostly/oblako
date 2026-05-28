@@ -6,6 +6,7 @@ from .bedrock import BedrockService
 from .caddy import CaddyService
 from .cloudformation import CloudFormationService
 from .dynamodb import DynamoDBService
+from .glue import GlueService
 from .iam import IamService
 from .iceberg import IcebergCatalogService
 from .kinesis import KinesisService
@@ -39,6 +40,8 @@ class Oblako:
         # (boto3.client("s3tables")) — same shape, same Iceberg under the hood.
         self.iceberg = IcebergCatalogService()
         self.s3tables = self.iceberg  # AWS-faithful alias: S3 Tables == Iceberg-on-S3
+        # Glue 5 PySpark runner (per-job container; ~5 GB image, pulled on first job).
+        self.glue = GlueService()
         self.stepfunctions = StepFunctionsService()
         # MLflow on AWS is a SageMaker resource (sagemaker:CreateMlflowTrackingServer).
         # Build the service first, then expose it under the SageMaker namespace.
