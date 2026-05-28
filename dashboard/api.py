@@ -586,6 +586,30 @@ def kinesis_get_records(stream_name: str, limit: int = 20):
         return {"records": [], "error": str(e)}
 
 
+@app.get("/api/redshift/schema")
+def redshift_schema():
+    """Return the schema tree (schemas -> tables -> columns) for the Query Editor browser."""
+    try:
+        conn = oblako.redshift.connect()
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT table_schema, table_name, column_name, data_type
+            FROM information_schema.columns
+            WHERE table_schema NOT IN ('information_schema', 'pg_catalog')
+            ORDER BY table_schema, table_name, ordinal_position
+        """)
+        schemas: dict[str, dict[str, list]] = {}
+        for schema, table, column, dtype in cur.fetchall():
+            tables = schemas.setdefault(schema, {})
+            tables.setdefault(table, []).append({"name": column, "type": dtype})
+        cur.close(); conn.close()
+        return {"schemas": [{"name": s, "tables": [{"name": t, "columns": cols}
+                             for t, cols in ts.items()]} for s, ts in schemas.items()]}
+    except Exception as e:
+        return {"schemas": [], "error": str(e)}
+
+
 @app.get("/api/redshift/tables")
 def list_tables():
     try:
