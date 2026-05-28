@@ -33,6 +33,7 @@ jobs:
           tests/notebook/test_notebook.py
           tests/stepfunctions/test_sfn_templates.py
           tests/iam/test_iam_evaluator.py
+          tests/services/test_mlflow.py
 
   integration:
     name: integration tests (Docker services)

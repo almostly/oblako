@@ -35,6 +35,13 @@ sagemaker = [
     "sagemaker>=2.200,<3",
     "pytz",  # sagemaker.workflow.pipeline imports it but doesn't always pull it in
 ]
+mlflow = [
+    # Local MLflow tracking server (oblako.mlflow). Heavy dep tree, hence an extra.
+    "mlflow>=3",
+    # SigV4 auth plugin so boto3-style credentials work — keeps user code
+    # identical to one targeting SageMaker's managed MLflow.
+    "sagemaker-mlflow>=0.1",
+]
 
 [project.scripts]
 oblako = "oblako.cli:main"

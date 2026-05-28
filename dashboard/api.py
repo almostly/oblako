@@ -675,6 +675,18 @@ def launch_notebook():
         return {"error": str(e)}
 
 
+@app.post("/api/mlflow/launch")
+def launch_mlflow():
+    """Start the local MLflow App container (pre-wired to S3Proxy) and return its URL."""
+    try:
+        oblako.mlflow.start()
+        if not oblako.mlflow.wait_ready(timeout=60):
+            return {"error": "MLflow did not become ready within 60s"}
+        return {"url": oblako.mlflow.tracking_uri}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
 # CloudFormation
 @app.get("/api/cloudformation/stacks")
 def list_stacks():

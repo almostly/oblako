@@ -9,12 +9,46 @@ import Container from '@cloudscape-design/components/container'
 import ColumnLayout from '@cloudscape-design/components/column-layout'
 import Alert from '@cloudscape-design/components/alert'
 import Tabs from '@cloudscape-design/components/tabs'
+import Link from '@cloudscape-design/components/link'
+import Spinner from '@cloudscape-design/components/spinner'
 import Prism from 'prismjs'
 import 'prismjs/components/prism-python'
 import 'prismjs/themes/prism.css'
 import NotebookPage from './NotebookPage'
 
 const API = 'http://localhost:8000'
+
+// Launches the local MLflow tracking server (oblako.mlflow) and embeds its UI.
+function MlflowTab() {
+  const [state, setState] = useState({ loading: true, url: null, error: null })
+
+  useEffect(() => {
+    let active = true
+    setState({ loading: true, url: null, error: null })
+    fetch(`${API}/api/mlflow/launch`, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => { if (active) setState({ loading: false, url: d.url || null, error: d.error || null }) })
+      .catch(e => { if (active) setState({ loading: false, url: null, error: e.message }) })
+    return () => { active = false }
+  }, [])
+
+  if (state.loading) {
+    return <Box padding="l"><Spinner /> Starting MLflow App… (serverless — no servers to manage; first launch builds the App image, ~a minute)</Box>
+  }
+  if (state.error) {
+    return <Box padding="l" color="text-status-error">{state.error}</Box>
+  }
+  return (
+    <SpaceBetween size="xs">
+      <Box float="right"><Link external href={state.url}>Open in a new tab</Link></Box>
+      <iframe
+        title="MLflow"
+        src={state.url}
+        style={{ width: '100%', height: '78vh', border: '1px solid #d5dbdb', borderRadius: 4 }}
+      />
+    </SpaceBetween>
+  )
+}
 
 const SAGEMAKER_CODE = `from sagemaker.local import LocalSession
 from sagemaker.estimator import Estimator
@@ -154,6 +188,7 @@ export default function SageMakerPage() {
       </Header>
       <Tabs tabs={[
         { id: 'notebook', label: 'Notebook', content: <NotebookPage embedded /> },
+        { id: 'mlflow', label: 'MLflow', content: <MlflowTab /> },
         { id: 'training', label: 'Training & endpoints', content: trainingTab },
       ]} />
     </SpaceBetween>

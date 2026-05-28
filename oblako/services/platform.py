@@ -6,6 +6,7 @@ from .bedrock import BedrockService
 from .cloudformation import CloudFormationService
 from .dynamodb import DynamoDBService
 from .iam import IamService
+from .mlflow import MlflowService
 from .moto import MotoService
 from .opensearch import OpenSearchService
 from .rds import RdsService
@@ -32,6 +33,9 @@ class Oblako:
         self.dynamodb = DynamoDBService(host_port=8001)
         self.stepfunctions = StepFunctionsService()
         self.sagemaker = SageMakerService()
+        # MLflow App container — heavy image, kept out of `up`; started lazily
+        # by the dashboard or by `oblako up mlflow`.
+        self.mlflow = MlflowService()
         # In-process orchestration server (no container): provisions stacks into
         # the engines above. Started lazily on first get_client().
         self.cloudformation = CloudFormationService()
