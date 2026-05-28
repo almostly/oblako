@@ -489,6 +489,74 @@ def iam_simulate(body: dict):
         return {"error": str(e)}
 
 
+# Kinesis
+@app.get("/api/kinesis/streams")
+def kinesis_streams():
+    """List Kinesis streams with status + shard count."""
+    try:
+        k = oblako.kinesis.get_client()
+        names = k.list_streams()["StreamNames"]
+        streams = []
+        for name in names:
+            d = k.describe_stream(StreamName=name)["StreamDescription"]
+            streams.append({"name": name, "status": d.get("StreamStatus"),
+                            "shards": len(d.get("Shards", []))})
+        return {"streams": streams}
+    except Exception as e:
+        return {"streams": [], "error": str(e)}
+
+
+@app.post("/api/kinesis/streams")
+def kinesis_create_stream(body: dict):
+    """Create a Kinesis stream."""
+    name = body.get("streamName")
+    if not name:
+        return {"error": "streamName is required"}
+    try:
+        oblako.kinesis.get_client().create_stream(
+            StreamName=name, ShardCount=int(body.get("shardCount", 1)),
+        )
+        return {"streamName": name}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/api/kinesis/records")
+def kinesis_put_record(body: dict):
+    """Put a record onto a Kinesis stream."""
+    try:
+        resp = oblako.kinesis.get_client().put_record(
+            StreamName=body["streamName"],
+            Data=body.get("data", "").encode(),
+            PartitionKey=body.get("partitionKey", "p1"),
+        )
+        return {"shardId": resp["ShardId"], "sequenceNumber": resp["SequenceNumber"]}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/api/kinesis/records/{stream_name}")
+def kinesis_get_records(stream_name: str, limit: int = 20):
+    """Read the most recent records from the stream (TRIM_HORIZON across all shards)."""
+    try:
+        k = oblako.kinesis.get_client()
+        shards = k.describe_stream(StreamName=stream_name)["StreamDescription"]["Shards"]
+        records = []
+        for shard in shards:
+            it = k.get_shard_iterator(StreamName=stream_name, ShardId=shard["ShardId"],
+                                      ShardIteratorType="TRIM_HORIZON")["ShardIterator"]
+            page = k.get_records(ShardIterator=it, Limit=limit)["Records"]
+            records.extend({
+                "shardId": shard["ShardId"],
+                "partitionKey": r["PartitionKey"],
+                "data": r["Data"].decode("utf-8", errors="replace"),
+                "sequenceNumber": r["SequenceNumber"],
+            } for r in page)
+        return {"records": records[-limit:]}
+    except Exception as e:
+        return {"records": [], "error": str(e)}
+
+
 @app.get("/api/redshift/tables")
 def list_tables():
     try:

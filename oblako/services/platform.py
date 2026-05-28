@@ -7,6 +7,7 @@ from .caddy import CaddyService
 from .cloudformation import CloudFormationService
 from .dynamodb import DynamoDBService
 from .iam import IamService
+from .kinesis import KinesisService
 from .mlflow import MlflowService
 from .moto import MotoService
 from .opensearch import OpenSearchService
@@ -32,6 +33,7 @@ class Oblako:
         self.iam = IamService(moto=self.moto)  # IAM/STS control plane + policy evaluator
         self.s3 = S3ProxyService()
         self.dynamodb = DynamoDBService(host_port=8001)
+        self.kinesis = KinesisService()
         self.stepfunctions = StepFunctionsService()
         self.sagemaker = SageMakerService()
         # MLflow App container — heavy image, kept out of `up`; started lazily

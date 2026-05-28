@@ -35,6 +35,7 @@ jobs:
           tests/iam/test_iam_evaluator.py
           tests/services/test_mlflow.py
           tests/services/test_caddy.py
+          tests/services/test_kinesis.py
 
   integration:
     name: integration tests (Docker services)

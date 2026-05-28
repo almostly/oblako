@@ -13,6 +13,7 @@ import DynamoDBPage from './pages/DynamoDBPage'
 import SageMakerPage from './pages/SageMakerPage'
 import RdsPage from './pages/RdsPage'
 import IamPage from './pages/IamPage'
+import KinesisPage from './pages/KinesisPage'
 
 const NAV_ITEMS = [
   { type: 'link', text: 'Services', href: '#services' },
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
   { type: 'link', text: 'SageMaker', href: '#sagemaker' },
   { type: 'link', text: 'S3', href: '#s3' },
   { type: 'link', text: 'DynamoDB', href: '#dynamodb' },
+  { type: 'link', text: 'Kinesis', href: '#kinesis' },
   { type: 'link', text: 'Step Functions', href: '#stepfunctions' },
   { type: 'link', text: 'CloudFormation', href: '#cloudformation' },
   { type: 'link', text: 'Redshift', href: '#redshift' },
@@ -34,6 +36,7 @@ const PAGES = {
   '#sagemaker': SageMakerPage,
   '#s3': S3Page,
   '#dynamodb': DynamoDBPage,
+  '#kinesis': KinesisPage,
   '#stepfunctions': StepFunctionsPage,
   '#cloudformation': CloudFormationPage,
   '#redshift': RedshiftPage,
