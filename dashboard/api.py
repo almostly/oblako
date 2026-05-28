@@ -489,6 +489,35 @@ def iam_simulate(body: dict):
         return {"error": str(e)}
 
 
+# Athena (Trino over the Iceberg catalog)
+@app.post("/api/athena/query")
+def athena_query(body: dict):
+    """Run a SQL query through local Trino; returns {columns, rows} or {error}."""
+    sql = (body or {}).get("sql", "").strip()
+    if not sql:
+        return {"error": "sql is required"}
+    try:
+        return oblako.trino.query(sql, timeout=120)
+    except Exception as e:  # noqa: BLE001
+        return {"error": {"message": str(e)}}
+
+
+@app.get("/api/athena/schemas")
+def athena_schemas(catalog: str = "iceberg"):
+    """Quick schema browser: schemas + their tables under a catalog."""
+    try:
+        schemas = oblako.trino.query(f"SHOW SCHEMAS FROM {catalog}").get("rows", [])
+        result = []
+        for (schema,) in schemas:
+            if schema in ("information_schema", "system"):
+                continue
+            tables = oblako.trino.query(f"SHOW TABLES FROM {catalog}.{schema}").get("rows", [])
+            result.append({"schema": schema, "tables": [t[0] for t in tables]})
+        return {"catalog": catalog, "schemas": result}
+    except Exception as e:  # noqa: BLE001
+        return {"catalog": catalog, "schemas": [], "error": str(e)}
+
+
 # Kinesis
 @app.get("/api/kinesis/streams")
 def kinesis_streams():

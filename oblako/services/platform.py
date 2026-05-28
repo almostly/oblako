@@ -18,6 +18,7 @@ from .redshift import RedshiftService
 from .s3proxy import S3ProxyService
 from .sagemaker import SageMakerService
 from .stepfunctions import StepFunctionsService
+from .trino import TrinoService
 
 
 class Oblako:
@@ -42,6 +43,9 @@ class Oblako:
         self.s3tables = self.iceberg  # AWS-faithful alias: S3 Tables == Iceberg-on-S3
         # Glue 5 PySpark runner (per-job container; ~5 GB image, pulled on first job).
         self.glue = GlueService()
+        # Trino — Athena equivalent. SQL over the Iceberg catalog / S3 Tables.
+        self.trino = TrinoService()
+        self.athena = self.trino  # AWS-faithful alias: Athena is Trino under the hood
         self.stepfunctions = StepFunctionsService()
         # MLflow on AWS is a SageMaker resource (sagemaker:CreateMlflowTrackingServer).
         # Build the service first, then expose it under the SageMaker namespace.
