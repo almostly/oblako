@@ -57,7 +57,7 @@ class Service:
     @property
     def container_name(self) -> str:
         """Return the container name for this service."""
-        return f"oblako-ml-{self.name}"
+        return f"oblako-{self.name}"
 
     def _port_bindings(self) -> dict:
         return {f"{p.container_port}/{p.protocol}": p.host_port for p in self.ports}

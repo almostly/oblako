@@ -28,7 +28,7 @@ class BedrockService(Service):
             name="bedrock",
             image="ollama/ollama:latest",
             ports=[PortMapping(container_port=11434, host_port=host_port)],
-            volumes={"oblako-ml-ollama": {"bind": "/root/.ollama", "mode": "rw"}},
+            volumes={"oblako-ollama-data": {"bind": "/root/.ollama", "mode": "rw"}},
         )
         self.host_port = host_port
         self.runtime_port = runtime_port

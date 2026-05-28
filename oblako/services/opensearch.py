@@ -20,7 +20,7 @@ class OpenSearchService(Service):
                 "OPENSEARCH_INITIAL_ADMIN_PASSWORD": "admin",
             },
             volumes={
-                "oblako-ml-opensearch": {
+                "oblako-opensearch-data": {
                     "bind": "/usr/share/opensearch/data",
                     "mode": "rw",
                 }

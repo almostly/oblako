@@ -21,7 +21,7 @@ class S3ProxyService(Service):
                 "JCLOUDS_FILESYSTEM_BASEDIR": "/data",
                 "S3PROXY_AUTHORIZATION": "none",
             },
-            volumes={"oblako-ml-s3": {"bind": "/data", "mode": "rw"}},
+            volumes={"oblako-s3-data": {"bind": "/data", "mode": "rw"}},
         )
         self.host_port = host_port
 

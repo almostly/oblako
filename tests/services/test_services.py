@@ -7,7 +7,7 @@ from oblako.services.base import Service, PortMapping, ServiceStatus
 
 def test_service_container_name():
     svc = Service(name="test", image="alpine:latest")
-    assert svc.container_name == "oblako-ml-test"
+    assert svc.container_name == "oblako-test"
 
 
 def test_service_port_bindings():

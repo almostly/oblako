@@ -23,14 +23,14 @@ _ENGINES = {
         "container_port": 5432,
         "default_host_port": 5432,
         "data_dir": "/var/lib/postgresql/data",
-        "volume": "oblako-ml-rds",
+        "volume": "oblako-rds-data",
     },
     "mysql": {
         "image": "mysql:8.0",
         "container_port": 3306,
         "default_host_port": 3306,
         "data_dir": "/var/lib/mysql",
-        "volume": "oblako-ml-rds-mysql",
+        "volume": "oblako-rds-mysql-data",
     },
 }
 

@@ -45,7 +45,7 @@ class RedshiftService(Service):
                 "POSTGRES_DB": database,
             },
             volumes={
-                "oblako-ml-redshift": {"bind": "/var/lib/postgresql/data", "mode": "rw"}
+                "oblako-redshift-data": {"bind": "/var/lib/postgresql/data", "mode": "rw"}
             },
         )
         self.host_port = host_port

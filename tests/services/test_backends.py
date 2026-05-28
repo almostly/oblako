@@ -23,9 +23,9 @@ def test_kubernetes_backend_selected(monkeypatch):
 def test_build_k8s_manifests():
     # A dynamodb-like Service maps to a Deployment + Service.
     manifest = backends.build_k8s_manifests(
-        name="oblako-ml-dynamodb", image="amazon/dynamodb-local:latest",
+        name="oblako-dynamodb", image="amazon/dynamodb-local:latest",
         ports={"8000/tcp": 8001}, environment={"FOO": "bar"},
-        volumes={"oblako-ml-dynamodb": {"bind": "/home/dynamodblocal/data", "mode": "rw"}},
+        volumes={"oblako-dynamodb": {"bind": "/home/dynamodblocal/data", "mode": "rw"}},
         extra_hosts={}, command="-jar DynamoDBLocal.jar -sharedDb -dbPath ./data",
         working_dir="/home/dynamodblocal", user="root", namespace="oblako",
     )
@@ -39,7 +39,7 @@ def test_build_k8s_manifests():
     assert container["securityContext"] == {"runAsUser": 0}
     assert container["volumeMounts"][0]["mountPath"] == "/home/dynamodblocal/data"
     svc = items["Service"]["spec"]
-    assert svc["selector"] == {"app": "oblako-ml-dynamodb"}
+    assert svc["selector"] == {"app": "oblako-dynamodb"}
     assert svc["ports"] == [{"name": "p8000", "port": 8000, "targetPort": 8000}]
 
 
