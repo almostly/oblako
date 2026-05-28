@@ -205,6 +205,7 @@ def _engines_up() -> bool:
         return False
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(not _engines_up(), reason="S3Proxy + DynamoDB Local not running")
 def test_deploy_lifecycle_provisions_real_engines():
     cfn = boto3.client("cloudformation", endpoint_url=start_in_thread(), **CREDS)
@@ -286,6 +287,7 @@ def _moto_up() -> bool:
         return False
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(not _moto_up(), reason="moto + DynamoDB Local not running")
 def test_sam_deploy_function_to_moto_and_table_to_dynamodb():
     cfn = boto3.client("cloudformation", endpoint_url=start_in_thread(), **CREDS)
@@ -359,6 +361,7 @@ def _opensearch_up() -> bool:
         return False
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not (_sfn_up() and _opensearch_up()),
     reason="Step Functions Local + OpenSearch not running",
@@ -430,6 +433,7 @@ def test_deploy_statemachine_and_opensearch_domain():
     ]
 
 
+@pytest.mark.integration
 @pytest.mark.skipif(
     not (_moto_up() and _sfn_up()),
     reason="moto + DynamoDB Local + Step Functions not running",

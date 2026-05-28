@@ -50,6 +50,13 @@ iceberg = [
 [project.scripts]
 oblako = "oblako.cli:main"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: requires running oblako services (Docker)",
+    "kubernetes: requires a Kubernetes cluster (minikube/kind)",
+]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

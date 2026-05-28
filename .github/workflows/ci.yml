@@ -19,26 +19,12 @@ jobs:
       - name: Lint (ruff)
         run: uv run --python 3.12 --extra dev ruff check oblako tests
 
-      # Docker-free subset (parsing, inference math, in-process servers).
+      # Docker-free subset: anything not auto-marked `integration` or `kubernetes`
+      # by tests/conftest.py is picked up — new tests Just Work without ci.yml edits.
       - name: Unit tests
         run: >
           uv run --python 3.12 --extra dev python -m pytest -v
-          tests/bedrock/test_bedrock_adapter.py
-          tests/bedrock/test_bedrock_backends.py
-          tests/services/test_services.py
-          tests/services/test_backends.py
-          tests/services/test_config.py
-          tests/redshift/test_redshift_ml_unit.py
-          tests/cloudformation/test_cloudformation.py
-          tests/notebook/test_notebook.py
-          tests/stepfunctions/test_sfn_templates.py
-          tests/iam/test_iam_evaluator.py
-          tests/services/test_mlflow.py
-          tests/services/test_caddy.py
-          tests/services/test_kinesis.py
-          tests/services/test_iceberg.py
-          tests/services/test_aws_namespacing.py
-          tests/services/test_glue.py
+          -m "not integration and not kubernetes"
 
   integration:
     name: integration tests (Docker services)
@@ -68,14 +54,7 @@ jobs:
       - name: Integration tests
         run: >
           uv run --python 3.12 --extra dev python -m pytest -v
-          tests/s3/test_s3proxy.py
-          tests/stepfunctions/test_stepfunctions.py
-          tests/redshift/test_redshift.py
-          tests/redshift/test_redshift_data.py
-          tests/rds/test_rds.py
-          tests/rds/test_rds_data.py
-          tests/opensearch/test_opensearch.py
-          tests/cloudformation/test_cloudformation.py
+          -m integration
 
   kubernetes:
     name: kubernetes backend (kind)
@@ -96,4 +75,4 @@ jobs:
       - name: Kubernetes backend test
         run: >
           uv run --python 3.12 --extra dev python -m pytest -v
-          tests/services/test_k8s_backend.py
+          -m kubernetes
