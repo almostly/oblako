@@ -1,10 +1,13 @@
 """Local MLflow App: managed container running the MLflow tracking server.
 
-Experience-faithful to SageMaker's managed MLflow — point ``mlflow`` at
-``http://localhost:5050`` and everything else is real MLflow. Artifacts land in
-S3Proxy via MLflow's proxied artifact storage (clients upload via the server,
-only the server hits S3); the backend store is SQLite on a named volume by
-default. ``sagemaker-mlflow`` is baked in for SigV4-signed clients.
+On AWS, MLflow is a SageMaker feature (``sagemaker:CreateMlflowTrackingServer``)
+— here it lives under the same namespace: ``oblako.sagemaker.mlflow``.
+
+Experience-faithful: point ``mlflow`` at ``http://localhost:5050`` and the rest
+is real MLflow. Artifacts land in S3Proxy via MLflow's proxied artifact storage
+(clients upload via the server; only the server hits S3); the backend store is
+SQLite on a named volume. ``sagemaker-mlflow`` is baked in for SigV4-signed
+clients targeting SageMaker-managed MLflow.
 
 The image is built from ``oblako/mlflow/Dockerfile`` on first start; if the
 ``slim`` (docker-slim / SlimToolkit) CLI is on PATH, the built image is then

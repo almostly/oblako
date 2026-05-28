@@ -35,13 +35,16 @@ class Oblako:
         self.s3 = S3ProxyService()
         self.dynamodb = DynamoDBService(host_port=8001)
         self.kinesis = KinesisService()
-        # Iceberg REST catalog (S3 Tables equivalent), backed by S3Proxy.
+        # Iceberg REST catalog backed by S3Proxy. On AWS this is "S3 Tables"
+        # (boto3.client("s3tables")) — same shape, same Iceberg under the hood.
         self.iceberg = IcebergCatalogService()
+        self.s3tables = self.iceberg  # AWS-faithful alias: S3 Tables == Iceberg-on-S3
         self.stepfunctions = StepFunctionsService()
-        self.sagemaker = SageMakerService()
-        # MLflow App container — heavy image, kept out of `up`; started lazily
-        # by the dashboard or by `oblako up mlflow`.
+        # MLflow on AWS is a SageMaker resource (sagemaker:CreateMlflowTrackingServer).
+        # Build the service first, then expose it under the SageMaker namespace.
         self.mlflow = MlflowService()
+        self.sagemaker = SageMakerService()
+        self.sagemaker.mlflow = self.mlflow  # oblako.sagemaker.mlflow mirrors AWS
         # Caddy reverse proxy fronts services with AWS-style vanity hostnames
         # (mlflow.oblako.aws -> MLflow). Also lazy — started with /api/mlflow/launch.
         self.caddy = CaddyService()

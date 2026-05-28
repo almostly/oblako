@@ -1,4 +1,8 @@
-"""Local Iceberg REST catalog — Iceberg tables on S3Proxy (S3 Tables equivalent).
+"""Local Iceberg REST catalog — Iceberg tables on S3Proxy.
+
+On AWS this is **S3 Tables** (``boto3.client("s3tables")``): a managed Iceberg
+catalog over S3. Same shape locally — Iceberg REST + S3Proxy underneath; the
+platform aliases this service as ``oblako.s3tables`` to mirror the AWS API.
 
 The ``tabulario/iceberg-rest`` reference image speaks the Iceberg REST API on
 :8181, with a built-in JDBC catalog. Configured here so the *warehouse* is
