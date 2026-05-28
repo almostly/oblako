@@ -83,6 +83,7 @@ def _service_type(name: str) -> str:
         "dynamodb": "DynamoDB",
         "stepfunctions": "Step Functions",
         "sagemaker": "SageMaker",
+        "lambda": "Lambda",
     }
     return types.get(name, name)
 
@@ -796,31 +797,50 @@ def launch_notebook():
         return {"error": str(e)}
 
 
+def _mlflow_urls() -> dict:
+    """Vanity + direct URLs for a ready MLflow App."""
+    vanity_url, hosts_line = None, None
+    try:
+        from oblako.services.caddy import vanity_host
+
+        oblako.caddy.start()
+        oblako.caddy.wait_ready(timeout=15)
+        vanity_url = oblako.caddy.vanity_url(vanity_host("mlflow"))
+        hosts_line = oblako.caddy.hosts_line()
+    except Exception:  # noqa: BLE001
+        pass
+    return {
+        "url": oblako.mlflow.tracking_uri,
+        "vanityUrl": vanity_url,
+        "hostsLine": hosts_line,
+    }
+
+
+@app.get("/api/mlflow/status")
+def mlflow_status():
+    """Where the MLflow App stands: idle / starting / ready / error.
+
+    The dashboard uses this to drive an explicit Create + Wait flow (mirrors
+    SageMaker's CreateMlflowTrackingServer in real AWS).
+    """
+    try:
+        if oblako.mlflow.wait_ready(timeout=2):
+            return {"status": "ready", **_mlflow_urls()}
+        return {"status": oblako.mlflow.status().value}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "error": str(e)}
+
+
 @app.post("/api/mlflow/launch")
 def launch_mlflow():
-    """Start MLflow + the Caddy vanity proxy; return both the direct and AWS-shaped URLs."""
+    """Create the MLflow App: start the container, return the URLs once ready."""
     try:
         oblako.mlflow.start()
-        if not oblako.mlflow.wait_ready(timeout=60):
-            return {"error": "MLflow did not become ready within 60s"}
-        # Caddy is best-effort — if :80 is busy or it errors, fall back to localhost.
-        vanity_url, hosts_line = None, None
-        try:
-            from oblako.services.caddy import vanity_host
-
-            oblako.caddy.start()
-            oblako.caddy.wait_ready(timeout=15)
-            vanity_url = oblako.caddy.vanity_url(vanity_host("mlflow"))
-            hosts_line = oblako.caddy.hosts_line()
-        except Exception:  # noqa: BLE001
-            pass
-        return {
-            "url": oblako.mlflow.tracking_uri,
-            "vanityUrl": vanity_url,
-            "hostsLine": hosts_line,
-        }
+        if not oblako.mlflow.wait_ready(timeout=120):
+            return {"status": "error", "error": "MLflow did not become ready within 120s"}
+        return {"status": "ready", **_mlflow_urls()}
     except Exception as e:  # noqa: BLE001
-        return {"error": str(e)}
+        return {"status": "error", "error": str(e)}
 
 
 # CloudFormation
@@ -879,9 +899,419 @@ def describe_stack(name: str):
         return {"error": str(e)}
 
 
-# -----------------------------------------------------------------------------------------------
+# Lambda
+# Moto owns the state (functions, layers, versions) and — with the Docker socket
+# mounted into the moto container — actually executes the handler on invoke.
+# moto's GetFunction returns a fake real-AWS S3 URL that we can't fetch back, so
+# we cache the source we packed into the zip alongside in a tiny in-memory map.
+# Key is (function_name) -> {"filename": str, "source": str}.
+_LAMBDA_SOURCE_CACHE: dict[str, dict[str, str]] = {}
+
+
+def _zip_handler(filename: str, source: str) -> bytes:
+    """Pack a single source file into a Lambda-deployable zip."""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(filename, source)
+    return buf.getvalue()
+
+
+def _runtime_filename(runtime: str, handler: str) -> str:
+    """Pick the source filename inside the zip from the runtime + handler."""
+    module = handler.split(".", 1)[0]
+    if runtime.startswith("python"):
+        return f"{module}.py"
+    if runtime.startswith("nodejs"):
+        return f"{module}.mjs" if module.endswith(".mjs") else f"{module}.js"
+    return f"{module}.py"
+
+
+def _starter_source(runtime: str, handler: str) -> str:
+    """Default source for a freshly created function."""
+    fn = handler.rsplit(".", 1)[-1]
+    if runtime.startswith("python"):
+        return (
+            "def " + fn + "(event, context):\n"
+            "    return {\"statusCode\": 200, \"body\": \"hello from oblako\", \"event\": event}\n"
+        )
+    if runtime.startswith("nodejs"):
+        return (
+            "export const " + fn + " = async (event) => ({\n"
+            "  statusCode: 200, body: 'hello from oblako', event,\n"
+            "});\n"
+        )
+    return "# unsupported runtime — replace this body\n"
+
+
+@app.get("/api/lambda/functions")
+def lambda_list_functions():
+    """List Lambda functions registered with moto."""
+    lam = oblako.lambda_.get_client()
+    try:
+        resp = lam.list_functions()
+        return {"functions": [
+            {
+                "name": f["FunctionName"],
+                "runtime": f.get("Runtime", ""),
+                "handler": f.get("Handler", ""),
+                "role": f.get("Role", ""),
+                "memory": f.get("MemorySize", 128),
+                "timeout": f.get("Timeout", 3),
+                "lastModified": f.get("LastModified", ""),
+                "codeSize": f.get("CodeSize", 0),
+                "layers": [l["Arn"] for l in f.get("Layers", [])],
+            } for f in resp.get("Functions", [])
+        ]}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e), "functions": []}
+
+
+@app.get("/api/lambda/functions/{name}")
+def lambda_get_function(name: str):
+    """Fetch full function detail incl. handler source (from server-side cache)."""
+    lam = oblako.lambda_.get_client()
+    try:
+        resp = lam.get_function(FunctionName=name)
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+    cfg = resp["Configuration"]
+    cached = _LAMBDA_SOURCE_CACHE.get(name) or {}
+    source = cached.get("source")
+    source_filename = cached.get("filename")
+    return {
+        "name": cfg["FunctionName"],
+        "runtime": cfg.get("Runtime", ""),
+        "handler": cfg.get("Handler", ""),
+        "role": cfg.get("Role", ""),
+        "memory": cfg.get("MemorySize", 128),
+        "timeout": cfg.get("Timeout", 3),
+        "description": cfg.get("Description", ""),
+        "lastModified": cfg.get("LastModified", ""),
+        "codeSize": cfg.get("CodeSize", 0),
+        "layers": [l["Arn"] for l in cfg.get("Layers", [])],
+        "envVars": cfg.get("Environment", {}).get("Variables", {}),
+        "source": source,
+        "sourceFilename": source_filename,
+    }
+
+
+@app.post("/api/lambda/functions")
+def lambda_create_function(body: dict):
+    """Create a new function from inline source.
+
+    Defaults Architectures=[x86_64] (real AWS Lambda's default). On Apple Silicon
+    the host arch is arm64, so we also pre-pull the x86_64 runtime image so moto
+    picks the AWS-default variant when it spawns the function container.
+    """
+    lam = oblako.lambda_.get_client()
+    name = body["name"]
+    # Default to python3.12 — its shogo82148 image is on AL2023 (glibc 2.34),
+    # matching real-AWS Lambda. python3.11 is still on AL2 (glibc 2.26) and
+    # rejects modern pandas/numpy wheels.
+    runtime = body.get("runtime", "python3.12")
+    handler = body.get("handler", "handler.handler")
+    source = body.get("source") or _starter_source(runtime, handler)
+    filename = _runtime_filename(runtime, handler)
+    role_arn = body.get("role") or oblako.lambda_.ensure_exec_role()
+    architecture = body.get("architecture", "x86_64")
+    try:
+        oblako.lambda_.ensure_runtime_image(runtime, architecture=architecture)
+    except Exception:  # noqa: BLE001
+        pass  # not fatal — moto will fall back to the local image
+    try:
+        lam.create_function(
+            FunctionName=name, Runtime=runtime, Role=role_arn, Handler=handler,
+            Code={"ZipFile": _zip_handler(filename, source)},
+            Architectures=[architecture],
+            Timeout=int(body.get("timeout", 10)),
+            MemorySize=int(body.get("memory", 128)),
+            Description=body.get("description", ""),
+        )
+        _LAMBDA_SOURCE_CACHE[name] = {"filename": filename, "source": source}
+        return {"ok": True, "name": name}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.put("/api/lambda/functions/{name}/code")
+def lambda_update_code(name: str, body: dict):
+    """Update inline source for an existing function (rezips, calls UpdateFunctionCode)."""
+    lam = oblako.lambda_.get_client()
+    try:
+        cfg = lam.get_function_configuration(FunctionName=name)
+        filename = body.get("sourceFilename") or _runtime_filename(
+            cfg.get("Runtime", "python3.11"), cfg.get("Handler", "handler.handler"),
+        )
+        lam.update_function_code(
+            FunctionName=name, ZipFile=_zip_handler(filename, body["source"]),
+        )
+        _LAMBDA_SOURCE_CACHE[name] = {"filename": filename, "source": body["source"]}
+        return {"ok": True, "lastModified": cfg.get("LastModified", "")}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.delete("/api/lambda/functions/{name}")
+def lambda_delete_function(name: str):
+    """Delete a function."""
+    lam = oblako.lambda_.get_client()
+    try:
+        lam.delete_function(FunctionName=name)
+        _LAMBDA_SOURCE_CACHE.pop(name, None)
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.post("/api/lambda/functions/{name}/invoke")
+def lambda_invoke(name: str, body: dict):
+    """Invoke a function. body = {payload: <event JSON>} — returns the real handler output."""
+    import time
+    lam = oblako.lambda_.get_client()
+    payload = json.dumps(body.get("payload") or {}).encode()
+    started = time.time()
+    try:
+        r = lam.invoke(FunctionName=name, Payload=payload, LogType="Tail")
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+    duration_ms = int((time.time() - started) * 1000)
+    raw = r["Payload"].read().decode("utf-8", errors="replace")
+    parsed = None
+    try:
+        parsed = json.loads(raw)
+    except Exception:  # noqa: BLE001
+        pass
+    log_tail = ""
+    if r.get("LogResult"):
+        import base64
+        try:
+            log_tail = base64.b64decode(r["LogResult"]).decode("utf-8", errors="replace")
+        except Exception:  # noqa: BLE001
+            pass
+    return {
+        "statusCode": r.get("StatusCode"),
+        "functionError": r.get("FunctionError"),
+        "executedVersion": r.get("ExecutedVersion"),
+        "durationMs": duration_ms,
+        "payload": parsed if parsed is not None else raw,
+        "rawPayload": raw,
+        "logTail": log_tail,
+    }
+
+
+@app.get("/api/lambda/layers")
+def lambda_list_layers():
+    """List Lambda layers (with their latest version)."""
+    lam = oblako.lambda_.get_client()
+    try:
+        resp = lam.list_layers()
+        return {"layers": [
+            {
+                "name": l["LayerName"],
+                "arn": l.get("LayerArn", ""),
+                "latestVersion": l.get("LatestMatchingVersion", {}).get("Version"),
+                "latestVersionArn": l.get("LatestMatchingVersion", {}).get("LayerVersionArn", ""),
+                "runtimes": l.get("LatestMatchingVersion", {}).get("CompatibleRuntimes", []),
+                "description": l.get("LatestMatchingVersion", {}).get("Description", ""),
+            } for l in resp.get("Layers", [])
+        ]}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e), "layers": []}
+
+
+@app.post("/api/lambda/layers")
+def lambda_publish_layer(body: dict):
+    """Publish a new layer version.
+
+    Two modes:
+    - Inline (small): {name, filename, content, runtimes, description} packs a
+      single text file into a zip and ships it via Content={ZipFile: ...}.
+    - S3 reference (large): {name, s3Bucket, s3Key, runtimes, description}
+      uses Content={S3Bucket, S3Key}, the real-Lambda way of avoiding the
+      ~50 MB inline payload limit. Pair with POST /api/lambda/layers/s3-upload
+      to stage a zip first.
+    """
+    lam = oblako.lambda_.get_client()
+    name = body["name"]
+    runtimes = body.get("runtimes") or ["python3.11"]
+    if body.get("s3Bucket") and body.get("s3Key"):
+        content = {"S3Bucket": body["s3Bucket"], "S3Key": body["s3Key"]}
+    else:
+        filename = body.get("filename", "python/oblako_layer.py")
+        text = body.get("content", "# layer content\n")
+        content = {"ZipFile": _zip_handler(filename, text)}
+    try:
+        resp = lam.publish_layer_version(
+            LayerName=name, Description=body.get("description", ""),
+            Content=content, CompatibleRuntimes=runtimes,
+        )
+        return {"ok": True, "version": resp["Version"], "arn": resp["LayerVersionArn"]}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.post("/api/lambda/layers/s3-upload")
+def lambda_layer_s3_upload(body: dict):
+    """Issue a presigned PUT URL for staging a large layer zip into S3Proxy.
+
+    Returns {bucket, key, putUrl}. The client uploads the zip to putUrl, then
+    POSTs {name, s3Bucket, s3Key, ...} to /api/lambda/layers to publish it.
+    """
+    import uuid
+    from botocore.config import Config
+    import boto3
+    bucket = body.get("bucket") or "oblako-lambda-layers"
+    key = body.get("key") or f"layers/{uuid.uuid4()}.zip"
+    s3 = oblako.s3.get_client()
+    if bucket not in {b["Name"] for b in s3.list_buckets().get("Buckets", [])}:
+        s3.create_bucket(Bucket=bucket)
+    signer = boto3.client(
+        "s3", endpoint_url=oblako.s3.endpoint_url,
+        aws_access_key_id="test", aws_secret_access_key="test", region_name=config.region(),
+        config=Config(signature_version="s3v4",
+                      s3={"addressing_style": "path", "payload_signing_enabled": False}),
+    )
+    put_url = signer.generate_presigned_url(
+        "put_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=600,
+    )
+    return {"bucket": bucket, "key": key, "putUrl": put_url}
+
+
+@app.post("/api/lambda/functions/{name}/layers")
+def lambda_attach_layers(name: str, body: dict):
+    """Replace the layer list on a function (Lambda's API is set-not-append)."""
+    lam = oblako.lambda_.get_client()
+    try:
+        lam.update_function_configuration(
+            FunctionName=name, Layers=body.get("layers", []),
+        )
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+# Glue
+# Data Catalog: list/create databases + tables (bridged to the Iceberg REST
+# catalog). Jobs: submit a PySpark script that runs in amazon/aws-glue-libs:5.
+# Workflows are not yet supported in the backend.
+
+# In-memory job history — Glue jobs are per-run containers (no persistent
+# tracking), so we keep a tiny log of recent runs here. Keyed by job id.
+_GLUE_JOB_HISTORY: list[dict] = []
+
+
+@app.get("/api/glue/databases")
+def glue_list_databases():
+    """List Glue Catalog databases (boto3 GetDatabases over the Iceberg bridge)."""
+    g = oblako.glue_catalog.get_client()
+    try:
+        resp = g.get_databases()
+        return {"databases": [
+            {"name": d["Name"], "description": d.get("Description", "")}
+            for d in resp.get("DatabaseList", [])
+        ]}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e), "databases": []}
+
+
+@app.post("/api/glue/databases")
+def glue_create_database(body: dict):
+    """Create a Glue Catalog database (Iceberg namespace under the hood)."""
+    g = oblako.glue_catalog.get_client()
+    try:
+        g.create_database(DatabaseInput={
+            "Name": body["name"],
+            "Description": body.get("description", ""),
+        })
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.get("/api/glue/databases/{db}/tables")
+def glue_list_tables(db: str):
+    """List tables in a database (Iceberg tables surfaced through Glue)."""
+    g = oblako.glue_catalog.get_client()
+    try:
+        resp = g.get_tables(DatabaseName=db)
+        return {"tables": [
+            {
+                "name": t["Name"], "tableType": t.get("TableType", ""),
+                "columns": [
+                    {"name": c["Name"], "type": c.get("Type", "")}
+                    for c in t.get("StorageDescriptor", {}).get("Columns", [])
+                ],
+                "location": t.get("StorageDescriptor", {}).get("Location", ""),
+                "parameters": t.get("Parameters", {}),
+            } for t in resp.get("TableList", [])
+        ]}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e), "tables": []}
+
+
+@app.get("/api/glue/databases/{db}/tables/{name}")
+def glue_get_table(db: str, name: str):
+    """Full table detail incl. Iceberg metadata pointer."""
+    g = oblako.glue_catalog.get_client()
+    try:
+        t = g.get_table(DatabaseName=db, Name=name)["Table"]
+        return {
+            "name": t["Name"], "databaseName": db,
+            "tableType": t.get("TableType", ""),
+            "columns": [
+                {"name": c["Name"], "type": c.get("Type", "")}
+                for c in t.get("StorageDescriptor", {}).get("Columns", [])
+            ],
+            "location": t.get("StorageDescriptor", {}).get("Location", ""),
+            "parameters": t.get("Parameters", {}),
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.post("/api/glue/jobs/run")
+def glue_run_job(body: dict):
+    """Submit a PySpark script to the Glue 5 runner. Synchronous (blocks until done).
+
+    body = {script: str, args?: list[str], env?: dict, timeout?: int}
+    Returns {exitCode, logs, durationMs}.
+    """
+    import time
+    script = body.get("script", "").strip()
+    if not script:
+        return {"error": "Empty script"}
+    started = time.time()
+    try:
+        result = oblako.glue.submit_job(
+            script,
+            args=body.get("args") or [],
+            env=body.get("env") or {},
+            timeout=int(body.get("timeout", 600)),
+        )
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e), "durationMs": int((time.time() - started) * 1000)}
+    record = {
+        "name": body.get("name") or f"job-{int(started)}",
+        "exitCode": result["exit_code"],
+        "logs": result["logs"][-8000:],
+        "durationMs": int((time.time() - started) * 1000),
+        "ranAt": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started)),
+    }
+    _GLUE_JOB_HISTORY.append(record)
+    # Keep history small — these can hold full Spark logs.
+    del _GLUE_JOB_HISTORY[:-20]
+    return record
+
+
+@app.get("/api/glue/jobs/history")
+def glue_job_history():
+    """Most recent Glue job runs (this dashboard process only — not persisted)."""
+    return {"jobs": list(reversed(_GLUE_JOB_HISTORY))}
+
+
 # Static frontend (production build)
-# -----------------------------------------------------------------------------------------------
 if DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")
 

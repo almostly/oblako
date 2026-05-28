@@ -11,6 +11,7 @@ from .glue_catalog import GlueCatalogService
 from .iam import IamService
 from .iceberg import IcebergCatalogService
 from .kinesis import KinesisService
+from .lambda_ import LambdaService
 from .mlflow import MlflowService
 from .moto import MotoService
 from .opensearch import OpenSearchService
@@ -35,6 +36,8 @@ class Oblako:
         self.aurora = self.rds  # Aurora shares the rds control plane + engine
         self.moto = MotoService()
         self.iam = IamService(moto=self.moto)  # IAM/STS control plane + policy evaluator
+        # Lambda: moto's control plane + real Docker exec (socket mounted into moto).
+        self.lambda_ = LambdaService(moto=self.moto)
         self.s3 = S3ProxyService()
         self.dynamodb = DynamoDBService(host_port=8001)
         self.kinesis = KinesisService()

@@ -15,10 +15,16 @@
     "@cloudscape-design/design-tokens": "^3.0.78",
     "@cloudscape-design/global-styles": "^1.0.57",
     "@dagrejs/dagre": "^3.0.0",
+    "@duckdb/duckdb-wasm": "^1.33.1-dev45.0",
     "@xyflow/react": "^12.10.2",
+    "katex": "^0.17.0",
     "prismjs": "^1.30.0",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",

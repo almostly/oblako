@@ -47,6 +47,12 @@ class TrinoService(Service):
             image="trinodb/trino:latest",
             ports=[PortMapping(container_port=8080, host_port=host_port)],
             volumes={str(TRINO_CATALOG_DIR): {"bind": "/etc/trino/catalog", "mode": "ro"}},
+            environment={
+                # S3Proxy doesn't implement aws-chunked CRC32 — make the AWS SDK v2
+                # used by Trino's S3 client skip the new flexible checksums.
+                "AWS_REQUEST_CHECKSUM_CALCULATION": "when_required",
+                "AWS_RESPONSE_CHECKSUM_VALIDATION": "when_required",
+            },
             extra_hosts={"host.docker.internal": "host-gateway"},
         )
         self.host_port = host_port

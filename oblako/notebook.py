@@ -157,8 +157,8 @@ def seed_workspace(workdir: Path) -> Path:
     import shutil
 
     write_starter(workdir)
-    example = Path(__file__).resolve().parents[1] / "examples" / "sagemaker_credit_risk"
-    dst = workdir / "sagemaker_credit_risk"
+    example = Path(__file__).resolve().parents[1] / "examples" / "sagemaker-examples"
+    dst = workdir / "sagemaker-examples"
     if example.exists() and not dst.exists():
         shutil.copytree(
             example,

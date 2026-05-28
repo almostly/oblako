@@ -7,6 +7,11 @@ import Button from '@cloudscape-design/components/button'
 import Textarea from '@cloudscape-design/components/textarea'
 import Select from '@cloudscape-design/components/select'
 import ColumnLayout from '@cloudscape-design/components/column-layout'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import 'katex/dist/katex.min.css'
 
 const API = 'http://localhost:8000'
 
@@ -81,9 +86,14 @@ export default function BedrockPage() {
                 <Box fontWeight="bold" color={msg.role === 'user' ? 'text-status-info' : 'text-status-success'}>
                   {msg.role === 'user' ? 'You' : 'Assistant'}
                 </Box>
-                <Box variant="p">
-                  {msg.content?.map((c, j) => <span key={j}>{c.text}</span>)}
-                </Box>
+                <div className="oblako-md">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm, remarkMath]}
+                    rehypePlugins={[rehypeKatex]}
+                  >
+                    {(msg.content || []).map(c => c.text || '').join('')}
+                  </ReactMarkdown>
+                </div>
               </div>
             ))}
             {loading && <Box color="text-body-secondary">Thinking...</Box>}

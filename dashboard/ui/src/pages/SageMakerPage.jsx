@@ -18,47 +18,84 @@ import NotebookPage from './NotebookPage'
 
 const API = 'http://localhost:8000'
 
-// Launches the local MLflow tracking server (oblako.mlflow) and embeds its UI.
+// Create + wait flow for the local MLflow tracking server.
+// Mirrors AWS SageMaker's CreateMlflowTrackingServer: an explicit Create press
+// kicks off the App; the UI polls /api/mlflow/status until ready, then embeds.
 function MlflowTab() {
-  const [state, setState] = useState({ loading: true, url: null, vanityUrl: null, hostsLine: null, error: null })
+  const [status, setStatus] = useState('idle')   // idle | starting | ready | error
+  const [urls, setUrls] = useState({ url: null, vanityUrl: null, hostsLine: null })
+  const [error, setError] = useState(null)
 
+  // Probe once on mount: if MLflow was already started this session, jump
+  // straight to "ready" without forcing the user to click Create again.
   useEffect(() => {
-    let active = true
-    setState({ loading: true, url: null, vanityUrl: null, hostsLine: null, error: null })
-    fetch(`${API}/api/mlflow/launch`, { method: 'POST' })
-      .then(r => r.json())
-      .then(d => { if (active) setState({ loading: false, url: d.url || null, vanityUrl: d.vanityUrl || null, hostsLine: d.hostsLine || null, error: d.error || null }) })
-      .catch(e => { if (active) setState({ loading: false, url: null, vanityUrl: null, hostsLine: null, error: e.message }) })
-    return () => { active = false }
+    fetch(`${API}/api/mlflow/status`).then(r => r.json()).then(d => {
+      if (d.status === 'ready') {
+        setStatus('ready')
+        setUrls({ url: d.url, vanityUrl: d.vanityUrl, hostsLine: d.hostsLine })
+      }
+    }).catch(() => {})
   }, [])
 
-  if (state.loading) {
-    return <Box padding="l"><Spinner /> Starting MLflow App… (serverless — no servers to manage; first launch builds the App image, ~a minute)</Box>
+  const createApp = async () => {
+    setStatus('starting'); setError(null)
+    try {
+      const d = await fetch(`${API}/api/mlflow/launch`, { method: 'POST' }).then(r => r.json())
+      if (d.status === 'ready') {
+        setStatus('ready')
+        setUrls({ url: d.url, vanityUrl: d.vanityUrl, hostsLine: d.hostsLine })
+      } else {
+        setStatus('error'); setError(d.error || 'MLflow did not become ready')
+      }
+    } catch (e) {
+      setStatus('error'); setError(String(e?.message || e))
+    }
   }
-  if (state.error) {
-    return <Box padding="l" color="text-status-error">{state.error}</Box>
+
+  if (status === 'idle') {
+    return (
+      <Container header={<Header variant="h2" description="Real AWS exposes MLflow as a SageMaker App you must create. Same flow here — Create starts the container and waits for it to become healthy.">Create MLflow tracking server</Header>}>
+        <SpaceBetween size="m">
+          <Box color="text-body-secondary">
+            First launch pulls the MLflow image (~1 minute). Subsequent presses are near-instant.
+          </Box>
+          <Button variant="primary" iconName="add-plus" onClick={createApp}>Create MLflow App</Button>
+        </SpaceBetween>
+      </Container>
+    )
+  }
+  if (status === 'starting') {
+    return (
+      <Container header={<Header variant="h2">Starting MLflow App…</Header>}>
+        <Box padding="l"><Spinner /> Building image + starting container (first time ~1 min)</Box>
+      </Container>
+    )
+  }
+  if (status === 'error') {
+    return (
+      <SpaceBetween size="m">
+        <Alert type="error" header="Could not start MLflow">{error}</Alert>
+        <Button onClick={createApp} iconName="refresh">Retry</Button>
+      </SpaceBetween>
+    )
   }
   return (
     <SpaceBetween size="s">
-      {state.vanityUrl && (
-        <Box padding="s" color="text-body-secondary" fontSize="body-s"
-             variant="div">
+      {urls.vanityUrl && (
+        <Box padding="s" color="text-body-secondary" fontSize="body-s" variant="div">
           <strong>Tracking server URL:</strong>{' '}
-          <Box variant="code" fontSize="body-s">{state.vanityUrl}</Box>
-          {state.hostsLine && (
+          <Box variant="code" fontSize="body-s">{urls.vanityUrl}</Box>
+          {urls.hostsLine && (
             <Box variant="div" padding={{ top: 'xxs' }}>
               First time only — add to <Box variant="code" fontSize="body-s">/etc/hosts</Box>:{' '}
-              <Box variant="code" fontSize="body-s">{state.hostsLine}</Box>
+              <Box variant="code" fontSize="body-s">{urls.hostsLine}</Box>
             </Box>
           )}
         </Box>
       )}
-      <Box float="right"><Link external href={state.vanityUrl || state.url}>Open in a new tab</Link></Box>
-      <iframe
-        title="MLflow"
-        src={state.url}
-        style={{ width: '100%', height: '78vh', border: '1px solid #d5dbdb', borderRadius: 4 }}
-      />
+      <Box float="right"><Link external href={urls.vanityUrl || urls.url}>Open in a new tab</Link></Box>
+      <iframe title="MLflow" src={urls.url}
+        style={{ width: '100%', height: '78vh', border: '1px solid #d5dbdb', borderRadius: 4 }} />
     </SpaceBetween>
   )
 }

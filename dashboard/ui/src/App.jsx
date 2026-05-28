@@ -15,18 +15,22 @@ import RdsPage from './pages/RdsPage'
 import IamPage from './pages/IamPage'
 import KinesisPage from './pages/KinesisPage'
 import AthenaPage from './pages/AthenaPage'
+import GluePage from './pages/GluePage'
+import LambdaPage from './pages/LambdaPage'
 
 const NAV_ITEMS = [
   { type: 'link', text: 'Services', href: '#services' },
   { type: 'divider' },
   { type: 'link', text: 'Bedrock', href: '#bedrock' },
   { type: 'link', text: 'SageMaker', href: '#sagemaker' },
+  { type: 'link', text: 'Lambda', href: '#lambda' },
   { type: 'link', text: 'S3', href: '#s3' },
   { type: 'link', text: 'DynamoDB', href: '#dynamodb' },
   { type: 'link', text: 'Kinesis', href: '#kinesis' },
   { type: 'link', text: 'Step Functions', href: '#stepfunctions' },
   { type: 'link', text: 'CloudFormation', href: '#cloudformation' },
   { type: 'link', text: 'Athena', href: '#athena' },
+  { type: 'link', text: 'Glue', href: '#glue' },
   { type: 'link', text: 'Redshift', href: '#redshift' },
   { type: 'link', text: 'RDS / Aurora', href: '#rds' },
   { type: 'link', text: 'IAM', href: '#iam' },
@@ -36,10 +40,12 @@ const PAGES = {
   '#services': ServicesPage,
   '#bedrock': BedrockPage,
   '#sagemaker': SageMakerPage,
+  '#lambda': LambdaPage,
   '#s3': S3Page,
   '#dynamodb': DynamoDBPage,
   '#kinesis': KinesisPage,
   '#athena': AthenaPage,
+  '#glue': GluePage,
   '#stepfunctions': StepFunctionsPage,
   '#cloudformation': CloudFormationPage,
   '#redshift': RedshiftPage,

@@ -6,7 +6,6 @@ import SpaceBetween from '@cloudscape-design/components/space-between'
 import StatusIndicator from '@cloudscape-design/components/status-indicator'
 import Button from '@cloudscape-design/components/button'
 import Container from '@cloudscape-design/components/container'
-import Textarea from '@cloudscape-design/components/textarea'
 import Modal from '@cloudscape-design/components/modal'
 import Alert from '@cloudscape-design/components/alert'
 import Badge from '@cloudscape-design/components/badge'
@@ -15,6 +14,7 @@ import Prism from 'prismjs'
 import 'prismjs/components/prism-json'
 import 'prismjs/themes/prism.css'
 import FlowGraph from '../components/FlowGraph'
+import CodeEditor from '../components/CodeEditor'
 
 const API = 'http://localhost:8000'
 const sleep = (ms) => new Promise(r => setTimeout(r, ms))
@@ -130,7 +130,7 @@ export default function StepFunctionsPage() {
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'stretch' }}>
           <Container fitHeight header={<Header variant="h2" description="Edit, then Run">Input</Header>}>
-            <Textarea value={inputText} onChange={({ detail }) => setInputText(detail.value)} rows={12} spellcheck={false} />
+            <CodeEditor value={inputText} onChange={setInputText} language="json" rows={12} />
           </Container>
           <Container fitHeight header={
             <Header variant="h2" actions={runResult && <StatusIndicator type={statusType(runResult.status)}>{runResult.status}</StatusIndicator>}>

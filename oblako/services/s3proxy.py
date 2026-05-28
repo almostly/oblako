@@ -20,6 +20,9 @@ class S3ProxyService(Service):
             environment={
                 "JCLOUDS_FILESYSTEM_BASEDIR": "/data",
                 "S3PROXY_AUTHORIZATION": "none",
+                # Browsers (dashboard / DuckDB-Wasm) need CORS to fetch parquet
+                # from S3Proxy cross-origin; permissive is fine for local dev.
+                "S3PROXY_CORS_ALLOW_ALL": "true",
             },
             volumes={"oblako-s3-data": {"bind": "/data", "mode": "rw"}},
         )
