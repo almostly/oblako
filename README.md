@@ -395,9 +395,9 @@ Real `CREATE MODEL` SQL, fully local: the `redshift-data` server intercepts it, 
 
 ```sql
 CREATE MODEL price_model
-  FROM (SELECT sqft, beds, price FROM homes)
-  TARGET price FUNCTION predict_price
-  MODEL_TYPE LINEAR_LEARNER;          -- regression (default)
+FROM (SELECT sqft, beds, price FROM homes)
+TARGET price FUNCTION predict_price
+MODEL_TYPE LINEAR_LEARNER;  -- regression (default)
 
 SELECT sqft, beds, predict_price(sqft, beds) FROM homes;   -- in-DB inference
 ```
