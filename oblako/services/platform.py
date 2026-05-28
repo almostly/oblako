@@ -7,6 +7,7 @@ from .caddy import CaddyService
 from .cloudformation import CloudFormationService
 from .dynamodb import DynamoDBService
 from .glue import GlueService
+from .glue_catalog import GlueCatalogService
 from .iam import IamService
 from .iceberg import IcebergCatalogService
 from .kinesis import KinesisService
@@ -43,6 +44,8 @@ class Oblako:
         self.s3tables = self.iceberg  # AWS-faithful alias: S3 Tables == Iceberg-on-S3
         # Glue 5 PySpark runner (per-job container; ~5 GB image, pulled on first job).
         self.glue = GlueService()
+        # Glue Data Catalog (boto3 `glue` client) bridged to the Iceberg REST catalog.
+        self.glue_catalog = GlueCatalogService()
         # Trino — Athena equivalent. SQL over the Iceberg catalog / S3 Tables.
         self.trino = TrinoService()
         self.athena = self.trino  # AWS-faithful alias: Athena is Trino under the hood
