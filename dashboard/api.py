@@ -677,12 +677,27 @@ def launch_notebook():
 
 @app.post("/api/mlflow/launch")
 def launch_mlflow():
-    """Start the local MLflow App container (pre-wired to S3Proxy) and return its URL."""
+    """Start MLflow + the Caddy vanity proxy; return both the direct and AWS-shaped URLs."""
     try:
         oblako.mlflow.start()
         if not oblako.mlflow.wait_ready(timeout=60):
             return {"error": "MLflow did not become ready within 60s"}
-        return {"url": oblako.mlflow.tracking_uri}
+        # Caddy is best-effort — if :80 is busy or it errors, fall back to localhost.
+        vanity_url, hosts_line = None, None
+        try:
+            from oblako.services.caddy import vanity_host
+
+            oblako.caddy.start()
+            oblako.caddy.wait_ready(timeout=15)
+            vanity_url = oblako.caddy.vanity_url(vanity_host("mlflow"))
+            hosts_line = oblako.caddy.hosts_line()
+        except Exception:  # noqa: BLE001
+            pass
+        return {
+            "url": oblako.mlflow.tracking_uri,
+            "vanityUrl": vanity_url,
+            "hostsLine": hosts_line,
+        }
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
 

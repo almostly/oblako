@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .bedrock import BedrockService
+from .caddy import CaddyService
 from .cloudformation import CloudFormationService
 from .dynamodb import DynamoDBService
 from .iam import IamService
@@ -36,6 +37,9 @@ class Oblako:
         # MLflow App container — heavy image, kept out of `up`; started lazily
         # by the dashboard or by `oblako up mlflow`.
         self.mlflow = MlflowService()
+        # Caddy reverse proxy fronts services with AWS-style vanity hostnames
+        # (mlflow.oblako.aws -> MLflow). Also lazy — started with /api/mlflow/launch.
+        self.caddy = CaddyService()
         # In-process orchestration server (no container): provisions stacks into
         # the engines above. Started lazily on first get_client().
         self.cloudformation = CloudFormationService()

@@ -20,15 +20,15 @@ const API = 'http://localhost:8000'
 
 // Launches the local MLflow tracking server (oblako.mlflow) and embeds its UI.
 function MlflowTab() {
-  const [state, setState] = useState({ loading: true, url: null, error: null })
+  const [state, setState] = useState({ loading: true, url: null, vanityUrl: null, hostsLine: null, error: null })
 
   useEffect(() => {
     let active = true
-    setState({ loading: true, url: null, error: null })
+    setState({ loading: true, url: null, vanityUrl: null, hostsLine: null, error: null })
     fetch(`${API}/api/mlflow/launch`, { method: 'POST' })
       .then(r => r.json())
-      .then(d => { if (active) setState({ loading: false, url: d.url || null, error: d.error || null }) })
-      .catch(e => { if (active) setState({ loading: false, url: null, error: e.message }) })
+      .then(d => { if (active) setState({ loading: false, url: d.url || null, vanityUrl: d.vanityUrl || null, hostsLine: d.hostsLine || null, error: d.error || null }) })
+      .catch(e => { if (active) setState({ loading: false, url: null, vanityUrl: null, hostsLine: null, error: e.message }) })
     return () => { active = false }
   }, [])
 
@@ -39,8 +39,21 @@ function MlflowTab() {
     return <Box padding="l" color="text-status-error">{state.error}</Box>
   }
   return (
-    <SpaceBetween size="xs">
-      <Box float="right"><Link external href={state.url}>Open in a new tab</Link></Box>
+    <SpaceBetween size="s">
+      {state.vanityUrl && (
+        <Box padding="s" color="text-body-secondary" fontSize="body-s"
+             variant="div">
+          <strong>Tracking server URL:</strong>{' '}
+          <Box variant="code" fontSize="body-s">{state.vanityUrl}</Box>
+          {state.hostsLine && (
+            <Box variant="div" padding={{ top: 'xxs' }}>
+              First time only — add to <Box variant="code" fontSize="body-s">/etc/hosts</Box>:{' '}
+              <Box variant="code" fontSize="body-s">{state.hostsLine}</Box>
+            </Box>
+          )}
+        </Box>
+      )}
+      <Box float="right"><Link external href={state.vanityUrl || state.url}>Open in a new tab</Link></Box>
       <iframe
         title="MLflow"
         src={state.url}
