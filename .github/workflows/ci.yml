@@ -36,6 +36,7 @@ jobs:
           tests/services/test_mlflow.py
           tests/services/test_caddy.py
           tests/services/test_kinesis.py
+          tests/services/test_iceberg.py
 
   integration:
     name: integration tests (Docker services)

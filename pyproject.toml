@@ -42,6 +42,10 @@ mlflow = [
     # identical to one targeting SageMaker's managed MLflow.
     "sagemaker-mlflow>=0.1",
 ]
+iceberg = [
+    # pyiceberg + pyarrow for writing/reading parquet via the local REST catalog.
+    "pyiceberg[pyarrow,s3fs]>=0.7",
+]
 
 [project.scripts]
 oblako = "oblako.cli:main"
