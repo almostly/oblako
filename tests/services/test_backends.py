@@ -1,5 +1,7 @@
 """Unit tests for the pluggable container backend selection."""
 
+import pytest
+
 from oblako.services import backends
 
 
@@ -34,6 +36,27 @@ def test_socket_selection_for_runtimes(monkeypatch, tmp_path):
     monkeypatch.setattr(backends, "_CANDIDATE_SOCKETS", {"colima": [str(sock)]})
     assert backends._socket_for("colima") == f"unix://{sock}"
     assert backends._socket_for("podman") is None  # no candidate -> ambient/default
+
+
+def test_run_port_conflict_gives_friendly_error(monkeypatch):
+    # A held host port should surface a clear PortInUseError, not a raw Docker 500.
+    from docker.errors import APIError
+
+    class _Containers:
+        def run(self, *a, **k):
+            raise APIError('500 Server Error: Bind for 0.0.0.0:5439 failed: '
+                           'port is already allocated')
+
+    class _Client:
+        containers = _Containers()
+
+    b = backends.DockerBackend()
+    monkeypatch.setattr(b, "_client", _Client())
+    with pytest.raises(backends.PortInUseError) as exc:
+        b.run(name="oblako-redshift", image="x", ports={"5432/tcp": 5439},
+              environment={}, volumes={}, extra_hosts={}, command=None,
+              working_dir=None, user=None)
+    assert "5439" in str(exc.value) and "already in use" in str(exc.value)
 
 
 def test_build_k8s_manifests():

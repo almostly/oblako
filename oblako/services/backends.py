@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -22,6 +23,10 @@ import subprocess
 RUNNING = "running"
 STOPPED = "stopped"
 ABSENT = "absent"
+
+
+class PortInUseError(RuntimeError):
+    """A host port a service needs is already held by another container/process."""
 
 # Kubernetes backend: namespace + a registry of live `kubectl port-forward`
 # processes (so localhost:host_port reaches the in-cluster Service), keyed by name.
@@ -104,11 +109,26 @@ class DockerBackend(ContainerBackend):
     def run(self, *, name, image, ports, environment, volumes, extra_hosts,
             command, working_dir, user) -> None:
         """Create and start a detached container."""
-        self.client.containers.run(
-            image, name=name, detach=True, ports=ports, environment=environment,
-            volumes=volumes, extra_hosts=extra_hosts, command=command,
-            working_dir=working_dir, user=user,
-        )
+        from docker.errors import APIError
+
+        try:
+            self.client.containers.run(
+                image, name=name, detach=True, ports=ports, environment=environment,
+                volumes=volumes, extra_hosts=extra_hosts, command=command,
+                working_dir=working_dir, user=user,
+            )
+        except APIError as e:
+            msg = str(e)
+            if "port is already allocated" in msg or "address already in use" in msg.lower():
+                m = re.search(r":(\d+) failed", msg) or re.search(r"0\.0\.0\.0:(\d+)", msg)
+                port = m.group(1) if m else "?"
+                raise PortInUseError(
+                    f"Can't start '{name}': host port {port} is already in use. "
+                    f"Another container or process holds it — find it with "
+                    f"`docker ps --filter publish={port}` (often a stale oblako "
+                    f"container) and stop/remove it, then retry."
+                ) from e
+            raise
 
     def status(self, name: str) -> str:
         """Return RUNNING/STOPPED/ABSENT for the container."""
