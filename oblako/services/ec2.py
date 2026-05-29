@@ -48,11 +48,17 @@ def _volume_name(instance_id: str) -> str:
     return f"oblako-ec2-{instance_id}"  # the instance's EBS volume
 
 
-def start_instance_container(instance_id: str, image_id: str | None = None) -> str:
+def start_instance_container(instance_id: str, image_id: str | None = None,
+                             image: str | None = None, command=None,
+                             published_ports: dict | None = None) -> str:
     """Start (idempotently) the backing container + EBS volume for an instance.
 
     Reusable by both Ec2Service and the CloudFormation AWS::EC2::Instance provider
     so a stack-provisioned instance is just as real as a service-launched one.
+    ``image`` forces a specific backing image (e.g. a Jupyter image for a
+    SageMaker notebook instance); otherwise the AMI id maps to the default.
+    ``published_ports`` maps container ports to host ports (e.g. a notebook
+    instance publishing JupyterLab).
     """
     import docker
 
@@ -65,7 +71,7 @@ def start_instance_container(instance_id: str, image_id: str | None = None) -> s
         return existing.id
     except docker.errors.NotFound:
         pass
-    image = _image_for(image_id)
+    image = image or _image_for(image_id)
     try:
         client.images.get(image)
     except docker.errors.ImageNotFound:
@@ -76,8 +82,10 @@ def start_instance_container(instance_id: str, image_id: str | None = None) -> s
     except docker.errors.NotFound:
         client.volumes.create(vol, labels={INSTANCE_LABEL: instance_id})  # EBS root
     container = client.containers.run(
-        image, command=["sleep", "infinity"], detach=True, name=name,
+        image, command=command or ["sleep", "infinity"], detach=True, name=name,
         volumes={vol: {"bind": EBS_MOUNT, "mode": "rw"}},
+        ports=published_ports or None,
+        extra_hosts={"host.docker.internal": "host-gateway"},  # reach oblako on the host
         labels={INSTANCE_LABEL: instance_id, "oblako.service": "ec2"},
     )
     return container.id

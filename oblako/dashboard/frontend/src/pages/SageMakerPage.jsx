@@ -124,6 +124,91 @@ function PythonCode({ code }) {
   )
 }
 
+const DOMAIN = 'studio'
+
+function StudioTab() {
+  const [domain, setDomain] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [nb, setNb] = useState(null)
+  const [err, setErr] = useState(null)
+
+  const refresh = () =>
+    fetch(`${API}/api/sagemaker/domains/${DOMAIN}/status`).then(r => r.json()).then(setDomain)
+  // Effect body just kicks off async work — all setState happens inside .then().
+  useEffect(() => {
+    fetch(`${API}/api/sagemaker/domains/${DOMAIN}/status`).then(r => r.json()).then(setDomain)
+  }, [])
+
+  const create = async () => {
+    setBusy(true); setErr(null)
+    const r = await fetch(`${API}/api/sagemaker/domains`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: DOMAIN }),
+    }).then(r => r.json())
+    setBusy(false)
+    if (r.status === 'error') { setErr(r.error); return }
+    setDomain(r)
+  }
+  const openNotebook = async () => {
+    setBusy(true); setErr(null)
+    const r = await fetch(`${API}/api/sagemaker/domains/${DOMAIN}/notebook`, { method: 'POST' })
+      .then(r => r.json())
+    setBusy(false)
+    if (r.error) { setErr(r.error); return }
+    setNb(r); window.open(r.url, '_blank')
+  }
+  const del = async () => {
+    setBusy(true); setErr(null)
+    await fetch(`${API}/api/sagemaker/domains/${DOMAIN}`, { method: 'DELETE' })
+    setBusy(false); setNb(null); refresh()
+  }
+
+  const exists = domain && domain.status !== 'NONE' && domain.status !== 'error'
+  const ready = domain?.status === 'CREATE_COMPLETE' || domain?.status === 'UPDATE_COMPLETE'
+
+  return (
+    <SpaceBetween size="l">
+      <Container header={
+        <Header variant="h2"
+          description="A Studio domain is provisioned as a CloudFormation stack: an S3 artifacts bucket + an EC2 notebook instance (a real container) with an EBS volume. The notebook runs JupyterLab inside that instance, pre-wired to oblako's services."
+          actions={
+            <SpaceBetween direction="horizontal" size="xs">
+              {!exists && <Button variant="primary" loading={busy} onClick={create}>Create domain</Button>}
+              {ready && <Button variant="primary" loading={busy} iconName="external" onClick={openNotebook}>Open notebook</Button>}
+              {exists && <Button loading={busy} onClick={del}>Delete domain</Button>}
+              <Button iconName="refresh" onClick={refresh}>Refresh</Button>
+            </SpaceBetween>
+          }>
+          Studio domain
+        </Header>
+      }>
+        <SpaceBetween size="m">
+          {err && <Alert type="error">{err}</Alert>}
+          {!domain && <Box><Spinner /> Checking…</Box>}
+          {domain && !exists && (
+            <Alert type="info">No domain yet. Create one — it deploys a CloudFormation stack (S3 + EC2 + EBS).</Alert>
+          )}
+          {exists && (
+            <ColumnLayout columns={2} variant="text-grid">
+              <div><Box variant="awsui-key-label">Status</Box>
+                <StatusIndicator type={ready ? 'success' : 'in-progress'}>{domain.status}</StatusIndicator></div>
+              <div><Box variant="awsui-key-label">CFN stack</Box><Box variant="code">{domain.stack}</Box></div>
+              <div><Box variant="awsui-key-label">Artifacts bucket</Box><Box variant="code">{domain.artifactsBucket}</Box></div>
+              <div><Box variant="awsui-key-label">Notebook instance</Box><Box variant="code">{domain.instanceId || '—'}</Box></div>
+            </ColumnLayout>
+          )}
+          {nb && (
+            <Alert type="success" header="JupyterLab launched on the notebook instance">
+              <Link external href={nb.url}>{nb.url}</Link> — runs inside instance {nb.instanceId},
+              EBS-backed home, boto3 pre-wired to oblako.
+            </Alert>
+          )}
+        </SpaceBetween>
+      </Container>
+    </SpaceBetween>
+  )
+}
+
 export default function SageMakerPage() {
   const [containers, setContainers] = useState({ training: [], endpoints: [] })
   const [images, setImages] = useState([])
@@ -238,6 +323,7 @@ export default function SageMakerPage() {
         Amazon SageMaker
       </Header>
       <Tabs tabs={[
+        { id: 'studio', label: 'Studio domain', content: <StudioTab /> },
         { id: 'notebook', label: 'Notebook', content: <NotebookPage embedded /> },
         { id: 'mlflow', label: 'MLflow', content: <MlflowTab /> },
         { id: 'training', label: 'Training & endpoints', content: trainingTab },

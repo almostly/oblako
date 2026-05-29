@@ -846,6 +846,48 @@ def launch_mlflow():
         return {"status": "error", "error": str(e)}
 
 
+# SageMaker Studio domain — a CloudFormation stack (S3 artifacts + EC2 notebook
+# instance + EBS); the notebook runs JupyterLab inside the instance, pre-wired.
+@app.get("/api/sagemaker/domains/{name}/status")
+def sagemaker_domain_status(name: str):
+    """Domain status (CFN stack state + notebook instance id)."""
+    try:
+        return oblako.sagemaker.domain_status(name)
+    except Exception as e:  # noqa: BLE001
+        return {"domain": name, "status": "error", "error": str(e)}
+
+
+@app.post("/api/sagemaker/domains")
+def sagemaker_create_domain(body: dict):
+    """Create a domain: deploy the CFN stack (S3 + EC2 + EBS). Blocks until done."""
+    try:
+        return oblako.sagemaker.create_domain(
+            body.get("name", "studio"),
+            instance_type=body.get("instanceType", "t3.medium"),
+        )
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "error": str(e)}
+
+
+@app.post("/api/sagemaker/domains/{name}/notebook")
+def sagemaker_launch_notebook(name: str):
+    """Launch JupyterLab inside the domain's notebook instance; return its URL."""
+    try:
+        return {"ok": True, **oblako.sagemaker.launch_notebook(name)}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.delete("/api/sagemaker/domains/{name}")
+def sagemaker_delete_domain(name: str):
+    """Tear down the domain's CloudFormation stack."""
+    try:
+        oblako.sagemaker.delete_domain(name)
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
 # CloudFormation
 @app.get("/api/cloudformation/stacks")
 def list_stacks():

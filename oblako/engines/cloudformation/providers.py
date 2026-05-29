@@ -160,7 +160,10 @@ def _ec2_create(logical_id, props, ctx):
     tags = props.get("Tags")
     if tags:
         ec2.create_tags(Resources=[iid], Tags=tags)
-    start_instance_container(iid, image_id=image_id)  # back it with a real container
+    # back it with a real container; `Image`/`Ports` are oblako extensions letting
+    # a resource pick its backing image + publish ports (e.g. a notebook instance).
+    start_instance_container(iid, image_id=image_id, image=props.get("Image"),
+                             published_ports=props.get("Ports"))
     return iid  # physical id is the InstanceId
 
 
