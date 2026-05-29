@@ -56,11 +56,13 @@ class Oblako:
         self.trino = TrinoService()
         self.athena = self.trino  # AWS-faithful alias: Athena is Trino under the hood
         self.stepfunctions = StepFunctionsService()
-        # MLflow on AWS is a SageMaker resource (sagemaker:CreateMlflowTrackingServer).
-        # Build the service first, then expose it under the SageMaker namespace.
-        self.mlflow = MlflowService()
+        # MLflow on AWS is a SageMaker resource (sagemaker:CreateMlflowTrackingServer),
+        # so it lives under the SageMaker namespace: oblako.sagemaker.mlflow is the
+        # canonical, AWS-faithful handle. oblako.mlflow stays as a convenience alias
+        # (same object), matching oblako's alias convention (athena, ollama, …).
         self.sagemaker = SageMakerService()
-        self.sagemaker.mlflow = self.mlflow  # oblako.sagemaker.mlflow mirrors AWS
+        self.sagemaker.mlflow = MlflowService()
+        self.mlflow = self.sagemaker.mlflow
         # Caddy reverse proxy fronts services with AWS-style vanity hostnames
         # (mlflow.oblako.aws -> MLflow). Also lazy — started with /api/mlflow/launch.
         self.caddy = CaddyService()

@@ -812,7 +812,7 @@ def _mlflow_urls() -> dict:
     except Exception:  # noqa: BLE001
         pass
     return {
-        "url": oblako.mlflow.tracking_uri,
+        "url": oblako.sagemaker.mlflow.tracking_uri,
         "vanityUrl": vanity_url,
         "hostsLine": hosts_line,
     }
@@ -826,9 +826,9 @@ def mlflow_status():
     SageMaker's CreateMlflowTrackingServer in real AWS).
     """
     try:
-        if oblako.mlflow.wait_ready(timeout=2):
+        if oblako.sagemaker.mlflow.wait_ready(timeout=2):
             return {"status": "ready", **_mlflow_urls()}
-        return {"status": oblako.mlflow.status().value}
+        return {"status": oblako.sagemaker.mlflow.status().value}
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "error": str(e)}
 
@@ -837,8 +837,8 @@ def mlflow_status():
 def launch_mlflow():
     """Create the MLflow App: start the container, return the URLs once ready."""
     try:
-        oblako.mlflow.start()
-        if not oblako.mlflow.wait_ready(timeout=120):
+        oblako.sagemaker.mlflow.start()
+        if not oblako.sagemaker.mlflow.wait_ready(timeout=120):
             return {"status": "error", "error": "MLflow did not become ready within 120s"}
         return {"status": "ready", **_mlflow_urls()}
     except Exception as e:  # noqa: BLE001
