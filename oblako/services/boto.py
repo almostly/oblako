@@ -36,7 +36,9 @@ def client(service: str, endpoint_url: str, *, region: str | None = None, **over
     )
 
 
-def resource(service: str, endpoint_url: str, *, region: str | None = None, **overrides):
+def resource(
+    service: str, endpoint_url: str, *, region: str | None = None, **overrides
+):
     """Like :func:`client`, but a boto3 resource (the higher-level API)."""
     return boto3.resource(
         service,

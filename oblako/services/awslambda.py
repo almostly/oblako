@@ -45,7 +45,8 @@ class LambdaService:
         iam = self.get_iam_client()
         try:
             return iam.create_role(
-                RoleName=name, AssumeRolePolicyDocument=ASSUME_ROLE_POLICY,
+                RoleName=name,
+                AssumeRolePolicyDocument=ASSUME_ROLE_POLICY,
             )["Role"]["Arn"]
         except iam.exceptions.EntityAlreadyExistsException:
             return iam.get_role(RoleName=name)["Role"]["Arn"]
@@ -65,6 +66,7 @@ class LambdaService:
         import re
         import docker
         from .backends import docker_client
+
         m = re.match(r"([a-z]+)([\d.]+)", runtime)
         if not m:
             return

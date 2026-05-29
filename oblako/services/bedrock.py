@@ -39,7 +39,7 @@ class BedrockService(Service):
     def url(self) -> str:
         """Ollama engine URL."""
         return f"http://localhost:{self.host_port}"
-    
+
     # -------------------------------------------------------------------------------
     # Engine (Ollama) model management
     # -------------------------------------------------------------------------------
@@ -74,7 +74,9 @@ class BedrockService(Service):
         if autostart and not bedrock_runtime.is_running(self.runtime_port):
             self.start_runtime_server()
         return boto.client(
-            service, f"http://localhost:{self.runtime_port}", region=self.region,
+            service,
+            f"http://localhost:{self.runtime_port}",
+            region=self.region,
         )
 
     def get_client(self, autostart: bool = True):

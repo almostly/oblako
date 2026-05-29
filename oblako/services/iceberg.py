@@ -41,9 +41,12 @@ DEFAULT_WAREHOUSE = "s3://oblako-iceberg/"
 class IcebergCatalogService(Service):
     """Local Iceberg REST catalog backed by S3Proxy."""
 
-    def __init__(self, host_port: int = ports.ICEBERG,
-                 s3_endpoint: str = "http://host.docker.internal:9000",
-                 warehouse: str = DEFAULT_WAREHOUSE):
+    def __init__(
+        self,
+        host_port: int = ports.ICEBERG,
+        s3_endpoint: str = "http://host.docker.internal:9000",
+        warehouse: str = DEFAULT_WAREHOUSE,
+    ):
         """Initialize on host_port (8181) with the warehouse on S3Proxy."""
         super().__init__(
             name="iceberg",
@@ -72,5 +75,7 @@ class IcebergCatalogService(Service):
         try:
             resp = httpx.get(f"{self.endpoint_url}/v1/config", timeout=3.0)
             return resp.status_code == 200
-        except httpx.HTTPError:  # any transport error (incl. accept-then-reset) = not ready
+        except (
+            httpx.HTTPError
+        ):  # any transport error (incl. accept-then-reset) = not ready
             return False

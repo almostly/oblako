@@ -36,10 +36,12 @@ def _score(instances):
         for col in cats:
             X[col] = X[col].astype(str)
         pool = Pool(X, cat_features=cat_idx)
-        proba = float(_model.predict_proba(pool)[0, 1])           # P(default)
+        proba = float(_model.predict_proba(pool)[0, 1])  # P(default)
         shap = _model.get_feature_importance(type="ShapValues", data=pool)
-        log_odds = float(shap[0, :-1].sum() + shap[0, -1])        # contributions + base
-        out.append({"proba": round(proba, 4), "score": int(offset + factor * (-log_odds))})
+        log_odds = float(shap[0, :-1].sum() + shap[0, -1])  # contributions + base
+        out.append(
+            {"proba": round(proba, 4), "score": int(offset + factor * (-log_odds))}
+        )
     return out
 
 

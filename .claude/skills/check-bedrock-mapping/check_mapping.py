@@ -36,7 +36,9 @@ def main() -> int:
     stale = [s for s in targets if s not in live]
 
     print(f"OpenRouter catalog: {len(live)} models")
-    print(f"Mapped slugs: {len(targets)} total — {len(targets) - len(stale)} live, {len(stale)} stale")
+    print(
+        f"Mapped slugs: {len(targets)} total — {len(targets) - len(stale)} live, {len(stale)} stale"
+    )
 
     if not stale:
         print("\nAll mapped OpenRouter slugs are live. OK")

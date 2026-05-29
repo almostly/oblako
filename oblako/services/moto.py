@@ -26,7 +26,9 @@ class MotoService(Service):
             name="moto",
             image="motoserver/moto:latest",
             ports=[PortMapping(container_port=5000, host_port=host_port)],
-            volumes={"/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"}},
+            volumes={
+                "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"}
+            },
             environment={
                 # Function containers must be able to reach moto over the host
                 # Docker network — host.docker.internal works on Docker Desktop.

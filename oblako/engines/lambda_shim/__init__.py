@@ -68,7 +68,10 @@ async def _invocations(request: Request) -> JSONResponse:
     handler = FUNCTIONS.get(name)
     if handler is None:
         return JSONResponse(
-            {"errorMessage": f"Function not found: {name}", "errorType": "ResourceNotFoundException"},
+            {
+                "errorMessage": f"Function not found: {name}",
+                "errorType": "ResourceNotFoundException",
+            },
             status_code=404,
             headers={"X-Amz-Function-Error": "Unhandled"},
         )
@@ -84,13 +87,20 @@ async def _invocations(request: Request) -> JSONResponse:
 
 def create_app() -> Starlette:
     """Build the Starlette ASGI app exposing the Lambda Invoke route."""
+
     async def health(_request: Request) -> JSONResponse:
         return JSONResponse({"status": "ok", "functions": list(FUNCTIONS)})
 
-    return Starlette(routes=[
-        Route("/", health, methods=["GET"]),
-        Route("/2015-03-31/functions/{name}/invocations", _invocations, methods=["POST"]),
-    ])
+    return Starlette(
+        routes=[
+            Route("/", health, methods=["GET"]),
+            Route(
+                "/2015-03-31/functions/{name}/invocations",
+                _invocations,
+                methods=["POST"],
+            ),
+        ]
+    )
 
 
 app = create_app()
@@ -99,7 +109,9 @@ app = create_app()
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if a lambda shim is reachable on the port."""
     try:
-        with urllib.request.urlopen(f"http://localhost:{port}/", timeout=timeout) as resp:
+        with urllib.request.urlopen(
+            f"http://localhost:{port}/", timeout=timeout
+        ) as resp:
             return resp.status == 200
     except Exception:
         return False
@@ -115,7 +127,9 @@ def start_in_thread(port: int = DEFAULT_PORT) -> str:
     with _lock:
         if port in _servers:
             return url
-        config = uvicorn.Config(create_app(), host="0.0.0.0", port=port, log_level="warning")
+        config = uvicorn.Config(
+            create_app(), host="0.0.0.0", port=port, log_level="warning"
+        )
         server = uvicorn.Server(config)
         thread = threading.Thread(target=server.run, daemon=True)
         thread.start()

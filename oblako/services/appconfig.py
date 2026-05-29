@@ -55,6 +55,8 @@ class AppConfigService:
         from oblako.engines.appconfig import AppConfigClient
 
         return AppConfigClient(
-            endpoint_url=self.endpoint_url, region=config.region(),
-            aws_access_key_id="test", aws_secret_access_key="test",
+            endpoint_url=self.endpoint_url,
+            region=config.region(),
+            aws_access_key_id="test",
+            aws_secret_access_key="test",
         )

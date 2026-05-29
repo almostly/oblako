@@ -14,7 +14,9 @@ depend on.
 
 # Object stores / streaming
 S3 = 9000  # S3Proxy
-DYNAMODB = 8001  # DynamoDB Local (host; 8000 inside the container — 8000 is the dashboard)
+DYNAMODB = (
+    8001  # DynamoDB Local (host; 8000 inside the container — 8000 is the dashboard)
+)
 KINESIS = 4567
 OPENSEARCH = 9200
 

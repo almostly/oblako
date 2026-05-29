@@ -32,8 +32,9 @@ def ec2():
 
 def test_control_plane_run_and_describe(ec2):
     iid = ec2.run_instance(instance_type="t3.medium", backed=False)  # metadata only
-    inst = ec2.get_client().describe_instances(InstanceIds=[iid])[
-        "Reservations"][0]["Instances"][0]
+    inst = ec2.get_client().describe_instances(InstanceIds=[iid])["Reservations"][0][
+        "Instances"
+    ][0]
     assert iid.startswith("i-") and inst["InstanceType"] == "t3.medium"
     ec2.get_client().terminate_instances(InstanceIds=[iid])
 
@@ -58,5 +59,6 @@ def test_instance_is_backed_by_real_container_and_volume(ec2):
     # terminate removes both container and EBS volume
     assert ec2.instance_container(iid) is None
     import docker
+
     with pytest.raises(docker.errors.NotFound):
         ec2mod._docker().volumes.get(ec2mod._volume_name(iid))

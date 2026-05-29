@@ -77,9 +77,15 @@ class Service:
             self.backend.remove(self.container_name)
         print(f"Starting {self.name}...")
         self.backend.run(
-            name=self.container_name, image=self.image, ports=self._port_bindings(),
-            environment=self.environment, volumes=self.volumes, extra_hosts=self.extra_hosts,
-            command=self.command, working_dir=self.working_dir, user=self.container_user,
+            name=self.container_name,
+            image=self.image,
+            ports=self._port_bindings(),
+            environment=self.environment,
+            volumes=self.volumes,
+            extra_hosts=self.extra_hosts,
+            command=self.command,
+            working_dir=self.working_dir,
+            user=self.container_user,
         )
 
     def stop(self) -> None:
@@ -92,8 +98,11 @@ class Service:
     def status(self) -> ServiceStatus:
         """Get current service status."""
         try:
-            return ServiceStatus.RUNNING if self.backend.status(self.container_name) == RUNNING \
+            return (
+                ServiceStatus.RUNNING
+                if self.backend.status(self.container_name) == RUNNING
                 else ServiceStatus.STOPPED
+            )
         except Exception:  # noqa: BLE001 - backend/daemon unreachable
             return ServiceStatus.ERROR
 
@@ -121,4 +130,6 @@ class Service:
 
     def __repr__(self) -> str:
         """Return a concise string representation of the service."""
-        return f"{type(self).__name__}(name={self.name!r}, status={self.status().value})"
+        return (
+            f"{type(self).__name__}(name={self.name!r}, status={self.status().value})"
+        )

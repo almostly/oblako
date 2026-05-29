@@ -29,9 +29,17 @@ from .engine import AppConfigError, AppConfigStore
 from .rule_evaluator import evaluate_config, evaluate_rule, extract_attributes
 
 __all__ = [
-    "app", "create_app", "AppConfigStore", "AppConfigError", "AppConfigClient",
-    "evaluate_config", "evaluate_rule", "extract_attributes",
-    "start_in_thread", "is_running", "DEFAULT_PORT",
+    "app",
+    "create_app",
+    "AppConfigStore",
+    "AppConfigError",
+    "AppConfigClient",
+    "evaluate_config",
+    "evaluate_rule",
+    "extract_attributes",
+    "start_in_thread",
+    "is_running",
+    "DEFAULT_PORT",
 ]
 
 DEFAULT_PORT = ports.APPCONFIG
@@ -51,7 +59,9 @@ def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
         return False
 
 
-def start_in_thread(port: int = DEFAULT_PORT, store: AppConfigStore | None = None) -> str:
+def start_in_thread(
+    port: int = DEFAULT_PORT, store: AppConfigStore | None = None
+) -> str:
     """Start the AppConfig server in a daemon thread (idempotent). Returns its URL."""
     import uvicorn
 
@@ -62,8 +72,9 @@ def start_in_thread(port: int = DEFAULT_PORT, store: AppConfigStore | None = Non
         if port in _servers:
             return url
         application = create_app(store)
-        config = uvicorn.Config(application, host="127.0.0.1", port=port,
-                                log_level="warning")
+        config = uvicorn.Config(
+            application, host="127.0.0.1", port=port, log_level="warning"
+        )
         server = uvicorn.Server(config)
         threading.Thread(target=server.run, daemon=True).start()
         _servers[port] = server

@@ -51,9 +51,16 @@ def _iceberg_to_glue_type(t) -> str:
     if isinstance(t, dict):
         return "string"  # nested struct/list/map -> coarse fallback
     return {
-        "int": "int", "long": "bigint", "float": "float", "double": "double",
-        "string": "string", "boolean": "boolean", "date": "date",
-        "timestamp": "timestamp", "timestamptz": "timestamp", "uuid": "string",
+        "int": "int",
+        "long": "bigint",
+        "float": "float",
+        "double": "double",
+        "string": "string",
+        "boolean": "boolean",
+        "date": "date",
+        "timestamp": "timestamp",
+        "timestamptz": "timestamp",
+        "uuid": "string",
         "binary": "binary",
     }.get(t, "string")
 
@@ -66,8 +73,10 @@ def _table_to_glue(database: str, name: str, table_json: dict) -> dict:
         "DatabaseName": database,
         "TableType": "EXTERNAL_TABLE",
         "StorageDescriptor": {
-            "Columns": [{"Name": f.get("name"), "Type": _iceberg_to_glue_type(f.get("type"))}
-                        for f in fields],
+            "Columns": [
+                {"Name": f.get("name"), "Type": _iceberg_to_glue_type(f.get("type"))}
+                for f in fields
+            ],
             "Location": table_json.get("metadata-location", ""),
         },
         "Parameters": {"table_type": "ICEBERG"},
@@ -93,21 +102,26 @@ def _get_database(body):
 @_action("AWSGlue.CreateDatabase")
 def _create_database(body):
     name = body["DatabaseInput"]["Name"]
-    httpx.post(f"{_iceberg_url()}/v1/namespaces",
-               json={"namespace": [name]}, timeout=5.0)
+    httpx.post(
+        f"{_iceberg_url()}/v1/namespaces", json={"namespace": [name]}, timeout=5.0
+    )
     return {}
 
 
 @_action("AWSGlue.GetTables")
 def _get_tables(body):
     db = body["DatabaseName"]
-    ids = httpx.get(f"{_iceberg_url()}/v1/namespaces/{db}/tables",
-                    timeout=5.0).json().get("identifiers", [])
+    ids = (
+        httpx.get(f"{_iceberg_url()}/v1/namespaces/{db}/tables", timeout=5.0)
+        .json()
+        .get("identifiers", [])
+    )
     tables = []
     for ident in ids:
         name = ident["name"]
-        tjson = httpx.get(f"{_iceberg_url()}/v1/namespaces/{db}/tables/{name}",
-                          timeout=5.0).json()
+        tjson = httpx.get(
+            f"{_iceberg_url()}/v1/namespaces/{db}/tables/{name}", timeout=5.0
+        ).json()
         tables.append(_table_to_glue(db, name, tjson))
     return {"TableList": tables}
 
@@ -136,12 +150,14 @@ async def _glue_dispatch(request: Request) -> JSONResponse:
     except Exception as e:  # noqa: BLE001 - surface as Glue InternalFailure
         return JSONResponse(
             {"__type": "InternalFailure", "Message": str(e)},
-            status_code=500, headers={"x-amzn-errortype": "InternalFailure"},
+            status_code=500,
+            headers={"x-amzn-errortype": "InternalFailure"},
         )
     if result is None:
         return JSONResponse(
             {"__type": "EntityNotFoundException", "Message": "Not found"},
-            status_code=400, headers={"x-amzn-errortype": "EntityNotFoundException"},
+            status_code=400,
+            headers={"x-amzn-errortype": "EntityNotFoundException"},
         )
     return JSONResponse(result)
 
@@ -152,10 +168,12 @@ async def _health(_request: Request) -> JSONResponse:
 
 def create_app() -> Starlette:
     """Build the Starlette ASGI app implementing the Glue Data Catalog wire protocol."""
-    return Starlette(routes=[
-        Route("/", _health, methods=["GET"]),
-        Route("/", _glue_dispatch, methods=["POST"]),
-    ])
+    return Starlette(
+        routes=[
+            Route("/", _health, methods=["GET"]),
+            Route("/", _glue_dispatch, methods=["POST"]),
+        ]
+    )
 
 
 app = create_app()
@@ -164,7 +182,9 @@ app = create_app()
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if a glue_catalog server is reachable on the port."""
     try:
-        with urllib.request.urlopen(f"http://localhost:{port}/", timeout=timeout) as resp:
+        with urllib.request.urlopen(
+            f"http://localhost:{port}/", timeout=timeout
+        ) as resp:
             return resp.status == 200
     except Exception:  # noqa: BLE001
         return False
@@ -180,7 +200,9 @@ def start_in_thread(port: int = DEFAULT_PORT) -> str:
     with _lock:
         if port in _servers:
             return url
-        ucfg = uvicorn.Config(create_app(), host="127.0.0.1", port=port, log_level="warning")
+        ucfg = uvicorn.Config(
+            create_app(), host="127.0.0.1", port=port, log_level="warning"
+        )
         server = uvicorn.Server(ucfg)
         thread = threading.Thread(target=server.run, daemon=True)
         thread.start()

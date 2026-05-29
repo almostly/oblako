@@ -16,8 +16,13 @@ def test_env_override(monkeypatch):
 
 
 def test_arn():
-    assert config.arn("s3", "my-bucket") == "arn:aws:s3:us-east-1:123456789012:my-bucket"
-    assert config.arn("iam", "role/r", region_scoped=False) == "arn:aws:iam::123456789012:role/r"
+    assert (
+        config.arn("s3", "my-bucket") == "arn:aws:s3:us-east-1:123456789012:my-bucket"
+    )
+    assert (
+        config.arn("iam", "role/r", region_scoped=False)
+        == "arn:aws:iam::123456789012:role/r"
+    )
 
 
 def test_clients_use_configured_region(monkeypatch):

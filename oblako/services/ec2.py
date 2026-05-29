@@ -48,9 +48,13 @@ def _volume_name(instance_id: str) -> str:
     return f"oblako-ec2-{instance_id}"  # the instance's EBS volume
 
 
-def start_instance_container(instance_id: str, image_id: str | None = None,
-                             image: str | None = None, command=None,
-                             published_ports: dict | None = None) -> str:
+def start_instance_container(
+    instance_id: str,
+    image_id: str | None = None,
+    image: str | None = None,
+    command=None,
+    published_ports: dict | None = None,
+) -> str:
     """Start (idempotently) the backing container + EBS volume for an instance.
 
     Reusable by both Ec2Service and the CloudFormation AWS::EC2::Instance provider
@@ -82,10 +86,15 @@ def start_instance_container(instance_id: str, image_id: str | None = None,
     except docker.errors.NotFound:
         client.volumes.create(vol, labels={INSTANCE_LABEL: instance_id})  # EBS root
     container = client.containers.run(
-        image, command=command or ["sleep", "infinity"], detach=True, name=name,
+        image,
+        command=command or ["sleep", "infinity"],
+        detach=True,
+        name=name,
         volumes={vol: {"bind": EBS_MOUNT, "mode": "rw"}},
         ports=published_ports or None,
-        extra_hosts={"host.docker.internal": "host-gateway"},  # reach oblako on the host
+        extra_hosts={
+            "host.docker.internal": "host-gateway"
+        },  # reach oblako on the host
         labels={INSTANCE_LABEL: instance_id, "oblako.service": "ec2"},
     )
     return container.id
@@ -122,17 +131,25 @@ class Ec2Service:
         return self.moto.endpoint_url
 
     # Control plane + real compute
-    def run_instance(self, image_id: str = "ami-0abcdef1234567890",
-                     instance_type: str = "t3.micro", *, backed: bool = True,
-                     **kwargs) -> str:
+    def run_instance(
+        self,
+        image_id: str = "ami-0abcdef1234567890",
+        instance_type: str = "t3.micro",
+        *,
+        backed: bool = True,
+        **kwargs,
+    ) -> str:
         """Launch one instance: record it in moto, then back it with a container.
 
         Returns the InstanceId. ``backed=False`` records control-plane metadata
         only (no container) — useful when Docker isn't available.
         """
         iid = self.get_client().run_instances(
-            ImageId=image_id, InstanceType=instance_type,
-            MinCount=1, MaxCount=1, **kwargs,
+            ImageId=image_id,
+            InstanceType=instance_type,
+            MinCount=1,
+            MaxCount=1,
+            **kwargs,
         )["Instances"][0]["InstanceId"]
         if backed:
             start_instance_container(iid, image_id=image_id)

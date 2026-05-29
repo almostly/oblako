@@ -37,14 +37,21 @@ def _ensure_bucket(s3_endpoint: str) -> None:
     """Create the artifact bucket on S3Proxy if it does not exist (best-effort)."""
     try:
         s3 = boto3.client(
-            "s3", endpoint_url=s3_endpoint, region_name=config.region(),
-            aws_access_key_id="test", aws_secret_access_key="test",
-            config=BotoConfig(signature_version="s3v4",
-                              s3={"addressing_style": "path"},
-                              request_checksum_calculation="when_required",
-                              response_checksum_validation="when_required"),
+            "s3",
+            endpoint_url=s3_endpoint,
+            region_name=config.region(),
+            aws_access_key_id="test",
+            aws_secret_access_key="test",
+            config=BotoConfig(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
+            ),
         )
-        if ARTIFACT_BUCKET not in {b["Name"] for b in s3.list_buckets().get("Buckets", [])}:
+        if ARTIFACT_BUCKET not in {
+            b["Name"] for b in s3.list_buckets().get("Buckets", [])
+        }:
             s3.create_bucket(Bucket=ARTIFACT_BUCKET)
     except Exception:  # noqa: BLE001 - S3Proxy may not be up; mlflow handles missing later
         pass
@@ -56,9 +63,21 @@ def _slim_image(tag: str) -> None:
         return
     full = f"{tag.split(':')[0]}:full"
     subprocess.run(["docker", "tag", tag, full], check=False, capture_output=True)
-    subprocess.run(["slim", "build", "--target", full, "--tag", tag,
-                    "--http-probe=false", "--continue-after", "10"],
-                   check=False, capture_output=True)
+    subprocess.run(
+        [
+            "slim",
+            "build",
+            "--target",
+            full,
+            "--tag",
+            tag,
+            "--http-probe=false",
+            "--continue-after",
+            "10",
+        ],
+        check=False,
+        capture_output=True,
+    )
 
 
 class MlflowService(Service):
@@ -66,8 +85,11 @@ class MlflowService(Service):
 
     name = "mlflow"
 
-    def __init__(self, host_port: int = ports.MLFLOW,
-                 s3_endpoint: str = "http://host.docker.internal:9000"):
+    def __init__(
+        self,
+        host_port: int = ports.MLFLOW,
+        s3_endpoint: str = "http://host.docker.internal:9000",
+    ):
         """Initialize on host_port (5050; 5000 collides with macOS AirPlay)."""
         super().__init__(
             name="mlflow",
@@ -116,5 +138,7 @@ class MlflowService(Service):
         try:
             resp = httpx.get(f"http://localhost:{self.host_port}/health", timeout=3.0)
             return resp.status_code == 200
-        except httpx.HTTPError:  # any transport error (incl. accept-then-reset) = not ready
+        except (
+            httpx.HTTPError
+        ):  # any transport error (incl. accept-then-reset) = not ready
             return False

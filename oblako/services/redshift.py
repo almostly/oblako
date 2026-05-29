@@ -46,7 +46,10 @@ class RedshiftService(Service):
                 "POSTGRES_DB": database,
             },
             volumes={
-                "oblako-redshift-data": {"bind": "/var/lib/postgresql/data", "mode": "rw"}
+                "oblako-redshift-data": {
+                    "bind": "/var/lib/postgresql/data",
+                    "mode": "rw",
+                }
             },
         )
         self.host_port = host_port
@@ -72,7 +75,9 @@ class RedshiftService(Service):
         from . import boto
 
         return boto.client(
-            "redshift", f"http://localhost:{self.control_port}", region=self.region,
+            "redshift",
+            f"http://localhost:{self.control_port}",
+            region=self.region,
         )
 
     def start_data_server(self):
@@ -96,7 +101,9 @@ class RedshiftService(Service):
         if autostart and not redshift_data.is_running(self.data_port):
             self.start_data_server()
         return boto.client(
-            "redshift-data", f"http://localhost:{self.data_port}", region=self.region,
+            "redshift-data",
+            f"http://localhost:{self.data_port}",
+            region=self.region,
         )
 
     def _health_check(self) -> bool:

@@ -84,7 +84,8 @@ class AppConfigClient:
 
     def _resolve_id(self, list_method: str, name: str, **kwargs: Any) -> str | None:
         cache_key = f"{list_method}/{name}/" + ",".join(
-            f"{k}={v}" for k, v in sorted(kwargs.items()))
+            f"{k}={v}" for k, v in sorted(kwargs.items())
+        )
         if cache_key in _ID_CACHE:
             return _ID_CACHE[cache_key]
         try:
@@ -102,20 +103,27 @@ class AppConfigClient:
         if not app_id:
             raise RuntimeError(f"AppConfig application '{application}' not found")
         profile_id = self._resolve_id(
-            "list_configuration_profiles", profile, ApplicationId=app_id)
+            "list_configuration_profiles", profile, ApplicationId=app_id
+        )
         if not profile_id:
-            raise RuntimeError(f"AppConfig profile '{profile}' not found in '{application}'")
+            raise RuntimeError(
+                f"AppConfig profile '{profile}' not found in '{application}'"
+            )
         versions = self._client.list_hosted_configuration_versions(
-            ApplicationId=app_id, ConfigurationProfileId=profile_id, MaxResults=1)
+            ApplicationId=app_id, ConfigurationProfileId=profile_id, MaxResults=1
+        )
         if not versions.get("Items"):
             raise RuntimeError(f"No versions for AppConfig profile '{profile}'")
         resp = self._client.get_hosted_configuration_version(
-            ApplicationId=app_id, ConfigurationProfileId=profile_id,
-            VersionNumber=versions["Items"][0]["VersionNumber"])
+            ApplicationId=app_id,
+            ConfigurationProfileId=profile_id,
+            VersionNumber=versions["Items"][0]["VersionNumber"],
+        )
         return resp["Content"].read()
 
-    def get_configuration(self, application: str, environment: str, profile: str,
-                          as_json: bool = True) -> Any:
+    def get_configuration(
+        self, application: str, environment: str, profile: str, as_json: bool = True
+    ) -> Any:
         """Return the raw configuration (cache when fresh, disk backup on failure)."""
         key = _config_key(application, environment, profile)
         cached = _CACHE.get(key)
@@ -133,9 +141,14 @@ class AppConfigClient:
         _write_backup(key, value, self._backup_dir)
         return self._decode(value, as_json)
 
-    def evaluate(self, application: str, environment: str, profile: str,
-                 context: dict[str, Any] | None = None,
-                 flag_name: str | None = None) -> dict[str, Any]:
+    def evaluate(
+        self,
+        application: str,
+        environment: str,
+        profile: str,
+        context: dict[str, Any] | None = None,
+        flag_name: str | None = None,
+    ) -> dict[str, Any]:
         """Resolve feature-flag variants against ``context`` (the agent's job).
 
         Fetches the raw config, then runs the rule evaluator over its ``values``
@@ -146,8 +159,14 @@ class AppConfigClient:
         result = evaluate_config(values, context or {})
         return result.get(flag_name, {}) if flag_name else result
 
-    def get_variant(self, application: str, environment: str, profile: str,
-                    context: dict[str, Any], flag_name: str) -> str | None:
+    def get_variant(
+        self,
+        application: str,
+        environment: str,
+        profile: str,
+        context: dict[str, Any],
+        flag_name: str,
+    ) -> str | None:
         """Return just the resolved variant name for one flag (or None)."""
         flag = self.evaluate(application, environment, profile, context, flag_name)
         return flag.get("_variant") if isinstance(flag, dict) else None

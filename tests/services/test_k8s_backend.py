@@ -15,10 +15,14 @@ import pytest
 def _cluster_available() -> bool:
     if shutil.which("kubectl") is None:
         return False
-    return subprocess.run(["kubectl", "cluster-info"], capture_output=True).returncode == 0
+    return (
+        subprocess.run(["kubectl", "cluster-info"], capture_output=True).returncode == 0
+    )
 
 
-pytestmark = pytest.mark.skipif(not _cluster_available(), reason="no Kubernetes cluster reachable")
+pytestmark = pytest.mark.skipif(
+    not _cluster_available(), reason="no Kubernetes cluster reachable"
+)
 
 
 def test_dynamodb_runs_on_kubernetes(monkeypatch):

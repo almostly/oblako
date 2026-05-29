@@ -254,15 +254,21 @@ class StackStore:
                 else:
                     continue  # unchanged — CloudFormation omits it from the change set
                 changes.append(
-                    {"Action": action, "LogicalResourceId": rid, "ResourceType": r["Type"]}
+                    {
+                        "Action": action,
+                        "LogicalResourceId": rid,
+                        "ResourceType": r["Type"],
+                    }
                 )
             for rid, r in old_resources.items():
                 if rid not in new_resources:
-                    changes.append({
-                        "Action": "Remove",
-                        "LogicalResourceId": rid,
-                        "ResourceType": r.get("Type", ""),
-                    })
+                    changes.append(
+                        {
+                            "Action": "Remove",
+                            "LogicalResourceId": rid,
+                            "ResourceType": r.get("Type", ""),
+                        }
+                    )
             # Adopt the new template + params only after diffing the old one.
             stack["template"] = template
             stack["params"] = params
@@ -331,7 +337,9 @@ class StackStore:
             ctx["attrs"][rid] = res.get("Attributes", {})
 
         changes = cs["changes"]
-        to_apply = [c["LogicalResourceId"] for c in changes if c["Action"] in ("Add", "Modify")]
+        to_apply = [
+            c["LogicalResourceId"] for c in changes if c["Action"] in ("Add", "Modify")
+        ]
         to_remove = [c["LogicalResourceId"] for c in changes if c["Action"] == "Remove"]
 
         if is_update:
@@ -376,7 +384,9 @@ class StackStore:
                 ctx["physical"].pop(rid, None)
                 ctx["attrs"].pop(rid, None)
                 stack["events"].append(
-                    _event(stack, rid, old["Type"], old["PhysicalId"], "DELETE_COMPLETE")
+                    _event(
+                        stack, rid, old["Type"], old["PhysicalId"], "DELETE_COMPLETE"
+                    )
                 )
             stack["Outputs"] = [
                 {

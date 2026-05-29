@@ -19,10 +19,19 @@ DEFAULT_ACCOUNT_ID = "123456789012"
 
 # Common AWS regions offered in the dashboard region picker.
 REGIONS = [
-    "us-east-1", "us-east-2", "us-west-1", "us-west-2",
-    "eu-west-1", "eu-west-2", "eu-central-1",
-    "ap-south-1", "ap-southeast-1", "ap-southeast-2", "ap-northeast-1",
-    "sa-east-1", "ca-central-1",
+    "us-east-1",
+    "us-east-2",
+    "us-west-1",
+    "us-west-2",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-central-1",
+    "ap-south-1",
+    "ap-southeast-1",
+    "ap-southeast-2",
+    "ap-northeast-1",
+    "sa-east-1",
+    "ca-central-1",
 ]
 
 # Runtime overrides (set by the dashboard region picker); take precedence over env.
@@ -37,7 +46,9 @@ def region() -> str:
 
 def account_id() -> str:
     """Return the active AWS account id: runtime override, then env, then default."""
-    return _account_override or os.environ.get("OBLAKO_ACCOUNT_ID") or DEFAULT_ACCOUNT_ID
+    return (
+        _account_override or os.environ.get("OBLAKO_ACCOUNT_ID") or DEFAULT_ACCOUNT_ID
+    )
 
 
 def set_region(value: str | None) -> None:

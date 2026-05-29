@@ -9,8 +9,12 @@ def _task_states(definition: dict) -> set[str]:
 
 def test_public_templates_shape():
     tpls = {t["id"]: t for t in sfn_templates.public_templates()}
-    assert set(tpls) == {"preprocess-train", "train-batch-transform", "hpo-batch-transform",
-                         "bedrock-reason-codes"}
+    assert set(tpls) == {
+        "preprocess-train",
+        "train-batch-transform",
+        "hpo-batch-transform",
+        "bedrock-reason-codes",
+    }
     # All four are runnable. The 3 SageMaker ones run mock-mode; Bedrock runs live.
     for tid in tpls:
         assert tpls[tid]["runnable"] is True
@@ -28,7 +32,9 @@ def test_definitions_are_well_formed():
         for name, state in states.items():
             target = state.get("Next") or state.get("Default")
             if target is not None:
-                assert target in states, f"{name} -> {target} (missing) in {tpl['name']}"
+                assert target in states, (
+                    f"{name} -> {target} (missing) in {tpl['name']}"
+                )
             for choice in state.get("Choices", []):
                 assert choice["Next"] in states
 
@@ -42,7 +48,9 @@ def test_mock_keys_map_to_task_states():
         for state_name in tpl["mock"]:
             assert state_name in tasks, f"{state_name} not a Task in {tpl['name']}"
         for short in tpl["mock"].values():
-            assert short in tpl["responses"], f"missing response {short} in {tpl['name']}"
+            assert short in tpl["responses"], (
+                f"missing response {short} in {tpl['name']}"
+            )
 
 
 def test_build_mock_config_only_mock_templates_and_resolvable():

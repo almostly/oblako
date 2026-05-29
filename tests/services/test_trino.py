@@ -5,13 +5,16 @@ from oblako.services.trino import TrinoService
 
 def test_defaults():
     svc = TrinoService()
-    assert svc.host_port == 8485  # Trino's internal :8080 mapped here (8080 is heavily used)
+    assert (
+        svc.host_port == 8485
+    )  # Trino's internal :8080 mapped here (8080 is heavily used)
     assert svc.endpoint_url == "http://localhost:8485"
     assert svc.image == "trinodb/trino:latest"
 
 
 def test_athena_alias():
     from oblako.services.platform import Oblako
+
     o = Oblako()
     assert o.athena is o.trino  # Athena is Trino under the hood on AWS too
 

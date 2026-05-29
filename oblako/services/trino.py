@@ -47,7 +47,9 @@ class TrinoService(Service):
             name="trino",
             image="trinodb/trino:latest",
             ports=[PortMapping(container_port=8080, host_port=host_port)],
-            volumes={str(TRINO_CATALOG_DIR): {"bind": "/etc/trino/catalog", "mode": "ro"}},
+            volumes={
+                str(TRINO_CATALOG_DIR): {"bind": "/etc/trino/catalog", "mode": "ro"}
+            },
             environment={
                 # S3Proxy doesn't implement aws-chunked CRC32 — make the AWS SDK v2
                 # used by Trino's S3 client skip the new flexible checksums.
@@ -67,8 +69,9 @@ class TrinoService(Service):
         """Run a SQL query through Trino's REST API. Returns ``{columns, rows}`` or ``{error}``."""
         base = self.endpoint_url
         headers = {"X-Trino-User": "oblako", "Content-Type": "text/plain"}
-        result = httpx.post(f"{base}/v1/statement", content=sql,
-                            headers=headers, timeout=timeout).json()
+        result = httpx.post(
+            f"{base}/v1/statement", content=sql, headers=headers, timeout=timeout
+        ).json()
         rows: list = []
         columns: list[str] | None = None
         deadline = time.time() + timeout
@@ -90,5 +93,7 @@ class TrinoService(Service):
         try:
             resp = httpx.get(f"{self.endpoint_url}/v1/info", timeout=3.0)
             return resp.status_code == 200 and not resp.json().get("starting", True)
-        except httpx.HTTPError:  # any transport error (incl. accept-then-reset) = not ready
+        except (
+            httpx.HTTPError
+        ):  # any transport error (incl. accept-then-reset) = not ready
             return False

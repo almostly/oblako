@@ -145,8 +145,12 @@ class SageMakerService:
                     return inst["InstanceId"]
         return None
 
-    def create_domain(self, name: str = "studio", instance_type: str = "t3.medium",
-                       notebook_port: int = NOTEBOOK_PORT) -> dict:
+    def create_domain(
+        self,
+        name: str = "studio",
+        instance_type: str = "t3.medium",
+        notebook_port: int = NOTEBOOK_PORT,
+    ) -> dict:
         """Create a Studio domain as a CloudFormation stack (S3 + EC2 + EBS).
 
         The notebook instance is a real container (Jupyter image) publishing
@@ -154,18 +158,32 @@ class SageMakerService:
         """
         self.ensure_notebook_image()  # build the slim image if needed (local tag)
         bucket = f"oblako-sagemaker-{name}"
-        template = json.dumps({"Resources": {
-            "Artifacts": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": bucket}},
-            "Notebook": {"Type": "AWS::EC2::Instance", "Properties": {
-                "InstanceType": instance_type,
-                "Image": NOTEBOOK_IMAGE,                 # oblako extension
-                "Ports": {"8888/tcp": notebook_port},    # oblako extension
-                "Tags": [{"Key": "Name", "Value": f"{name}-notebook"}],
-            }},
-        }})
+        template = json.dumps(
+            {
+                "Resources": {
+                    "Artifacts": {
+                        "Type": "AWS::S3::Bucket",
+                        "Properties": {"BucketName": bucket},
+                    },
+                    "Notebook": {
+                        "Type": "AWS::EC2::Instance",
+                        "Properties": {
+                            "InstanceType": instance_type,
+                            "Image": NOTEBOOK_IMAGE,  # oblako extension
+                            "Ports": {"8888/tcp": notebook_port},  # oblako extension
+                            "Tags": [{"Key": "Name", "Value": f"{name}-notebook"}],
+                        },
+                    },
+                }
+            }
+        )
         cfn, stack = self._cfn(), _domain_stack(name)
-        cfn.create_change_set(StackName=stack, TemplateBody=template,
-                              ChangeSetName="create", ChangeSetType="CREATE")
+        cfn.create_change_set(
+            StackName=stack,
+            TemplateBody=template,
+            ChangeSetName="create",
+            ChangeSetType="CREATE",
+        )
         cfn.execute_change_set(StackName=stack, ChangeSetName="create")
         return self.domain_status(name)
 
@@ -177,7 +195,9 @@ class SageMakerService:
         except Exception:  # noqa: BLE001
             return {"domain": name, "status": "NONE"}
         return {
-            "domain": name, "stack": stack, "status": s["StackStatus"],
+            "domain": name,
+            "stack": stack,
+            "status": s["StackStatus"],
             "artifactsBucket": f"oblako-sagemaker-{name}",
             "instanceId": self._notebook_instance_id(name),
         }
@@ -197,7 +217,8 @@ class SageMakerService:
         container = self.client.containers.get(_container_name(iid))
         host = "host.docker.internal"
         env = {
-            "AWS_ACCESS_KEY_ID": "test", "AWS_SECRET_ACCESS_KEY": "test",
+            "AWS_ACCESS_KEY_ID": "test",
+            "AWS_SECRET_ACCESS_KEY": "test",
             "AWS_DEFAULT_REGION": "us-east-1",
             "AWS_ENDPOINT_URL_S3": f"http://{host}:{P.S3}",
             "AWS_ENDPOINT_URL_DYNAMODB": f"http://{host}:{P.DYNAMODB}",
@@ -205,9 +226,18 @@ class SageMakerService:
             "AWS_ENDPOINT_URL_CLOUDFORMATION": f"http://{host}:{P.CLOUDFORMATION}",
         }
         container.exec_run(
-            ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser",
-             "--allow-root", "--ServerApp.token=oblako", f"--notebook-dir={EBS_MOUNT}"],
-            environment=env, detach=True,
+            [
+                "jupyter",
+                "lab",
+                "--ip=0.0.0.0",
+                "--port=8888",
+                "--no-browser",
+                "--allow-root",
+                "--ServerApp.token=oblako",
+                f"--notebook-dir={EBS_MOUNT}",
+            ],
+            environment=env,
+            detach=True,
         )
         return {"instanceId": iid, "url": f"http://localhost:{port}/lab?token=oblako"}
 

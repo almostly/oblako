@@ -42,7 +42,7 @@ class AppConfigStore:
         self._counter = 0
         self.applications: dict[str, dict] = {}
         self.environments: dict[str, dict] = {}  # env_id -> env (carries ApplicationId)
-        self.profiles: dict[str, dict] = {}      # profile_id -> profile (ApplicationId)
+        self.profiles: dict[str, dict] = {}  # profile_id -> profile (ApplicationId)
         # (app_id, profile_id) -> list of {VersionNumber, Content: bytes, ContentType}
         self.versions: dict[tuple[str, str], list[dict]] = {}
         self.deployment_strategies: dict[str, dict] = {}
@@ -65,14 +65,26 @@ class AppConfigStore:
         """AWS ships predefined deployment strategies; mirror the common ones."""
         for sid, name, dur, growth in [
             ("AppConfig.AllAtOnce", "AppConfig.AllAtOnce", 0, 100.0),
-            ("AppConfig.Linear50PercentEvery30Seconds",
-             "AppConfig.Linear50PercentEvery30Seconds", 1, 50.0),
-            ("AppConfig.Canary10Percent20Minutes",
-             "AppConfig.Canary10Percent20Minutes", 20, 10.0),
+            (
+                "AppConfig.Linear50PercentEvery30Seconds",
+                "AppConfig.Linear50PercentEvery30Seconds",
+                1,
+                50.0,
+            ),
+            (
+                "AppConfig.Canary10Percent20Minutes",
+                "AppConfig.Canary10Percent20Minutes",
+                20,
+                10.0,
+            ),
         ]:
             self.deployment_strategies[sid] = {
-                "Id": sid, "Name": name, "DeploymentDurationInMinutes": dur,
-                "GrowthFactor": growth, "GrowthType": "LINEAR", "ReplicateTo": "NONE",
+                "Id": sid,
+                "Name": name,
+                "DeploymentDurationInMinutes": dur,
+                "GrowthFactor": growth,
+                "GrowthType": "LINEAR",
+                "ReplicateTo": "NONE",
             }
 
     # Resolution helpers — AppConfig accepts an Id or a Name as an identifier.
@@ -85,7 +97,10 @@ class AppConfigStore:
 
     def _resolve_env(self, app_id: str, identifier: str) -> dict:
         for env in self.environments.values():
-            if env["ApplicationId"] == app_id and identifier in (env["Id"], env["Name"]):
+            if env["ApplicationId"] == app_id and identifier in (
+                env["Id"],
+                env["Name"],
+            ):
                 return env
         raise AppConfigError(f"Environment '{identifier}' not found")
 
@@ -116,8 +131,13 @@ class AppConfigStore:
         """Create an environment under an application."""
         with self._lock:
             self._resolve_app(app_id)  # validate
-            env = {"Id": self._id(), "Name": name, "ApplicationId": app_id,
-                   "Description": description, "State": "ReadyForDeployment"}
+            env = {
+                "Id": self._id(),
+                "Name": name,
+                "ApplicationId": app_id,
+                "Description": description,
+                "State": "ReadyForDeployment",
+            }
             self.environments[env["Id"]] = env
             return env
 
@@ -126,16 +146,23 @@ class AppConfigStore:
         return [e for e in self.environments.values() if e["ApplicationId"] == app_id]
 
     # Configuration profiles
-    def create_configuration_profile(self, app_id: str, name: str,
-                                     location_uri: str = "hosted",
-                                     profile_type: str | None = None,
-                                     description: str = "") -> dict:
+    def create_configuration_profile(
+        self,
+        app_id: str,
+        name: str,
+        location_uri: str = "hosted",
+        profile_type: str | None = None,
+        description: str = "",
+    ) -> dict:
         """Create a configuration profile (Freeform or FeatureFlags)."""
         with self._lock:
             self._resolve_app(app_id)
             profile = {
-                "Id": self._id(), "Name": name, "ApplicationId": app_id,
-                "LocationUri": location_uri, "Description": description,
+                "Id": self._id(),
+                "Name": name,
+                "ApplicationId": app_id,
+                "LocationUri": location_uri,
+                "Description": description,
                 # AWS.AppConfig.FeatureFlags or AWS.Freeform
                 "Type": profile_type or "AWS.Freeform",
             }
@@ -151,31 +178,54 @@ class AppConfigStore:
         return self._resolve_profile(app_id, profile_id)
 
     # Hosted configuration versions
-    def create_hosted_configuration_version(self, app_id: str, profile_id: str,
-                                            content: bytes, content_type: str,
-                                            description: str = "") -> dict:
+    def create_hosted_configuration_version(
+        self,
+        app_id: str,
+        profile_id: str,
+        content: bytes,
+        content_type: str,
+        description: str = "",
+    ) -> dict:
         """Store a new hosted configuration version (auto-incrementing the number)."""
         with self._lock:
             self._resolve_app(app_id)
             self._resolve_profile(app_id, profile_id)
             versions = self.versions.setdefault((app_id, profile_id), [])
             version_number = (versions[-1]["VersionNumber"] + 1) if versions else 1
-            v = {"ApplicationId": app_id, "ConfigurationProfileId": profile_id,
-                 "VersionNumber": version_number, "Content": content,
-                 "ContentType": content_type, "Description": description}
+            v = {
+                "ApplicationId": app_id,
+                "ConfigurationProfileId": profile_id,
+                "VersionNumber": version_number,
+                "Content": content,
+                "ContentType": content_type,
+                "Description": description,
+            }
             versions.append(v)
             return v
 
-    def list_hosted_configuration_versions(self, app_id: str, profile_id: str) -> list[dict]:
+    def list_hosted_configuration_versions(
+        self, app_id: str, profile_id: str
+    ) -> list[dict]:
         """List hosted version summaries (no content), newest first."""
         # summaries (no Content), newest first — like the AWS API
         versions = self.versions.get((app_id, profile_id), [])
-        return [{k: x[k] for k in ("ApplicationId", "ConfigurationProfileId",
-                                   "VersionNumber", "ContentType", "Description")}
-                for x in reversed(versions)]
+        return [
+            {
+                k: x[k]
+                for k in (
+                    "ApplicationId",
+                    "ConfigurationProfileId",
+                    "VersionNumber",
+                    "ContentType",
+                    "Description",
+                )
+            }
+            for x in reversed(versions)
+        ]
 
-    def get_hosted_configuration_version(self, app_id: str, profile_id: str,
-                                         version_number: int) -> dict:
+    def get_hosted_configuration_version(
+        self, app_id: str, profile_id: str, version_number: int
+    ) -> dict:
         """Return a specific hosted configuration version, including its content."""
         for v in self.versions.get((app_id, profile_id), []):
             if v["VersionNumber"] == version_number:
@@ -190,16 +240,25 @@ class AppConfigStore:
         return versions[-1]
 
     # Deployment strategies
-    def create_deployment_strategy(self, name: str, duration: int = 0,
-                                   growth_factor: float = 100.0,
-                                   description: str = "") -> dict:
+    def create_deployment_strategy(
+        self,
+        name: str,
+        duration: int = 0,
+        growth_factor: float = 100.0,
+        description: str = "",
+    ) -> dict:
         """Create a custom deployment strategy."""
         with self._lock:
             sid = self._id()
-            s = {"Id": sid, "Name": name,
-                 "DeploymentDurationInMinutes": duration,
-                 "GrowthFactor": growth_factor, "GrowthType": "LINEAR",
-                 "ReplicateTo": "NONE", "Description": description}
+            s = {
+                "Id": sid,
+                "Name": name,
+                "DeploymentDurationInMinutes": duration,
+                "GrowthFactor": growth_factor,
+                "GrowthType": "LINEAR",
+                "ReplicateTo": "NONE",
+                "Description": description,
+            }
             self.deployment_strategies[sid] = s
             return s
 
@@ -208,19 +267,33 @@ class AppConfigStore:
         return list(self.deployment_strategies.values())
 
     # Deployments — oblako completes them immediately (the local engine has no ramp)
-    def start_deployment(self, app_id: str, env_id: str, profile_id: str,
-                         version: str, strategy_id: str, description: str = "") -> dict:
+    def start_deployment(
+        self,
+        app_id: str,
+        env_id: str,
+        profile_id: str,
+        version: str,
+        strategy_id: str,
+        description: str = "",
+    ) -> dict:
         """Start a deployment (completed immediately — the local engine has no ramp)."""
         with self._lock:
             self._resolve_app(app_id)
             deps = self.deployments.setdefault((app_id, env_id), [])
             number = (deps[-1]["DeploymentNumber"] + 1) if deps else 1
-            d = {"ApplicationId": app_id, "EnvironmentId": env_id,
-                 "DeploymentNumber": number, "ConfigurationProfileId": profile_id,
-                 "ConfigurationVersion": str(version),
-                 "DeploymentStrategyId": strategy_id, "Description": description,
-                 "State": "COMPLETE", "PercentageComplete": 100.0,
-                 "StartedAt": _now(), "CompletedAt": _now()}
+            d = {
+                "ApplicationId": app_id,
+                "EnvironmentId": env_id,
+                "DeploymentNumber": number,
+                "ConfigurationProfileId": profile_id,
+                "ConfigurationVersion": str(version),
+                "DeploymentStrategyId": strategy_id,
+                "Description": description,
+                "State": "COMPLETE",
+                "PercentageComplete": 100.0,
+                "StartedAt": _now(),
+                "CompletedAt": _now(),
+            }
             deps.append(d)
             return d
 

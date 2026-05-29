@@ -16,7 +16,9 @@ import boto3
 import shortuuid  # installed by `sam build` (BuildMethod: python-uv), not the Lambda base image
 from botocore.config import Config
 
-CREDS = dict(aws_access_key_id="test", aws_secret_access_key="test", region_name="us-east-1")
+CREDS = dict(
+    aws_access_key_id="test", aws_secret_access_key="test", region_name="us-east-1"
+)
 BUCKET, TABLE = "sam-oblako", "SamOblako"
 
 
@@ -63,10 +65,15 @@ def store(key, body):
     s3.put_object(Bucket=BUCKET, Key=key, Body=body.encode())
     s3_roundtrip = s3.get_object(Bucket=BUCKET, Key=key)["Body"].read().decode()
     record_id = shortuuid.uuid()  # proves the uv-installed dependency is available
-    ddb.put_item(TableName=TABLE, Item={
-        "id": {"S": key}, "body": {"S": body},
-        "rid": {"S": record_id}, "ts": {"N": str(int(time.time()))},
-    })
+    ddb.put_item(
+        TableName=TABLE,
+        Item={
+            "id": {"S": key},
+            "body": {"S": body},
+            "rid": {"S": record_id},
+            "ts": {"N": str(int(time.time()))},
+        },
+    )
     item = ddb.get_item(TableName=TABLE, Key={"id": {"S": key}})["Item"]
     return {
         "s3_roundtrip": s3_roundtrip,
@@ -83,21 +90,33 @@ def fetch(key):
 
 
 def _resp(status, payload):
-    return {"statusCode": status, "headers": {"Content-Type": "application/json"}, "body": json.dumps(payload)}
+    return {
+        "statusCode": status,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps(payload),
+    }
 
 
 def lambda_handler(event, context):
     # API Gateway (`sam local start-api`) sends a proxy event; direct invoke doesn't.
     if "httpMethod" in event or "requestContext" in event:
-        method = event.get("httpMethod") or event.get("requestContext", {}).get("http", {}).get("method", "GET")
+        method = event.get("httpMethod") or event.get("requestContext", {}).get(
+            "http", {}
+        ).get("method", "GET")
         key = (event.get("pathParameters") or {}).get("id", "hello.txt")
         try:
             if method == "PUT":
                 return _resp(201, store(key, event.get("body") or ""))
             record = fetch(key)
-            return _resp(200, record) if record else _resp(404, {"error": f"no item {key!r}"})
+            return (
+                _resp(200, record)
+                if record
+                else _resp(404, {"error": f"no item {key!r}"})
+            )
         except Exception as e:
             return _resp(500, {"error": str(e)})
 
     # direct invoke: `sam local invoke -e event.json`  ->  {key, body}
-    return store(event.get("key", "hello.txt"), event.get("body", "hello from SAM + oblako"))
+    return store(
+        event.get("key", "hello.txt"), event.get("body", "hello from SAM + oblako")
+    )

@@ -12,7 +12,12 @@ import boto3
 import pytest
 
 from oblako.engines.cloudformation import create_app, start_in_thread
-from oblako.engines.cloudformation.engine import StackStore, _ordered, _resolve, parse_template
+from oblako.engines.cloudformation.engine import (
+    StackStore,
+    _ordered,
+    _resolve,
+    parse_template,
+)
 from oblako.engines.cloudformation.transform import is_sam, transform_sam
 from oblako.services import DynamoDBService, S3ProxyService
 
@@ -154,27 +159,37 @@ def test_change_set_diffs_add_modify_remove():
     store.create_change_set("s", t1, {}, "cs1", "CREATE")
     cs1 = store.describe_change_set("s", "cs1")
     assert {(c["LogicalResourceId"], c["Action"]) for c in cs1["Changes"]} == {
-        ("A", "Add"), ("B", "Add"),
+        ("A", "Add"),
+        ("B", "Add"),
     }
 
     # A unchanged, B modified, C added. (B's props differ from t1.)
-    t2 = json.dumps({"Resources": {
-        "A": bucket_a,
-        "B": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": "b2"}},
-        "C": {"Type": "AWS::DynamoDB::Table"},
-    }})
+    t2 = json.dumps(
+        {
+            "Resources": {
+                "A": bucket_a,
+                "B": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": "b2"}},
+                "C": {"Type": "AWS::DynamoDB::Table"},
+            }
+        }
+    )
     store.create_change_set("s", t2, {}, "cs2", "UPDATE")
     cs2 = store.describe_change_set("s", "cs2")
     # Unchanged A is omitted; only the modify + add show up.
     assert {(c["LogicalResourceId"], c["Action"]) for c in cs2["Changes"]} == {
-        ("B", "Modify"), ("C", "Add"),
+        ("B", "Modify"),
+        ("C", "Add"),
     }
 
     # Now drop A; B and C identical to t2 (so they're unchanged → omitted).
-    t3 = json.dumps({"Resources": {
-        "B": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": "b2"}},
-        "C": {"Type": "AWS::DynamoDB::Table"},
-    }})
+    t3 = json.dumps(
+        {
+            "Resources": {
+                "B": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": "b2"}},
+                "C": {"Type": "AWS::DynamoDB::Table"},
+            }
+        }
+    )
     store.create_change_set("s", t3, {}, "cs3", "UPDATE")
     cs3 = store.describe_change_set("s", "cs3")
     assert {(c["LogicalResourceId"], c["Action"]) for c in cs3["Changes"]} == {
@@ -323,36 +338,59 @@ def test_update_change_set_adds_and_removes_real_resources():
     s3 = S3ProxyService().get_client()
     ddb = DynamoDBService(host_port=8001).get_client()
 
-    v1 = json.dumps({"Resources": {
-        "Data": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": "oblako-cfnup"}},
-        "Items": {
-            "Type": "AWS::DynamoDB::Table",
-            "Properties": {
-                "TableName": "cfnup-items",
-                "AttributeDefinitions": [{"AttributeName": "id", "AttributeType": "S"}],
-                "KeySchema": [{"AttributeName": "id", "KeyType": "HASH"}],
-            },
-        },
-    }})
+    v1 = json.dumps(
+        {
+            "Resources": {
+                "Data": {
+                    "Type": "AWS::S3::Bucket",
+                    "Properties": {"BucketName": "oblako-cfnup"},
+                },
+                "Items": {
+                    "Type": "AWS::DynamoDB::Table",
+                    "Properties": {
+                        "TableName": "cfnup-items",
+                        "AttributeDefinitions": [
+                            {"AttributeName": "id", "AttributeType": "S"}
+                        ],
+                        "KeySchema": [{"AttributeName": "id", "KeyType": "HASH"}],
+                    },
+                },
+            }
+        }
+    )
     # v2 keeps the bucket verbatim and removes the table.
-    v2 = json.dumps({"Resources": {
-        "Data": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": "oblako-cfnup"}},
-    }})
+    v2 = json.dumps(
+        {
+            "Resources": {
+                "Data": {
+                    "Type": "AWS::S3::Bucket",
+                    "Properties": {"BucketName": "oblako-cfnup"},
+                },
+            }
+        }
+    )
 
-    cfn.create_change_set(StackName="cfnup", TemplateBody=v1, ChangeSetName="c1",
-                          ChangeSetType="CREATE")
+    cfn.create_change_set(
+        StackName="cfnup", TemplateBody=v1, ChangeSetName="c1", ChangeSetType="CREATE"
+    )
     cfn.execute_change_set(StackName="cfnup", ChangeSetName="c1")
     cfn.get_waiter("stack_create_complete").wait(StackName="cfnup")
     try:
         assert "oblako-cfnup" in [b["Name"] for b in s3.list_buckets()["Buckets"]]
         assert "cfnup-items" in ddb.list_tables()["TableNames"]
 
-        cfn.create_change_set(StackName="cfnup", TemplateBody=v2, ChangeSetName="c2",
-                              ChangeSetType="UPDATE")
+        cfn.create_change_set(
+            StackName="cfnup",
+            TemplateBody=v2,
+            ChangeSetName="c2",
+            ChangeSetType="UPDATE",
+        )
         # The change set is a single Remove (the unchanged bucket is omitted).
         desc = cfn.describe_change_set(StackName="cfnup", ChangeSetName="c2")
-        assert [(c["ResourceChange"]["LogicalResourceId"], c["ResourceChange"]["Action"])
-                for c in desc["Changes"]] == [("Items", "Remove")]
+        assert [
+            (c["ResourceChange"]["LogicalResourceId"], c["ResourceChange"]["Action"])
+            for c in desc["Changes"]
+        ] == [("Items", "Remove")]
 
         cfn.execute_change_set(StackName="cfnup", ChangeSetName="c2")
         cfn.get_waiter("stack_update_complete").wait(StackName="cfnup")

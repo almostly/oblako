@@ -9,6 +9,7 @@ def test_image_tag():
 
 def test_glue_attached_to_platform():
     from oblako.services.platform import Oblako
+
     o = Oblako()
     assert isinstance(o.glue, GlueService)
     assert o.glue.name == "glue"

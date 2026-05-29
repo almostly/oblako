@@ -374,7 +374,7 @@ TEMPLATES["bedrock-reason-codes"] = {
     "input": {
         "modelId": "qwen2.5:0.5b",
         "prompt": "Summarize this credit applicant in two sentences: application_score=610, "
-                  "bureau_score=640, debt_to_income=0.46, months_at_employer=7, residential_status=Tenant.",
+        "bureau_score=640, debt_to_income=0.46, months_at_employer=7, residential_status=Tenant.",
     },
     "definition": {
         "Comment": "Prompt-chain a credit decision narrative against the local model.",
@@ -398,7 +398,7 @@ TEMPLATES["bedrock-reason-codes"] = {
                     "Payload": {
                         "modelId.$": "$.modelId",
                         "prompt": "Based on that summary, list the top adverse-action reason codes "
-                                  "as a short numbered list.",
+                        "as a short numbered list.",
                         "context.$": "$.summary.Payload.text",
                     },
                 },

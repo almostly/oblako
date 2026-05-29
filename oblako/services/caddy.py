@@ -62,7 +62,9 @@ class CaddyService(Service):
 
     name = "caddy"
 
-    def __init__(self, host_port: int = ports.CADDY, routes: dict[str, str] | None = None):
+    def __init__(
+        self, host_port: int = ports.CADDY, routes: dict[str, str] | None = None
+    ):
         """Initialize on host_port (80 by default; pick a higher one if :80 is busy)."""
         CADDY_DIR.mkdir(parents=True, exist_ok=True)
         self.routes = routes if routes is not None else vanity_routes()
@@ -91,5 +93,7 @@ class CaddyService(Service):
             # Caddy without a default site returns 404 on /, but the port is open.
             resp = httpx.get(f"http://localhost:{self.host_port}/", timeout=3.0)
             return resp.status_code < 500
-        except httpx.HTTPError:  # any transport error (incl. accept-then-reset) = not ready
+        except (
+            httpx.HTTPError
+        ):  # any transport error (incl. accept-then-reset) = not ready
             return False

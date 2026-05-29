@@ -47,8 +47,14 @@ class GlueService:
             print(f"Pulling {IMAGE_TAG} (~5 GB) — this can take a few minutes...")
             self.client.images.pull(IMAGE_TAG)
 
-    def submit_job(self, script: str, *, args: list[str] | None = None,
-                   env: dict[str, str] | None = None, timeout: int = 1200) -> dict:
+    def submit_job(
+        self,
+        script: str,
+        *,
+        args: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        timeout: int = 1200,
+    ) -> dict:
         """Run a PySpark script in a Glue 5 container; return ``{exit_code, logs}``.
 
         The script is written to a tempdir mounted at ``/scripts/job.py``. The
@@ -100,27 +106,47 @@ class GlueService:
             sname = step.get("name") or f"step{i + 1}"
             script = (step.get("script") or "").strip()
             if failed:
-                results.append({"name": sname, "status": "SKIPPED", "exitCode": None, "logs": ""})
+                results.append(
+                    {"name": sname, "status": "SKIPPED", "exitCode": None, "logs": ""}
+                )
                 continue
             if not script:
-                results.append({"name": sname, "status": "FAILED", "exitCode": None,
-                                "logs": "empty script"})
+                results.append(
+                    {
+                        "name": sname,
+                        "status": "FAILED",
+                        "exitCode": None,
+                        "logs": "empty script",
+                    }
+                )
                 failed = True
                 continue
             try:
                 r = self.submit_job(script, timeout=timeout)
             except Exception as e:  # noqa: BLE001 — surface the failure in the step
-                results.append({"name": sname, "status": "FAILED", "exitCode": None,
-                                "logs": str(e)})
+                results.append(
+                    {
+                        "name": sname,
+                        "status": "FAILED",
+                        "exitCode": None,
+                        "logs": str(e),
+                    }
+                )
                 failed = True
                 continue
             ok = r["exit_code"] == 0
-            results.append({
-                "name": sname,
-                "status": "SUCCEEDED" if ok else "FAILED",
-                "exitCode": r["exit_code"],
-                "logs": r["logs"][-8000:],
-            })
+            results.append(
+                {
+                    "name": sname,
+                    "status": "SUCCEEDED" if ok else "FAILED",
+                    "exitCode": r["exit_code"],
+                    "logs": r["logs"][-8000:],
+                }
+            )
             if not ok:
                 failed = True
-        return {"name": name, "status": "FAILED" if failed else "SUCCEEDED", "steps": results}
+        return {
+            "name": name,
+            "status": "FAILED" if failed else "SUCCEEDED",
+            "steps": results,
+        }

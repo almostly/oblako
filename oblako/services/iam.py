@@ -38,13 +38,15 @@ class IamService:
     def create_role(self, name: str, trust_policy: dict) -> dict:
         """Create an IAM role with the given trust policy and return its description."""
         return self.get_client().create_role(
-            RoleName=name, AssumeRolePolicyDocument=json.dumps(trust_policy),
+            RoleName=name,
+            AssumeRolePolicyDocument=json.dumps(trust_policy),
         )["Role"]
 
     def create_policy(self, name: str, document: dict) -> dict:
         """Create a customer-managed policy and return its description."""
         return self.get_client().create_policy(
-            PolicyName=name, PolicyDocument=json.dumps(document),
+            PolicyName=name,
+            PolicyDocument=json.dumps(document),
         )["Policy"]
 
     def attach_role_policy(self, role_name: str, policy_arn: str) -> None:
@@ -68,20 +70,29 @@ class IamService:
         name = principal_arn.split("/")[-1]
         is_role = ":role/" in principal_arn
         if is_role:
-            attached = iam.list_attached_role_policies(RoleName=name)["AttachedPolicies"]
+            attached = iam.list_attached_role_policies(RoleName=name)[
+                "AttachedPolicies"
+            ]
             inline_names = iam.list_role_policies(RoleName=name)["PolicyNames"]
-            inline = [iam.get_role_policy(RoleName=name, PolicyName=p)["PolicyDocument"]
-                      for p in inline_names]
+            inline = [
+                iam.get_role_policy(RoleName=name, PolicyName=p)["PolicyDocument"]
+                for p in inline_names
+            ]
         else:
-            attached = iam.list_attached_user_policies(UserName=name)["AttachedPolicies"]
+            attached = iam.list_attached_user_policies(UserName=name)[
+                "AttachedPolicies"
+            ]
             inline_names = iam.list_user_policies(UserName=name)["PolicyNames"]
-            inline = [iam.get_user_policy(UserName=name, PolicyName=p)["PolicyDocument"]
-                      for p in inline_names]
+            inline = [
+                iam.get_user_policy(UserName=name, PolicyName=p)["PolicyDocument"]
+                for p in inline_names
+            ]
         statements: list = []
         for ap in attached:
             pol = iam.get_policy(PolicyArn=ap["PolicyArn"])["Policy"]
             version = iam.get_policy_version(
-                PolicyArn=ap["PolicyArn"], VersionId=pol["DefaultVersionId"],
+                PolicyArn=ap["PolicyArn"],
+                VersionId=pol["DefaultVersionId"],
             )["PolicyVersion"]
             statements += self._statements(version["Document"])
         for doc in inline:
@@ -90,18 +101,25 @@ class IamService:
 
     def authorize(self, principal_arn: str, action: str, resource: str) -> str:
         """Return Allow/Deny/ImplicitDeny for the principal doing action on resource."""
-        return evaluator.evaluate(self.gather_statements(principal_arn), action, resource)
+        return evaluator.evaluate(
+            self.gather_statements(principal_arn), action, resource
+        )
 
-    def assume_role(self, role_arn: str, principal_arn: str,
-                    session_name: str = "oblako-session") -> dict:
+    def assume_role(
+        self, role_arn: str, principal_arn: str, session_name: str = "oblako-session"
+    ) -> dict:
         """Evaluate the role's trust policy, then sts:AssumeRole if the principal is allowed."""
         iam = self.get_client()
         role_name = role_arn.split("/")[-1]
         trust = iam.get_role(RoleName=role_name)["Role"]["AssumeRolePolicyDocument"]
         if not evaluator.can_assume(trust, principal_arn):
-            return {"allowed": False,
-                    "reason": f"{principal_arn} is not permitted by the role's trust policy"}
-        resp = self.get_client("sts").assume_role(RoleArn=role_arn, RoleSessionName=session_name)
+            return {
+                "allowed": False,
+                "reason": f"{principal_arn} is not permitted by the role's trust policy",
+            }
+        resp = self.get_client("sts").assume_role(
+            RoleArn=role_arn, RoleSessionName=session_name
+        )
         creds = resp["Credentials"]
         return {
             "allowed": True,

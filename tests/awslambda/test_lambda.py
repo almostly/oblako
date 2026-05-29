@@ -45,7 +45,8 @@ def _zip(files: dict[str, str]) -> bytes:
 def _invoke(svc, name: str, event: dict):
     """Invoke and return (status, parsed_payload, raw). Skip on Docker-exec errors."""
     resp = svc.get_client().invoke(
-        FunctionName=name, Payload=json.dumps(event).encode(),
+        FunctionName=name,
+        Payload=json.dumps(event).encode(),
     )
     raw = resp["Payload"].read().decode("utf-8", errors="replace")
     if "error running docker" in raw:
@@ -118,9 +119,13 @@ def test_layer_zip_is_importable_at_runtime(svc):
     client = svc.get_client()
     layer = client.publish_layer_version(
         LayerName="oblako-testlib",
-        Content={"ZipFile": _zip({
-            "python/oblako_testlib/__init__.py": "def ping():\n    return 'pong'\n",
-        })},
+        Content={
+            "ZipFile": _zip(
+                {
+                    "python/oblako_testlib/__init__.py": "def ping():\n    return 'pong'\n",
+                }
+            )
+        },
         CompatibleRuntimes=[RUNTIME],
     )
     name = f"oblako-test-{uuid.uuid4().hex[:8]}"

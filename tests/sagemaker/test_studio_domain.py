@@ -43,7 +43,9 @@ def test_create_domain_provisions_s3_ec2_ebs_then_deletes(sm):
     assert iid and iid.startswith("i-")
 
     # S3 artifacts bucket is real
-    buckets = {b["Name"] for b in S3ProxyService().get_client().list_buckets()["Buckets"]}
+    buckets = {
+        b["Name"] for b in S3ProxyService().get_client().list_buckets()["Buckets"]
+    }
     assert "oblako-sagemaker-pytest" in buckets
 
     # EC2 notebook instance is a real container with the EBS volume mounted +
@@ -54,5 +56,9 @@ def test_create_domain_provisions_s3_ec2_ebs_then_deletes(sm):
     assert "8888/tcp" in c.attrs["NetworkSettings"]["Ports"]
 
     sm.delete_domain("pytest")
-    assert ec2mod._docker().containers.list(
-        all=True, filters={"name": ec2mod._container_name(iid)}) == []
+    assert (
+        ec2mod._docker().containers.list(
+            all=True, filters={"name": ec2mod._container_name(iid)}
+        )
+        == []
+    )

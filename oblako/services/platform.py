@@ -37,7 +37,9 @@ class Oblako:
         self.rds = RdsService()
         self.aurora = self.rds  # Aurora shares the rds control plane + engine
         self.moto = MotoService()
-        self.iam = IamService(moto=self.moto)  # IAM/STS control plane + policy evaluator
+        self.iam = IamService(
+            moto=self.moto
+        )  # IAM/STS control plane + policy evaluator
         # Lambda: moto's control plane + real Docker exec (socket mounted into moto).
         # Canonical attribute is `awslambda` (matches moto's own module name);
         # `lambda_` stays as a boto3-style alias since `lambda` is a keyword.

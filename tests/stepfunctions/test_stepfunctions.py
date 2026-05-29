@@ -143,14 +143,20 @@ def test_ml_template_runs_in_mock_mode(sfn):
     tpl = sfn_templates.TEMPLATES["preprocess-train"]
     try:
         arn = sfn.create_state_machine(
-            name=tpl["name"], definition=json.dumps(tpl["definition"]), roleArn=DUMMY_ROLE,
+            name=tpl["name"],
+            definition=json.dumps(tpl["definition"]),
+            roleArn=DUMMY_ROLE,
         )["stateMachineArn"]
     except sfn.exceptions.StateMachineAlreadyExists:
-        arn = next(m["stateMachineArn"] for m in sfn.list_state_machines()["stateMachines"]
-                   if m["name"] == tpl["name"])
+        arn = next(
+            m["stateMachineArn"]
+            for m in sfn.list_state_machines()["stateMachines"]
+            if m["name"] == tpl["name"]
+        )
 
     resp = sfn.start_execution(
-        stateMachineArn=f"{arn}#{tpl['testCase']}", input=json.dumps(tpl["input"]),
+        stateMachineArn=f"{arn}#{tpl['testCase']}",
+        input=json.dumps(tpl["input"]),
     )
     for _ in range(20):
         desc = sfn.describe_execution(executionArn=resp["executionArn"])

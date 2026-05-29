@@ -42,7 +42,8 @@ class S3ProxyService(Service):
         (Real checksum support would mean switching the backend to MinIO.)
         """
         return boto.client(
-            "s3", self.endpoint_url,
+            "s3",
+            self.endpoint_url,
             config=Config(
                 signature_version="s3v4",
                 request_checksum_calculation="when_required",

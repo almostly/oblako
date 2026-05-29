@@ -23,8 +23,14 @@ class KinesisService(Service):
             image="saidsef/aws-kinesis-local:latest",
             ports=[PortMapping(container_port=4567, host_port=host_port)],
             # The image's CMD is shell-mangled; override with a clean args list.
-            command=["--port", "4567", "--path", "/data",
-                     "--shardLimit", str(shard_limit)],
+            command=[
+                "--port",
+                "4567",
+                "--path",
+                "/data",
+                "--shardLimit",
+                str(shard_limit),
+            ],
             volumes={"oblako-kinesis-data": {"bind": "/data", "mode": "rw"}},
         )
         self.host_port = host_port

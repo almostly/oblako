@@ -119,7 +119,9 @@ class RdsService(Service):
         from . import boto
 
         return boto.client(
-            "rds", f"http://localhost:{self.control_port}", region=self.region,
+            "rds",
+            f"http://localhost:{self.control_port}",
+            region=self.region,
         )
 
     # -------------------------------------------------------------------------------
@@ -188,7 +190,9 @@ class RdsService(Service):
         if autostart and not rds_data.is_running(self.data_port):
             self.start_data_server()
         return boto.client(
-            "rds-data", f"http://localhost:{self.data_port}", region=self.region,
+            "rds-data",
+            f"http://localhost:{self.data_port}",
+            region=self.region,
         )
 
     def _health_check(self) -> bool:
