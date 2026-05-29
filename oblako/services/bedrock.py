@@ -92,7 +92,9 @@ class BedrockService(Service):
         try:
             resp = httpx.get(f"{self.url}/api/tags", timeout=3.0)
             return resp.status_code == 200
-        except (httpx.ConnectError, httpx.TimeoutException):
+        except httpx.HTTPError:
+            # a starting service may accept then reset the connection
+            # (httpx.ReadError), not just refuse it — any transport error = not ready
             return False
 
 

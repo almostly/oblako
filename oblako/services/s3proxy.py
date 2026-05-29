@@ -58,5 +58,7 @@ class S3ProxyService(Service):
         try:
             resp = httpx.get(self.endpoint_url, timeout=3.0)
             return resp.status_code in (200, 403)
-        except (httpx.ConnectError, httpx.TimeoutException):
+        except httpx.HTTPError:
+            # a starting service may accept then reset the connection
+            # (httpx.ReadError), not just refuse it — any transport error = not ready
             return False
