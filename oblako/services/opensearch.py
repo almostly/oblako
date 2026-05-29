@@ -1,5 +1,6 @@
 """OpenSearch service: vector search for Knowledge Bases / RAG."""
 
+from oblako import ports
 import httpx
 
 from .base import Service, PortMapping
@@ -8,7 +9,7 @@ from .base import Service, PortMapping
 class OpenSearchService(Service):
     """OpenSearch service for vector search and RAG Knowledge Bases."""
 
-    def __init__(self, host_port: int = 9200):
+    def __init__(self, host_port: int = ports.OPENSEARCH):
         """Initialize the OpenSearch service on the given host port."""
         super().__init__(
             name="opensearch",

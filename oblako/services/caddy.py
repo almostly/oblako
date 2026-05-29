@@ -10,6 +10,7 @@ One-time per machine: add ``127.0.0.1 mlflow.oblako.aws`` to ``/etc/hosts``
 
 from __future__ import annotations
 
+from oblako import ports
 from pathlib import Path
 
 import httpx
@@ -61,7 +62,7 @@ class CaddyService(Service):
 
     name = "caddy"
 
-    def __init__(self, host_port: int = 80, routes: dict[str, str] | None = None):
+    def __init__(self, host_port: int = ports.CADDY, routes: dict[str, str] | None = None):
         """Initialize on host_port (80 by default; pick a higher one if :80 is busy)."""
         CADDY_DIR.mkdir(parents=True, exist_ok=True)
         self.routes = routes if routes is not None else vanity_routes()

@@ -1,5 +1,6 @@
 """S3Proxy service: S3-compatible object storage."""
 
+from oblako import ports
 import httpx
 from botocore.config import Config
 
@@ -10,7 +11,7 @@ from . import boto
 class S3ProxyService(Service):
     """S3-compatible object storage service backed by S3Proxy."""
 
-    def __init__(self, host_port: int = 9000):
+    def __init__(self, host_port: int = ports.S3):
         """Initialize the S3Proxy service on the given host port."""
         super().__init__(
             name="s3proxy",

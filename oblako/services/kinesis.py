@@ -7,6 +7,7 @@ State persists in a named volume so streams survive restarts.
 
 from __future__ import annotations
 
+from oblako import ports
 from .base import Service, PortMapping
 from .boto import BotoService
 
@@ -15,7 +16,7 @@ from .boto import BotoService
 class KinesisService(Service):
     """Local Kinesis Data Streams (kinesalite-backed)."""
 
-    def __init__(self, host_port: int = 4567, shard_limit: int = 100):
+    def __init__(self, host_port: int = ports.KINESIS, shard_limit: int = 100):
         """Initialize on host_port (4567 default) with a configurable shard limit."""
         super().__init__(
             name="kinesis",

@@ -1,5 +1,6 @@
 """Step Functions Local service."""
 
+from oblako import ports
 import json
 from pathlib import Path
 
@@ -22,7 +23,7 @@ class StepFunctionsService(Service):
 
     def __init__(
         self,
-        host_port: int = 8083,
+        host_port: int = ports.STEPFUNCTIONS,
         lambda_endpoint: str = "http://host.docker.internal:3001",
     ):
         """Initialize the Step Functions service with the given host port and Lambda endpoint."""

@@ -15,6 +15,7 @@ Usage:
 import argparse
 import sys
 
+from oblako import ports
 from oblako.services.platform import Oblako
 
 
@@ -111,7 +112,7 @@ def cmd_dashboard(args):
     import subprocess
     import webbrowser
 
-    port = args.port or 8000
+    port = args.port or ports.DASHBOARD
     print(f"Starting oblako dashboard on http://localhost:{port}")
     webbrowser.open(f"http://localhost:{port}")
     subprocess.call(
@@ -140,7 +141,7 @@ def cmd_notebook(args):
         sys.exit(1)
     from oblako import notebook
 
-    port = args.port or 8888
+    port = args.port or ports.NOTEBOOK
     print(f"Launching JupyterLab on http://localhost:{port}")
     print(
         "kernel is pre-wired: boto3.client('s3') etc. hit oblako (run 'oblako up' for the services)"
@@ -155,7 +156,7 @@ def cmd_redshift_data(args):
     """Run the Redshift Data API server (boto3 'redshift-data' endpoint)."""
     import uvicorn
 
-    port = args.port or 8002
+    port = args.port or ports.REDSHIFT_DATA
     print(f"Starting Redshift Data API on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('redshift-data', endpoint_url=...)")
     uvicorn.run("oblako.engines.redshift_data.app:app", host="0.0.0.0", port=port)
@@ -165,7 +166,7 @@ def cmd_bedrock_runtime(args):
     """Run the Bedrock Runtime server (boto3 'bedrock-runtime' endpoint -> Ollama)."""
     import uvicorn
 
-    port = args.port or 8004
+    port = args.port or ports.BEDROCK_RUNTIME
     print(f"Starting Bedrock Runtime on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('bedrock-runtime', endpoint_url=...)")
     uvicorn.run("oblako.engines.bedrock_runtime.app:app", host="0.0.0.0", port=port)
@@ -175,7 +176,7 @@ def cmd_rds_data(args):
     """Run the RDS Data API server (boto3 'rds-data' endpoint -> RDS engine)."""
     import uvicorn
 
-    port = args.port or 8006
+    port = args.port or ports.RDS_DATA
     print(f"Starting RDS Data API on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('rds-data', endpoint_url=...)")
     uvicorn.run("oblako.engines.rds_data.app:app", host="0.0.0.0", port=port)
@@ -190,7 +191,7 @@ def cmd_cloudformation(args):
     """
     import uvicorn
 
-    port = args.port or 5601
+    port = args.port or ports.CLOUDFORMATION
     print(f"Starting CloudFormation on http://localhost:{port}")
     print("point the AWS CLI / SAM at it:")
     print(f"export AWS_ENDPOINT_URL_CLOUDFORMATION=http://localhost:{port}")

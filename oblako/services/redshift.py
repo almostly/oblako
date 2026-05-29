@@ -13,6 +13,7 @@ Three ways in:
                             for real against pgredshift (auto-starts the server).
 """
 
+from oblako import ports
 import psycopg2
 
 from oblako import config
@@ -24,12 +25,12 @@ class RedshiftService(Service):
 
     def __init__(
         self,
-        host_port: int = 5439,
+        host_port: int = ports.REDSHIFT_PG,
         user: str = "oblako",
         password: str = "oblako",
         database: str = "oblako",
-        control_port: int = 5500,
-        data_port: int = 8002,
+        control_port: int = ports.MOTO,
+        data_port: int = ports.REDSHIFT_DATA,
         region: str | None = None,
     ):
         """Initialize the Redshift service with connection and port settings."""

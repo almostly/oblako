@@ -9,6 +9,7 @@ via AWS_ENDPOINT_URL_CLOUDFORMATION — at it and stacks land in oblako for real
 
 from __future__ import annotations
 
+from oblako import ports
 from oblako import config
 
 
@@ -17,7 +18,7 @@ class CloudFormationService:
 
     name = "cloudformation"
 
-    def __init__(self, port: int = 5601, region: str | None = None):
+    def __init__(self, port: int = ports.CLOUDFORMATION, region: str | None = None):
         """Initialize with the given port and AWS region."""
         self.port = port
         self.region = region or config.region()

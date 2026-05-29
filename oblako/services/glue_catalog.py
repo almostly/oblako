@@ -7,6 +7,7 @@ thin Service-style accessor that starts it on demand and hands out a boto3
 
 from __future__ import annotations
 
+from oblako import ports
 from . import boto
 
 
@@ -15,7 +16,7 @@ class GlueCatalogService:
 
     name = "glue_catalog"
 
-    def __init__(self, port: int = 8486):
+    def __init__(self, port: int = ports.GLUE_CATALOG):
         """Initialize the accessor for the in-process Glue-API shim on the given port."""
         self.port = port
 

@@ -16,6 +16,7 @@ minified in place.
 
 from __future__ import annotations
 
+from oblako import ports
 import shutil
 import subprocess
 from pathlib import Path
@@ -65,7 +66,7 @@ class MlflowService(Service):
 
     name = "mlflow"
 
-    def __init__(self, host_port: int = 5050,
+    def __init__(self, host_port: int = ports.MLFLOW,
                  s3_endpoint: str = "http://host.docker.internal:9000"):
         """Initialize on host_port (5050; 5000 collides with macOS AirPlay)."""
         super().__init__(

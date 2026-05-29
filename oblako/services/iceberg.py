@@ -29,6 +29,7 @@ pyarrow's S3FS doesn't and the multipart upload fails with HTTP 400):
 
 from __future__ import annotations
 
+from oblako import ports
 import httpx
 
 from oblako import config
@@ -40,7 +41,7 @@ DEFAULT_WAREHOUSE = "s3://oblako-iceberg/"
 class IcebergCatalogService(Service):
     """Local Iceberg REST catalog backed by S3Proxy."""
 
-    def __init__(self, host_port: int = 8181,
+    def __init__(self, host_port: int = ports.ICEBERG,
                  s3_endpoint: str = "http://host.docker.internal:9000",
                  warehouse: str = DEFAULT_WAREHOUSE):
         """Initialize on host_port (8181) with the warehouse on S3Proxy."""

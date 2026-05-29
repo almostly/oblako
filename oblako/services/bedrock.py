@@ -8,6 +8,7 @@ Bedrock. Two ways in:
                        the local bedrock-runtime server).
 """
 
+from oblako import ports
 import httpx
 
 from oblako import config
@@ -19,8 +20,8 @@ class BedrockService(Service):
 
     def __init__(
         self,
-        host_port: int = 11434,
-        runtime_port: int = 8004,
+        host_port: int = ports.OLLAMA,
+        runtime_port: int = ports.BEDROCK_RUNTIME,
         region: str | None = None,
     ):
         """Initialize the Bedrock service with Ollama engine and runtime port."""

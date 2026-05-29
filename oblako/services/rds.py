@@ -14,6 +14,7 @@ The control-plane cluster/instance objects are moto metadata pointing at the one
 local engine — real SQL behavior, simulated topology.
 """
 
+from oblako import ports
 from oblako import config
 from .base import Service, PortMapping
 
@@ -45,8 +46,8 @@ class RdsService(Service):
         user: str = "oblako",
         password: str = "oblako",
         database: str = "oblako",
-        control_port: int = 5500,
-        data_port: int = 8006,
+        control_port: int = ports.MOTO,
+        data_port: int = ports.RDS_DATA,
         region: str | None = None,
     ):
         """Initialize the RDS service for the specified engine (postgres or mysql)."""

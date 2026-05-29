@@ -17,21 +17,30 @@ import subprocess
 import sys
 from pathlib import Path
 
-# botocore honors AWS_ENDPOINT_URL_<serviceId>; these names are verified to resolve.
+from oblako import ports
+
+
+def _local(port: int) -> str:
+    return f"http://localhost:{port}"
+
+
+# botocore honors AWS_ENDPOINT_URL_<serviceId>; these names are verified to
+# resolve. Ports come from the single registry (oblako.ports) so they can't
+# drift from the Service defaults / docker-compose.
 ENDPOINTS = {
-    "AWS_ENDPOINT_URL_S3": "http://localhost:9000",
-    "AWS_ENDPOINT_URL_DYNAMODB": "http://localhost:8001",
-    "AWS_ENDPOINT_URL_CLOUDFORMATION": "http://localhost:5601",
-    "AWS_ENDPOINT_URL_SFN": "http://localhost:8083",
-    "AWS_ENDPOINT_URL_REDSHIFT": "http://localhost:5500",
-    "AWS_ENDPOINT_URL_REDSHIFT_DATA": "http://localhost:8002",
-    "AWS_ENDPOINT_URL_RDS": "http://localhost:5500",
-    "AWS_ENDPOINT_URL_RDS_DATA": "http://localhost:8006",
-    "AWS_ENDPOINT_URL_LAMBDA": "http://localhost:5500",
-    "AWS_ENDPOINT_URL_IAM": "http://localhost:5500",
-    "AWS_ENDPOINT_URL_API_GATEWAY": "http://localhost:5500",
-    "AWS_ENDPOINT_URL_BEDROCK_RUNTIME": "http://localhost:8004",
-    "AWS_ENDPOINT_URL_BEDROCK": "http://localhost:8004",
+    "AWS_ENDPOINT_URL_S3": _local(ports.S3),
+    "AWS_ENDPOINT_URL_DYNAMODB": _local(ports.DYNAMODB),
+    "AWS_ENDPOINT_URL_CLOUDFORMATION": _local(ports.CLOUDFORMATION),
+    "AWS_ENDPOINT_URL_SFN": _local(ports.STEPFUNCTIONS),
+    "AWS_ENDPOINT_URL_REDSHIFT": _local(ports.MOTO),
+    "AWS_ENDPOINT_URL_REDSHIFT_DATA": _local(ports.REDSHIFT_DATA),
+    "AWS_ENDPOINT_URL_RDS": _local(ports.MOTO),
+    "AWS_ENDPOINT_URL_RDS_DATA": _local(ports.RDS_DATA),
+    "AWS_ENDPOINT_URL_LAMBDA": _local(ports.MOTO),
+    "AWS_ENDPOINT_URL_IAM": _local(ports.MOTO),
+    "AWS_ENDPOINT_URL_API_GATEWAY": _local(ports.MOTO),
+    "AWS_ENDPOINT_URL_BEDROCK_RUNTIME": _local(ports.BEDROCK_RUNTIME),
+    "AWS_ENDPOINT_URL_BEDROCK": _local(ports.BEDROCK_RUNTIME),
 }
 
 _AWS_CONFIG = (

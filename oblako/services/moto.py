@@ -5,6 +5,7 @@ Runs the official `motoserver/moto` image. boto3 clients pointed at it via
 nodes, endpoints) without touching the cloud.
 """
 
+from oblako import ports
 import urllib.request
 
 from .base import Service, PortMapping
@@ -13,7 +14,7 @@ from .base import Service, PortMapping
 class MotoService(Service):
     """Moto server service providing AWS control-plane APIs locally."""
 
-    def __init__(self, host_port: int = 5500):
+    def __init__(self, host_port: int = ports.MOTO):
         """Initialize the Moto service on the given host port.
 
         Mounts /var/run/docker.sock so moto's Lambda backend can spawn real

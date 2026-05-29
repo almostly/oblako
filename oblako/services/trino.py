@@ -11,6 +11,7 @@ and mounted into the container.
 
 from __future__ import annotations
 
+from oblako import ports
 import time
 from pathlib import Path
 
@@ -38,7 +39,7 @@ s3.aws-secret-key=test
 class TrinoService(Service):
     """Local Trino, pre-wired with the Iceberg connector to oblako's catalog + S3."""
 
-    def __init__(self, host_port: int = 8485):
+    def __init__(self, host_port: int = ports.TRINO):
         """Initialize on host_port (8485; Trino's internal port is 8080)."""
         TRINO_CATALOG_DIR.mkdir(parents=True, exist_ok=True)
         (TRINO_CATALOG_DIR / "iceberg.properties").write_text(_ICEBERG_PROPERTIES)

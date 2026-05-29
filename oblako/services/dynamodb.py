@@ -1,5 +1,6 @@
 """DynamoDB Local service: official AWS Docker image."""
 
+from oblako import ports
 from .base import Service, PortMapping
 from .boto import BotoService, resource
 
@@ -8,7 +9,7 @@ from .boto import BotoService, resource
 class DynamoDBService(Service):
     """DynamoDB Local service backed by the official Amazon Docker image."""
 
-    def __init__(self, host_port: int = 8000):
+    def __init__(self, host_port: int = ports.DYNAMODB):
         """Initialize the DynamoDB Local service on the given host port."""
         super().__init__(
             name="dynamodb",
