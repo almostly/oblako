@@ -37,6 +37,7 @@ export default function RdsPage() {
       .then(d => { setDatabases(d.databases || []); setLoading(false) })
       .catch(() => setLoading(false))
   }
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(fetchDatabases, [])
 
   const create = () => {

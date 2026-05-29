@@ -33,6 +33,7 @@ export default function CloudFormationPage() {
       .catch(() => setLoading(false))
   }
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { fetchStacks() }, [])
 
   const openStack = (name) => {

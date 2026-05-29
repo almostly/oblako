@@ -157,6 +157,7 @@ function JupyterLabTab() {
 
   useEffect(() => {
     let active = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setState({ loading: true, url: null, error: null })
     fetch(`${API}/api/notebook/launch`, { method: 'POST' })
       .then(r => r.json())

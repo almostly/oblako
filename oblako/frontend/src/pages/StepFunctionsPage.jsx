@@ -53,6 +53,7 @@ export default function StepFunctionsPage() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchMachines()
     fetch(`${API}/api/stepfunctions/templates`).then(r => r.json()).then(d => setTemplates(d.templates || []))
   }, [])

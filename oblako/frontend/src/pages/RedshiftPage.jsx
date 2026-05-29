@@ -26,7 +26,7 @@ function pushHistory(sql) {
   const cur = loadHistory().filter(q => q !== sql)
   cur.unshift(sql)
   const trimmed = cur.slice(0, HISTORY_MAX)
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed)) } catch {}
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed)) } catch { /* storage unavailable */ }
   return trimmed
 }
 
@@ -65,7 +65,7 @@ export default function RedshiftPage() {
   const [clusters, setClusters] = useState([])
   const [tree, setTree] = useState([])
   const [tabs, setTabs] = useState([newTab()])
-  const [activeId, setActiveId] = useState(null)
+  const [activeId, setActiveId] = useState(tabs[0].id)
   const [history, setHistory] = useState(loadHistory())
 
   // Create-cluster modal state
@@ -81,7 +81,6 @@ export default function RedshiftPage() {
   useEffect(() => {
     fetch(`${API}/api/redshift/clusters`).then(r => r.json()).then(d => setClusters(d.clusters || []))
     fetch(`${API}/api/redshift/schema`).then(r => r.json()).then(d => setTree(d.schemas || []))
-    if (!activeId && tabs.length) setActiveId(tabs[0].id)
   }, [])
 
   const updateTab = (t) => setTabs(curr => curr.map(x => x.id === t.id ? t : x))
@@ -116,7 +115,7 @@ export default function RedshiftPage() {
     updateTab({ ...current, sql })
   }
 
-  const useHistory = (sql) => {
+  const applyHistory = (sql) => {
     const current = tabs.find(t => t.id === activeId) || tabs[0]
     updateTab({ ...current, sql })
   }
@@ -161,7 +160,7 @@ export default function RedshiftPage() {
                 placeholder="History"
                 selectedOption={null}
                 options={history.slice(0, 20).map((q, i) => ({ value: String(i), label: q.split('\n')[0].slice(0, 80) || `(query ${i+1})`, description: q.length > 80 ? `${q.length} chars` : undefined }))}
-                onChange={({ detail }) => useHistory(history[parseInt(detail.selectedOption.value, 10)])}
+                onChange={({ detail }) => applyHistory(history[parseInt(detail.selectedOption.value, 10)])}
                 empty="No queries yet"
               />
               <Button iconName="add-plus" onClick={() => addTab()}>New tab</Button>

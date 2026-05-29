@@ -30,6 +30,7 @@ export default function KinesisPage() {
       .then(d => { setStreams(d.streams || []); setLoading(false) })
       .catch(() => setLoading(false))
   }
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(fetchStreams, [])
 
   const create = () => {

@@ -67,7 +67,7 @@ export default function S3Page() {
     { text: selectedBucket, href: '#' },
   ]
   if (prefix) {
-    prefix.split('/').filter(Boolean).forEach((part, i, arr) => {
+    prefix.split('/').filter(Boolean).forEach((part) => {
       breadcrumbs.push({ text: part, href: '#' })
     })
   }
