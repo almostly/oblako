@@ -50,7 +50,7 @@ class AppConfigService:
         return boto.client("appconfigdata", self.endpoint_url)
 
     def get_agent(self, autostart: bool = True):
-        """The bundled AppConfigClient agent, wired to oblako, for flag evaluation."""
+        """Return the bundled AppConfigClient agent, wired to oblako, for flag evaluation."""
         self._ensure(autostart)
         from oblako.engines.appconfig import AppConfigClient
 

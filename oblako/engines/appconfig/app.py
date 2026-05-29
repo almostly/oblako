@@ -41,6 +41,7 @@ async def _json_body(request: Request) -> dict:
 
 # appconfig — control plane
 async def applications(request: Request):
+    """Handle ListApplications (GET) / CreateApplication (POST)."""
     if request.method == "POST":
         body = await _json_body(request)
         return JSONResponse(_store.create_application(
@@ -49,6 +50,7 @@ async def applications(request: Request):
 
 
 async def application(request: Request):
+    """Handle GetApplication."""
     try:
         return JSONResponse(_store.get_application(request.path_params["app_id"]))
     except AppConfigError as e:
@@ -56,6 +58,7 @@ async def application(request: Request):
 
 
 async def environments(request: Request):
+    """Handle ListEnvironments (GET) / CreateEnvironment (POST)."""
     app_id = request.path_params["app_id"]
     try:
         if request.method == "POST":
@@ -68,6 +71,7 @@ async def environments(request: Request):
 
 
 async def configuration_profiles(request: Request):
+    """Handle ListConfigurationProfiles (GET) / CreateConfigurationProfile (POST)."""
     app_id = request.path_params["app_id"]
     try:
         if request.method == "POST":
@@ -81,6 +85,7 @@ async def configuration_profiles(request: Request):
 
 
 async def configuration_profile(request: Request):
+    """Handle GetConfigurationProfile."""
     try:
         return JSONResponse(_store.get_configuration_profile(
             request.path_params["app_id"], request.path_params["profile_id"]))
@@ -98,6 +103,7 @@ def _version_headers(v: dict) -> dict:
 
 
 async def hosted_versions(request: Request):
+    """Handle ListHostedConfigurationVersions (GET) / CreateHostedConfigurationVersion (POST)."""
     app_id = request.path_params["app_id"]
     profile_id = request.path_params["profile_id"]
     try:
@@ -115,6 +121,7 @@ async def hosted_versions(request: Request):
 
 
 async def hosted_version(request: Request):
+    """Handle GetHostedConfigurationVersion (raw content in the body)."""
     try:
         v = _store.get_hosted_configuration_version(
             request.path_params["app_id"], request.path_params["profile_id"],
@@ -125,6 +132,7 @@ async def hosted_version(request: Request):
 
 
 async def deployment_strategies(request: Request):
+    """Handle ListDeploymentStrategies (GET) / CreateDeploymentStrategy (POST)."""
     if request.method == "POST":
         body = await _json_body(request)
         return JSONResponse(_store.create_deployment_strategy(
@@ -134,6 +142,7 @@ async def deployment_strategies(request: Request):
 
 
 async def deployments(request: Request):
+    """Handle ListDeployments (GET) / StartDeployment (POST)."""
     app_id = request.path_params["app_id"]
     env_id = request.path_params["env_id"]
     try:
@@ -150,6 +159,7 @@ async def deployments(request: Request):
 
 # appconfigdata — data plane (raw content; the agent evaluates flags)
 async def configuration_sessions(request: Request):
+    """Handle StartConfigurationSession (appconfigdata)."""
     body = await _json_body(request)
     try:
         app = _store._resolve_app(body["ApplicationIdentifier"])
@@ -164,6 +174,7 @@ async def configuration_sessions(request: Request):
 
 
 async def get_latest_configuration(request: Request):
+    """Handle GetLatestConfiguration (appconfigdata) — returns raw content."""
     token = request.query_params.get("configuration_token")
     session = _store.sessions.get(token)
     if not session:

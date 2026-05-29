@@ -24,6 +24,7 @@ class AppConfigError(Exception):
     """Raised for not-found / bad-request conditions (mapped to AWS errors)."""
 
     def __init__(self, message: str, code: str = "ResourceNotFoundException"):
+        """Init with a message and an AWS error code."""
         super().__init__(message)
         self.code = code
 
@@ -96,19 +97,23 @@ class AppConfigStore:
 
     # Applications
     def create_application(self, name: str, description: str = "") -> dict:
+        """Create an application."""
         with self._lock:
             app = {"Id": self._id(), "Name": name, "Description": description}
             self.applications[app["Id"]] = app
             return app
 
     def list_applications(self) -> list[dict]:
+        """List all applications."""
         return list(self.applications.values())
 
     def get_application(self, app_id: str) -> dict:
+        """Return an application by id or name."""
         return self._resolve_app(app_id)
 
     # Environments
     def create_environment(self, app_id: str, name: str, description: str = "") -> dict:
+        """Create an environment under an application."""
         with self._lock:
             self._resolve_app(app_id)  # validate
             env = {"Id": self._id(), "Name": name, "ApplicationId": app_id,
@@ -117,6 +122,7 @@ class AppConfigStore:
             return env
 
     def list_environments(self, app_id: str) -> list[dict]:
+        """List an application's environments."""
         return [e for e in self.environments.values() if e["ApplicationId"] == app_id]
 
     # Configuration profiles
@@ -124,6 +130,7 @@ class AppConfigStore:
                                      location_uri: str = "hosted",
                                      profile_type: str | None = None,
                                      description: str = "") -> dict:
+        """Create a configuration profile (Freeform or FeatureFlags)."""
         with self._lock:
             self._resolve_app(app_id)
             profile = {
@@ -136,15 +143,18 @@ class AppConfigStore:
             return profile
 
     def list_configuration_profiles(self, app_id: str) -> list[dict]:
+        """List an application's configuration profiles."""
         return [p for p in self.profiles.values() if p["ApplicationId"] == app_id]
 
     def get_configuration_profile(self, app_id: str, profile_id: str) -> dict:
+        """Return a configuration profile by id or name."""
         return self._resolve_profile(app_id, profile_id)
 
     # Hosted configuration versions
     def create_hosted_configuration_version(self, app_id: str, profile_id: str,
                                             content: bytes, content_type: str,
                                             description: str = "") -> dict:
+        """Store a new hosted configuration version (auto-incrementing the number)."""
         with self._lock:
             self._resolve_app(app_id)
             self._resolve_profile(app_id, profile_id)
@@ -157,6 +167,7 @@ class AppConfigStore:
             return v
 
     def list_hosted_configuration_versions(self, app_id: str, profile_id: str) -> list[dict]:
+        """List hosted version summaries (no content), newest first."""
         # summaries (no Content), newest first — like the AWS API
         versions = self.versions.get((app_id, profile_id), [])
         return [{k: x[k] for k in ("ApplicationId", "ConfigurationProfileId",
@@ -165,12 +176,14 @@ class AppConfigStore:
 
     def get_hosted_configuration_version(self, app_id: str, profile_id: str,
                                          version_number: int) -> dict:
+        """Return a specific hosted configuration version, including its content."""
         for v in self.versions.get((app_id, profile_id), []):
             if v["VersionNumber"] == version_number:
                 return v
         raise AppConfigError(f"HostedConfigurationVersion {version_number} not found")
 
     def latest_version(self, app_id: str, profile_id: str) -> dict:
+        """Return the newest hosted configuration version for a profile."""
         versions = self.versions.get((app_id, profile_id), [])
         if not versions:
             raise AppConfigError("No hosted configuration versions")
@@ -180,20 +193,24 @@ class AppConfigStore:
     def create_deployment_strategy(self, name: str, duration: int = 0,
                                    growth_factor: float = 100.0,
                                    description: str = "") -> dict:
+        """Create a custom deployment strategy."""
         with self._lock:
-            s = {"Id": self._id(), "Name": name,
+            sid = self._id()
+            s = {"Id": sid, "Name": name,
                  "DeploymentDurationInMinutes": duration,
                  "GrowthFactor": growth_factor, "GrowthType": "LINEAR",
                  "ReplicateTo": "NONE", "Description": description}
-            self.deployment_strategies[s["Id"]] = s
+            self.deployment_strategies[sid] = s
             return s
 
     def list_deployment_strategies(self) -> list[dict]:
+        """List deployment strategies (predefined + custom)."""
         return list(self.deployment_strategies.values())
 
     # Deployments — oblako completes them immediately (the local engine has no ramp)
     def start_deployment(self, app_id: str, env_id: str, profile_id: str,
                          version: str, strategy_id: str, description: str = "") -> dict:
+        """Start a deployment (completed immediately — the local engine has no ramp)."""
         with self._lock:
             self._resolve_app(app_id)
             deps = self.deployments.setdefault((app_id, env_id), [])
@@ -208,4 +225,5 @@ class AppConfigStore:
             return d
 
     def list_deployments(self, app_id: str, env_id: str) -> list[dict]:
+        """List an environment's deployments, newest first."""
         return list(reversed(self.deployments.get((app_id, env_id), [])))
