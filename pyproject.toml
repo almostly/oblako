@@ -63,3 +63,12 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["oblako"]
+# The React app lives at oblako/frontend; ship the built dist (so a pip-installed
+# `oblako dashboard` can serve the UI) but never the node toolchain or sources.
+exclude = [
+    "oblako/frontend/node_modules",
+    "oblako/frontend/src",
+    "oblako/frontend/*.js",
+    "oblako/frontend/*.json",
+    "oblako/frontend/*.html",
+]

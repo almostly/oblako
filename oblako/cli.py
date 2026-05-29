@@ -119,7 +119,7 @@ def cmd_dashboard(args):
             sys.executable,
             "-m",
             "uvicorn",
-            "dashboard.api:app",
+            "oblako.dashboard.api:app",
             "--host",
             "0.0.0.0",
             "--port",

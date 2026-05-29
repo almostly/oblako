@@ -13,7 +13,8 @@ from oblako.services import sfn_templates
 from oblako import config
 
 oblako = Oblako()
-DIST_DIR = Path(__file__).parent / "ui" / "dist"
+# The built React app lives next door at oblako/frontend/dist.
+DIST_DIR = Path(__file__).parent.parent / "frontend" / "dist"
 
 
 @asynccontextmanager
