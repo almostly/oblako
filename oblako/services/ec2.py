@@ -30,9 +30,9 @@ INSTANCE_LABEL = "oblako.ec2.instance-id"
 
 
 def _docker():
-    import docker
+    from .backends import docker_client
 
-    return docker.from_env()
+    return docker_client()  # honours OBLAKO_CONTAINER_BACKEND (docker/podman/colima)
 
 
 def _image_for(image_id: str | None) -> str:

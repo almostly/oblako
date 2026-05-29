@@ -30,11 +30,11 @@ class GlueService:
 
     @property
     def client(self):
-        """Return the docker-py client, honouring DOCKER_HOST or the active context."""
+        """Return the docker-py client for the configured backend (docker/podman/colima)."""
         if self._client is None:
-            import docker
+            from .backends import docker_client
 
-            self._client = docker.from_env()
+            self._client = docker_client()
         return self._client
 
     def ensure_image(self) -> None:

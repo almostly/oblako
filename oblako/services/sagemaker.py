@@ -35,9 +35,11 @@ class SageMakerService:
 
     @property
     def client(self) -> docker.DockerClient:
-        """Return (or lazily create) the Docker client."""
+        """Return (or lazily create) the Docker client for the configured backend."""
         if self._client is None:
-            self._client = docker.from_env()
+            from .backends import docker_client
+
+            self._client = docker_client()
         return self._client
 
     def get_session(self):

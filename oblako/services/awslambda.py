@@ -64,6 +64,7 @@ class LambdaService:
         """
         import re
         import docker
+        from .backends import docker_client
         m = re.match(r"([a-z]+)([\d.]+)", runtime)
         if not m:
             return
@@ -74,7 +75,7 @@ class LambdaService:
         # Amazon Linux 2023 (glibc 2.34) — pick that as the dashboard default.
         image = f"ghcr.io/shogo82148/lambda-{language}:{version}"
         platform = f"linux/{'amd64' if architecture == 'x86_64' else 'arm64'}"
-        client = docker.from_env()
+        client = docker_client()
         wanted_arch = "amd64" if architecture == "x86_64" else "arm64"
         # If the cached image is the wrong arch, drop it so the pull is honest.
         try:

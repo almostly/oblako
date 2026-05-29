@@ -323,14 +323,37 @@ class KubernetesBackend(ContainerBackend):
         return result.stdout if result.returncode == 0 else ""
 
 
-def _docker_backend_for(runtime: str) -> DockerBackend:
+def _socket_for(runtime: str) -> str | None:
+    """The Docker-API socket URL for a runtime (podman/colima), or None."""
     if os.environ.get("DOCKER_HOST"):
-        return DockerBackend()  # explicit DOCKER_HOST wins
+        return None  # explicit DOCKER_HOST wins (docker-py honours it)
     for candidate in _CANDIDATE_SOCKETS.get(runtime, []):
         path = os.path.expanduser(os.path.expandvars(candidate))
         if os.path.exists(path):
-            return DockerBackend(base_url=f"unix://{path}")
-    return DockerBackend()  # fall back to the ambient Docker context
+            return f"unix://{path}"
+    return None
+
+
+def _docker_backend_for(runtime: str) -> DockerBackend:
+    return DockerBackend(base_url=_socket_for(runtime))
+
+
+def docker_client():
+    """A docker-py client for the configured Docker-API backend.
+
+    The per-task compute paths (Lambda exec, Glue jobs, SageMaker local, EC2
+    instances, the Studio notebook) talk to Docker directly rather than through a
+    Service's ``ContainerBackend``. Routing them through here means they target
+    the SAME daemon the services use — so ``OBLAKO_CONTAINER_BACKEND=podman``/
+    ``colima`` works for compute too, without having to also set ``DOCKER_HOST``.
+    (Kubernetes has no docker socket; the compute paths need a Docker-API runtime,
+    so under ``kubernetes`` this falls back to the ambient Docker context.)
+    """
+    import docker
+
+    choice = (os.environ.get("OBLAKO_CONTAINER_BACKEND") or "docker").lower()
+    socket = _socket_for(choice) if choice in ("podman", "colima") else None
+    return docker.DockerClient(base_url=socket) if socket else docker.from_env()
 
 
 def get_backend() -> ContainerBackend:
