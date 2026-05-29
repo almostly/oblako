@@ -146,6 +146,30 @@ def _iam_delete(physical_id, props):
         pass
 
 
+# AWS::EC2::Instance (control plane via moto) — instance metadata; describe
+# fidelity, no compute (a later stage backs instances with real containers).
+def _ec2_create(logical_id, props, ctx):
+    ec2 = _moto_client("ec2")
+    kwargs = {
+        "ImageId": props.get("ImageId", "ami-0abcdef1234567890"),
+        "InstanceType": props.get("InstanceType", "t3.micro"),
+        "MinCount": 1,
+        "MaxCount": 1,
+    }
+    iid = ec2.run_instances(**kwargs)["Instances"][0]["InstanceId"]
+    tags = props.get("Tags")
+    if tags:
+        ec2.create_tags(Resources=[iid], Tags=tags)
+    return iid  # physical id is the InstanceId
+
+
+def _ec2_delete(physical_id, props):
+    try:
+        _moto_client("ec2").terminate_instances(InstanceIds=[physical_id])
+    except Exception:  # noqa: BLE001
+        pass
+
+
 # AWS::Lambda::Function (control plane via moto). oblako has no Lambda engine —
 # real execution stays in `sam local`; this stores a describable record (a
 # placeholder zip; the original CodeUri is kept in the description).
@@ -258,6 +282,7 @@ PROVIDERS = {
     "AWS::Redshift::Cluster": (_redshift_create, _redshift_delete),
     "AWS::RDS::DBInstance": (_rds_create, _rds_delete),
     "AWS::IAM::Role": (_iam_create, _iam_delete),
+    "AWS::EC2::Instance": (_ec2_create, _ec2_delete),
     "AWS::Lambda::Function": (_lambda_create, _lambda_delete),
     "AWS::ApiGateway::RestApi": (_apigw_create, _apigw_delete),
     "AWS::StepFunctions::StateMachine": (_sfn_create, _sfn_delete),

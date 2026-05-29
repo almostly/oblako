@@ -6,6 +6,7 @@ from .bedrock import BedrockService
 from .caddy import CaddyService
 from .cloudformation import CloudFormationService
 from .dynamodb import DynamoDBService
+from .ec2 import Ec2Service
 from .glue import GlueService
 from .glue_catalog import GlueCatalogService
 from .iam import IamService
@@ -41,6 +42,9 @@ class Oblako:
         # `lambda_` stays as a boto3-style alias since `lambda` is a keyword.
         self.awslambda = LambdaService(moto=self.moto)
         self.lambda_ = self.awslambda
+        # EC2: moto's control plane (instances, VPCs, security groups — describe
+        # fidelity). Shares the moto endpoint, like IAM/Lambda.
+        self.ec2 = Ec2Service(moto=self.moto)
         self.s3 = S3ProxyService()
         self.dynamodb = DynamoDBService(host_port=8001)
         self.kinesis = KinesisService()

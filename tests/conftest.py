@@ -34,6 +34,7 @@ _INTEGRATION_FILES = {
     "tests/redshift/test_redshift_data.py",
     "tests/redshift/test_redshift_ml.py",
     "tests/stepfunctions/test_stepfunctions.py",
+    "tests/services/test_ec2.py",
 }
 
 _KUBERNETES_FILES = {
