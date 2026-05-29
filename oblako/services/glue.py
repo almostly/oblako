@@ -81,3 +81,46 @@ class GlueService:
                 return {"exit_code": result["StatusCode"], "logs": logs}
             finally:
                 container.remove(force=True)
+
+    def run_workflow(self, name: str, steps: list[dict], *, timeout: int = 600) -> dict:
+        """Run a Glue workflow: a sequential pipeline of PySpark job steps.
+
+        Each step is ``{name, script}``. Steps run in order, and a step runs only
+        if every prior step SUCCEEDED — mirroring a Glue CONDITIONAL trigger gated
+        on predecessor success. The first failure stops the pipeline; the rest are
+        marked SKIPPED. Returns ``{name, status, steps:[{name, status, exitCode,
+        logs}]}``.
+
+        This covers the common sequential-ETL workflow. Full DAGs (parallel
+        branches, crawlers, scheduled/event triggers) aren't modelled yet.
+        """
+        results: list[dict] = []
+        failed = False
+        for i, step in enumerate(steps):
+            sname = step.get("name") or f"step{i + 1}"
+            script = (step.get("script") or "").strip()
+            if failed:
+                results.append({"name": sname, "status": "SKIPPED", "exitCode": None, "logs": ""})
+                continue
+            if not script:
+                results.append({"name": sname, "status": "FAILED", "exitCode": None,
+                                "logs": "empty script"})
+                failed = True
+                continue
+            try:
+                r = self.submit_job(script, timeout=timeout)
+            except Exception as e:  # noqa: BLE001 — surface the failure in the step
+                results.append({"name": sname, "status": "FAILED", "exitCode": None,
+                                "logs": str(e)})
+                failed = True
+                continue
+            ok = r["exit_code"] == 0
+            results.append({
+                "name": sname,
+                "status": "SUCCEEDED" if ok else "FAILED",
+                "exitCode": r["exit_code"],
+                "logs": r["logs"][-8000:],
+            })
+            if not ok:
+                failed = True
+        return {"name": name, "status": "FAILED" if failed else "SUCCEEDED", "steps": results}
