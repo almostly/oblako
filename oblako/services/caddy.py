@@ -91,5 +91,5 @@ class CaddyService(Service):
             # Caddy without a default site returns 404 on /, but the port is open.
             resp = httpx.get(f"http://localhost:{self.host_port}/", timeout=3.0)
             return resp.status_code < 500
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError):
+        except httpx.HTTPError:  # any transport error (incl. accept-then-reset) = not ready
             return False

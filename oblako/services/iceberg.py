@@ -72,5 +72,5 @@ class IcebergCatalogService(Service):
         try:
             resp = httpx.get(f"{self.endpoint_url}/v1/config", timeout=3.0)
             return resp.status_code == 200
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError):
+        except httpx.HTTPError:  # any transport error (incl. accept-then-reset) = not ready
             return False

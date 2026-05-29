@@ -94,5 +94,8 @@ class StepFunctionsService(Service):
                 timeout=3.0,
             )
             return resp.status_code == 200
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.ReadError):
+        except httpx.HTTPError:
+            # a starting SFN Local may accept then reset the connection
+            # (RemoteProtocolError/ReadError), not just refuse it — any transport
+            # error means not-ready, never crash wait_ready
             return False
