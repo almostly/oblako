@@ -1,4 +1,4 @@
-"""Example 5: Step Functions Local for ML workflow orchestration.
+"""Step Functions Local for ML workflow orchestration.
 
 Mirrors the pattern from credit-risk-modeling step_functions:
 a scoring workflow with choice states for approve/decline.
@@ -77,7 +77,9 @@ try:
 except Exception:
     pass
 
-resp = sfn.create_state_machine(name=SM_NAME, definition=json.dumps(workflow), roleArn=ROLE)
+resp = sfn.create_state_machine(
+    name=SM_NAME, definition=json.dumps(workflow), roleArn=ROLE
+)
 sm_arn = resp["stateMachineArn"]
 print(f"Created state machine: {SM_NAME}")
 
@@ -102,7 +104,9 @@ for case in test_cases:
         time.sleep(0.25)
 
     output = json.loads(desc["output"])
-    print(f"  {output['customer_id']}: score={output['score']}, decision={output['decision']}")
+    print(
+        f"{output['customer_id']}: score={output['score']}, decision={output['decision']}"
+    )
 
 # Cleanup
 sfn.delete_state_machine(stateMachineArn=sm_arn)

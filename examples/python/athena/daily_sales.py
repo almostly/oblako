@@ -37,15 +37,43 @@ NAMESPACE = "s3_namespace"
 TABLE = "daily_sales"
 WAREHOUSE = "s3://oblako-iceberg/"
 
-ROWS = pa.table({
-    "sale_date": [date(2024, 1, 15), date(2024, 1, 15), date(2024, 1, 16),
-                  date(2024, 2, 1),  date(2024, 2, 1),  date(2024, 2, 2),
-                  date(2024, 2, 2),  date(2024, 2, 3),  date(2024, 2, 3)],
-    "product_category": ["Laptop", "Monitor", "Laptop", "Monitor", "Keyboard",
-                         "Mouse",  "Laptop",  "Laptop", "Monitor"],
-    "sales_amount":     [900.00, 250.00, 1350.00, 300.00, 60.00,
-                         25.00,  1050.00, 1200.00, 375.00],
-})
+ROWS = pa.table(
+    {
+        "sale_date": [
+            date(2024, 1, 15),
+            date(2024, 1, 15),
+            date(2024, 1, 16),
+            date(2024, 2, 1),
+            date(2024, 2, 1),
+            date(2024, 2, 2),
+            date(2024, 2, 2),
+            date(2024, 2, 3),
+            date(2024, 2, 3),
+        ],
+        "product_category": [
+            "Laptop",
+            "Monitor",
+            "Laptop",
+            "Monitor",
+            "Keyboard",
+            "Mouse",
+            "Laptop",
+            "Laptop",
+            "Monitor",
+        ],
+        "sales_amount": [
+            900.00,
+            250.00,
+            1350.00,
+            300.00,
+            60.00,
+            25.00,
+            1050.00,
+            1200.00,
+            375.00,
+        ],
+    }
+)
 
 
 def main() -> None:
@@ -55,15 +83,22 @@ def main() -> None:
 
     # Ensure the warehouse bucket exists on S3Proxy.
     s3 = o.s3.get_client()
-    if "oblako-iceberg" not in {b["Name"] for b in s3.list_buckets().get("Buckets", [])}:
+    if "oblako-iceberg" not in {
+        b["Name"] for b in s3.list_buckets().get("Buckets", [])
+    }:
         s3.create_bucket(Bucket="oblako-iceberg")
 
     cat = load_catalog(
-        "oblako", uri="http://localhost:8181", warehouse=WAREHOUSE,
-        **{"py-io-impl": "pyiceberg.io.fsspec.FsspecFileIO",
-           "s3.endpoint": "http://localhost:9000",
-           "s3.access-key-id": "test", "s3.secret-access-key": "test",
-           "s3.path-style-access": "true"},
+        "oblako",
+        uri="http://localhost:8181",
+        warehouse=WAREHOUSE,
+        **{
+            "py-io-impl": "pyiceberg.io.fsspec.FsspecFileIO",
+            "s3.endpoint": "http://localhost:9000",
+            "s3.access-key-id": "test",
+            "s3.secret-access-key": "test",
+            "s3.path-style-access": "true",
+        },
     )
 
     # 1. Schema + partitioned table (Iceberg's month() transform).
@@ -87,10 +122,17 @@ def main() -> None:
         NestedField(2, "product_category", StringType(), required=False),
         NestedField(3, "sales_amount", DoubleType(), required=False),
     )
-    partition_spec = PartitionSpec(PartitionField(
-        source_id=1, field_id=1000, transform=MonthTransform(), name="sale_month",
-    ))
-    tbl = cat.create_table(f"{NAMESPACE}.{TABLE}", schema=schema, partition_spec=partition_spec)
+    partition_spec = PartitionSpec(
+        PartitionField(
+            source_id=1,
+            field_id=1000,
+            transform=MonthTransform(),
+            name="sale_month",
+        )
+    )
+    tbl = cat.create_table(
+        f"{NAMESPACE}.{TABLE}", schema=schema, partition_spec=partition_spec
+    )
 
     # 2. INSERT INTO equivalent (parquet on S3Proxy).
     tbl.append(ROWS)
@@ -117,9 +159,14 @@ def main() -> None:
     # aren't quotable as a fixed URL).
     import io
     import pyarrow.parquet as pq
+
     buf = io.BytesIO()
     pq.write_table(ROWS, buf)
-    s3.put_object(Bucket="oblako-iceberg", Key="demos/daily_sales.parquet", Body=buf.getvalue())
+    s3.put_object(
+        Bucket="oblako-iceberg",
+        Key="demos/daily_sales.parquet",
+        Body=buf.getvalue(),
+    )
     print("\nwrote demos/daily_sales.parquet (stable URL for dashboard demos)")
 
 

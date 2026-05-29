@@ -1,4 +1,4 @@
-"""Example 4: OpenSearch vector search for RAG / Knowledge Bases.
+"""OpenSearch vector search for RAG / Knowledge Bases.
 
 Mirrors the pattern from deploy-amazon-bedrock-agent: index documents,
 then retrieve relevant chunks using k-NN vector search.
@@ -54,14 +54,38 @@ def fake_embedding(text: str, dim: int = 64) -> list[float]:
 
 
 documents = [
-    {"text": "Credit risk is the possibility of a loss resulting from a borrower's failure to repay a loan.", "source": "policy/credit-risk-overview.pdf"},
-    {"text": "The probability of default (PD) measures the likelihood that a borrower will default within a given time period.", "source": "policy/credit-risk-overview.pdf"},
-    {"text": "Loss Given Default (LGD) estimates the portion of exposure that will be lost if a default occurs.", "source": "policy/credit-risk-overview.pdf"},
-    {"text": "A credit scorecard assigns points to borrower characteristics to produce a numerical credit score.", "source": "policy/scorecard-methodology.pdf"},
-    {"text": "Weight of Evidence (WOE) transformation converts categorical variables into continuous values based on event rates.", "source": "policy/scorecard-methodology.pdf"},
-    {"text": "The Gini coefficient measures the discriminatory power of a credit scoring model, ranging from 0 to 1.", "source": "policy/scorecard-methodology.pdf"},
-    {"text": "Basel III requires banks to hold capital reserves proportional to the credit risk of their loan portfolios.", "source": "policy/regulatory-requirements.pdf"},
-    {"text": "IFRS 9 mandates expected credit loss provisioning based on forward-looking macroeconomic scenarios.", "source": "policy/regulatory-requirements.pdf"},
+    {
+        "text": "Credit risk is the possibility of a loss resulting from a borrower's failure to repay a loan.",
+        "source": "policy/credit-risk-overview.pdf",
+    },
+    {
+        "text": "The probability of default (PD) measures the likelihood that a borrower will default within a given time period.",
+        "source": "policy/credit-risk-overview.pdf",
+    },
+    {
+        "text": "Loss Given Default (LGD) estimates the portion of exposure that will be lost if a default occurs.",
+        "source": "policy/credit-risk-overview.pdf",
+    },
+    {
+        "text": "A credit scorecard assigns points to borrower characteristics to produce a numerical credit score.",
+        "source": "policy/scorecard-methodology.pdf",
+    },
+    {
+        "text": "Weight of Evidence (WOE) transformation converts categorical variables into continuous values based on event rates.",
+        "source": "policy/scorecard-methodology.pdf",
+    },
+    {
+        "text": "The Gini coefficient measures the discriminatory power of a credit scoring model, ranging from 0 to 1.",
+        "source": "policy/scorecard-methodology.pdf",
+    },
+    {
+        "text": "Basel III requires banks to hold capital reserves proportional to the credit risk of their loan portfolios.",
+        "source": "policy/regulatory-requirements.pdf",
+    },
+    {
+        "text": "IFRS 9 mandates expected credit loss provisioning based on forward-looking macroeconomic scenarios.",
+        "source": "policy/regulatory-requirements.pdf",
+    },
 ]
 
 for i, doc in enumerate(documents):

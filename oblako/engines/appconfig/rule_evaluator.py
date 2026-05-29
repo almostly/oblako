@@ -204,7 +204,9 @@ def _eval(node: Any, context: dict[str, Any]) -> Any:
     if op == "begins_with":
         val = _resolve(args[0], context)
         prefix = _resolve(args[1], context)
-        return isinstance(val, str) and isinstance(prefix, str) and val.startswith(prefix)
+        return (
+            isinstance(val, str) and isinstance(prefix, str) and val.startswith(prefix)
+        )
     if op == "ends_with":
         val = _resolve(args[0], context)
         suffix = _resolve(args[1], context)
@@ -215,7 +217,10 @@ def _eval(node: Any, context: dict[str, Any]) -> Any:
         return isinstance(val, str) and isinstance(substr, str) and substr in val
 
     # Percentage split: (split by:: $var pct::N seed:: "str")
-    # Confirmed from the Go binary: fnv1a_32(val + seed) % 10000 < pct * 100
+    # Verified against the AWS AppConfig agent's Go binary (rules.bucket,
+    # disassembled): bucket = float64(fnv1a_32(val+seed) % 100000) / 1000.0, a
+    # percentage in [0, 100); treatment iff bucket < pct. (NOT % 10000 — the
+    # bucketing granularity is 0.001%, five digits.)
     if op == "split":
         by_val = None
         pct = None
@@ -240,8 +245,8 @@ def _eval(node: Any, context: dict[str, Any]) -> Any:
             i += 1
         if by_val is None or pct is None:
             return False
-        bucket = _fnv1a_32(f"{by_val}{seed}".encode()) % 10000
-        return bucket < pct * 100
+        bucket = (_fnv1a_32(f"{by_val}{seed}".encode()) % 100000) / 1000.0
+        return bucket < pct
 
     if op in ("matches", "match"):
         val = _resolve(args[0], context)

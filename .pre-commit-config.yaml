@@ -1,12 +1,20 @@
 # Run on demand: uvx pre-commit run --all-files
 # Install the git hook: uvx pre-commit install
 repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.14
+    hooks:
+      - id: ruff-check        # lint (autofix); covers oblako/, tests/, examples/, notebooks
+        args: [--fix]
+      - id: ruff-format       # formatter — keeps boxed section-divider comments intact
+
   - repo: https://github.com/PyCQA/pydocstyle
     rev: 6.3.0
     hooks:
       - id: pydocstyle
         # scope to the package; tests/examples/dashboard aren't docstring-checked
         files: ^oblako/.*\.py$
+        exclude: ^oblako/dashboard/
 
   - repo: https://github.com/aws-cloudformation/cfn-lint
     rev: v1.47.1

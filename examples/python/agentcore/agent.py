@@ -1,4 +1,4 @@
-"""Example 8: a local Bedrock AgentCore agent, fully offline.
+"""A local Bedrock AgentCore agent, fully offline.
 
 The agent runs on the AgentCore Runtime contract (POST /invocations, GET /ping)
 and calls oblako's local Bedrock (boto3 'bedrock-runtime' -> Ollama). No cloud.

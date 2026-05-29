@@ -1,4 +1,4 @@
-"""Example 6: Full platform lifecycle via docker-py.
+"""Full platform lifecycle via docker-py.
 
 Start all services, check health, print status, stop everything.
 No docker-compose CLI needed.
@@ -18,11 +18,11 @@ print("\nWaiting for services to be ready...")
 readiness = oblako.wait_ready(timeout=60)
 for name, ready in readiness.items():
     status = "ready" if ready else "not ready"
-    print(f"  {name}: {status}")
+    print(f"{name}: {status}")
 
 print("\nStatus:")
 for name, state in oblako.status().items():
-    print(f"  {name}: {state}")
+    print(f"{name}: {state}")
 
 # Show Ollama models if available
 if readiness.get("ollama"):

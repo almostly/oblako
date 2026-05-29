@@ -46,7 +46,11 @@ app.add_middleware(
 @app.get("/api/config")
 def get_config():
     """Return the active region + account and the selectable regions."""
-    return {"region": config.region(), "accountId": config.account_id(), "regions": config.REGIONS}
+    return {
+        "region": config.region(),
+        "accountId": config.account_id(),
+        "regions": config.REGIONS,
+    }
 
 
 @app.post("/api/config")
@@ -86,6 +90,7 @@ def _service_type(name: str) -> str:
         "sagemaker": "SageMaker",
         "lambda": "Lambda",
         "ec2": "EC2",
+        "appconfig": "AppConfig",
     }
     return types.get(name, name)
 
@@ -195,18 +200,28 @@ def create_state_machine(body: dict):
         if not tpl:
             return {"error": f"Unknown template '{template_id}'"}
         name, definition = tpl["name"], tpl["definition"]
-        extra = {"testCase": tpl["testCase"], "runnable": tpl.get("runnable", False), "input": tpl["input"]}
+        extra = {
+            "testCase": tpl["testCase"],
+            "runnable": tpl.get("runnable", False),
+            "input": tpl["input"],
+        }
     else:
         name, definition = body.get("name"), body.get("definition")
         if not name or not definition:
             return {"error": "Provide a templateId, or both name and definition."}
         extra = {"testCase": None, "runnable": False, "input": {}}
     try:
-        arn = sfn.create_state_machine(name=name, definition=json.dumps(definition),
-                                       roleArn=sfn_templates.DUMMY_ROLE)["stateMachineArn"]
+        arn = sfn.create_state_machine(
+            name=name,
+            definition=json.dumps(definition),
+            roleArn=sfn_templates.DUMMY_ROLE,
+        )["stateMachineArn"]
     except sfn.exceptions.StateMachineAlreadyExists:
-        arn = next(m["stateMachineArn"] for m in sfn.list_state_machines()["stateMachines"]
-                   if m["name"] == name)
+        arn = next(
+            m["stateMachineArn"]
+            for m in sfn.list_state_machines()["stateMachines"]
+            if m["name"] == name
+        )
     except Exception as e:
         return {"error": str(e)}
     return {"stateMachineArn": arn, "name": name, **extra}
@@ -241,7 +256,11 @@ def describe_execution(arn: str):
             t = e["type"]
             if t.endswith("StateEntered"):
                 name = e["stateEnteredEventDetails"]["name"]
-                seen[name] = {"name": name, "type": t[: -len("StateEntered")], "status": "RUNNING"}
+                seen[name] = {
+                    "name": name,
+                    "type": t[: -len("StateEntered")],
+                    "status": "RUNNING",
+                }
                 steps.append(seen[name])
             elif t.endswith("StateExited"):
                 name = e["stateExitedEventDetails"]["name"]
@@ -369,18 +388,26 @@ def list_rds_databases():
         rds = oblako.rds.get_client()
         items = []
         for c in rds.describe_db_clusters().get("DBClusters", []):
-            items.append({
-                "id": c["DBClusterIdentifier"], "kind": "cluster",
-                "engine": c.get("Engine"), "status": c.get("Status"),
-                "endpoint": c.get("Endpoint"),
-            })
+            items.append(
+                {
+                    "id": c["DBClusterIdentifier"],
+                    "kind": "cluster",
+                    "engine": c.get("Engine"),
+                    "status": c.get("Status"),
+                    "endpoint": c.get("Endpoint"),
+                }
+            )
         for i in rds.describe_db_instances().get("DBInstances", []):
-            items.append({
-                "id": i["DBInstanceIdentifier"], "kind": "instance",
-                "engine": i.get("Engine"), "status": i.get("DBInstanceStatus"),
-                "endpoint": (i.get("Endpoint") or {}).get("Address"),
-                "instanceClass": i.get("DBInstanceClass"),
-            })
+            items.append(
+                {
+                    "id": i["DBInstanceIdentifier"],
+                    "kind": "instance",
+                    "engine": i.get("Engine"),
+                    "status": i.get("DBInstanceStatus"),
+                    "endpoint": (i.get("Endpoint") or {}).get("Address"),
+                    "instanceClass": i.get("DBInstanceClass"),
+                }
+            )
         return {"databases": items}
     except Exception as e:
         return {"databases": [], "error": str(e)}
@@ -398,17 +425,23 @@ def create_rds_database(body: dict):
     try:
         rds = oblako.rds.get_client()
         if body.get("mode") == "cluster":  # Aurora
-            aurora_engine = "aurora-postgresql" if engine == "postgres" else "aurora-mysql"
+            aurora_engine = (
+                "aurora-postgresql" if engine == "postgres" else "aurora-mysql"
+            )
             resp = rds.create_db_cluster(
-                DBClusterIdentifier=identifier, Engine=aurora_engine,
-                MasterUsername=user, MasterUserPassword=password,
+                DBClusterIdentifier=identifier,
+                Engine=aurora_engine,
+                MasterUsername=user,
+                MasterUserPassword=password,
                 DatabaseName=body.get("dbName", "app"),
             )
             return {"id": resp["DBCluster"]["DBClusterIdentifier"], "kind": "cluster"}
         resp = rds.create_db_instance(
-            DBInstanceIdentifier=identifier, Engine=engine,
+            DBInstanceIdentifier=identifier,
+            Engine=engine,
             DBInstanceClass=body.get("instanceClass", "db.t3.micro"),
-            MasterUsername=user, MasterUserPassword=password,
+            MasterUsername=user,
+            MasterUserPassword=password,
             AllocatedStorage=int(body.get("allocatedStorage", 20)),
             DBName=body.get("dbName", "app"),
         )
@@ -424,10 +457,18 @@ def iam_overview():
     try:
         iam = oblako.iam.get_client()
         return {
-            "users": [{"name": u["UserName"], "arn": u["Arn"]} for u in iam.list_users()["Users"]],
-            "roles": [{"name": r["RoleName"], "arn": r["Arn"]} for r in iam.list_roles()["Roles"]],
-            "policies": [{"name": p["PolicyName"], "arn": p["Arn"]}
-                         for p in iam.list_policies(Scope="Local")["Policies"]],
+            "users": [
+                {"name": u["UserName"], "arn": u["Arn"]}
+                for u in iam.list_users()["Users"]
+            ],
+            "roles": [
+                {"name": r["RoleName"], "arn": r["Arn"]}
+                for r in iam.list_roles()["Roles"]
+            ],
+            "policies": [
+                {"name": p["PolicyName"], "arn": p["Arn"]}
+                for p in iam.list_policies(Scope="Local")["Policies"]
+            ],
         }
     except Exception as e:
         return {"users": [], "roles": [], "policies": [], "error": str(e)}
@@ -486,7 +527,9 @@ def iam_assume_role(body: dict):
 def iam_simulate(body: dict):
     """Decide whether a principal may perform an action on a resource."""
     try:
-        decision = oblako.iam.authorize(body["principalArn"], body["action"], body["resource"])
+        decision = oblako.iam.authorize(
+            body["principalArn"], body["action"], body["resource"]
+        )
         return {"decision": decision}
     except Exception as e:
         return {"error": str(e)}
@@ -514,7 +557,9 @@ def athena_schemas(catalog: str = "iceberg"):
         for (schema,) in schemas:
             if schema in ("information_schema", "system"):
                 continue
-            tables = oblako.trino.query(f"SHOW TABLES FROM {catalog}.{schema}").get("rows", [])
+            tables = oblako.trino.query(f"SHOW TABLES FROM {catalog}.{schema}").get(
+                "rows", []
+            )
             result.append({"schema": schema, "tables": [t[0] for t in tables]})
         return {"catalog": catalog, "schemas": result}
     except Exception as e:  # noqa: BLE001
@@ -531,8 +576,13 @@ def kinesis_streams():
         streams = []
         for name in names:
             d = k.describe_stream(StreamName=name)["StreamDescription"]
-            streams.append({"name": name, "status": d.get("StreamStatus"),
-                            "shards": len(d.get("Shards", []))})
+            streams.append(
+                {
+                    "name": name,
+                    "status": d.get("StreamStatus"),
+                    "shards": len(d.get("Shards", [])),
+                }
+            )
         return {"streams": streams}
     except Exception as e:
         return {"streams": [], "error": str(e)}
@@ -546,7 +596,8 @@ def kinesis_create_stream(body: dict):
         return {"error": "streamName is required"}
     try:
         oblako.kinesis.get_client().create_stream(
-            StreamName=name, ShardCount=int(body.get("shardCount", 1)),
+            StreamName=name,
+            ShardCount=int(body.get("shardCount", 1)),
         )
         return {"streamName": name}
     except Exception as e:
@@ -572,18 +623,26 @@ def kinesis_get_records(stream_name: str, limit: int = 20):
     """Read the most recent records from the stream (TRIM_HORIZON across all shards)."""
     try:
         k = oblako.kinesis.get_client()
-        shards = k.describe_stream(StreamName=stream_name)["StreamDescription"]["Shards"]
+        shards = k.describe_stream(StreamName=stream_name)["StreamDescription"][
+            "Shards"
+        ]
         records = []
         for shard in shards:
-            it = k.get_shard_iterator(StreamName=stream_name, ShardId=shard["ShardId"],
-                                      ShardIteratorType="TRIM_HORIZON")["ShardIterator"]
+            it = k.get_shard_iterator(
+                StreamName=stream_name,
+                ShardId=shard["ShardId"],
+                ShardIteratorType="TRIM_HORIZON",
+            )["ShardIterator"]
             page = k.get_records(ShardIterator=it, Limit=limit)["Records"]
-            records.extend({
-                "shardId": shard["ShardId"],
-                "partitionKey": r["PartitionKey"],
-                "data": r["Data"].decode("utf-8", errors="replace"),
-                "sequenceNumber": r["SequenceNumber"],
-            } for r in page)
+            records.extend(
+                {
+                    "shardId": shard["ShardId"],
+                    "partitionKey": r["PartitionKey"],
+                    "data": r["Data"].decode("utf-8", errors="replace"),
+                    "sequenceNumber": r["SequenceNumber"],
+                }
+                for r in page
+            )
         return {"records": records[-limit:]}
     except Exception as e:
         return {"records": [], "error": str(e)}
@@ -608,8 +667,15 @@ def redshift_schema():
             tables.setdefault(table, []).append({"name": column, "type": dtype})
         cur.close()
         conn.close()
-        return {"schemas": [{"name": s, "tables": [{"name": t, "columns": cols}
-                             for t, cols in ts.items()]} for s, ts in schemas.items()]}
+        return {
+            "schemas": [
+                {
+                    "name": s,
+                    "tables": [{"name": t, "columns": cols} for t, cols in ts.items()],
+                }
+                for s, ts in schemas.items()
+            ]
+        }
     except Exception as e:
         return {"schemas": [], "error": str(e)}
 
@@ -647,7 +713,9 @@ def run_query(body: dict):
         return {"error": "No query provided"}
     try:
         rd = oblako.redshift.get_data_client()
-        stmt_id = rd.execute_statement(Database=oblako.redshift.database, Sql=query)["Id"]
+        stmt_id = rd.execute_statement(Database=oblako.redshift.database, Sql=query)[
+            "Id"
+        ]
         desc = rd.describe_statement(Id=stmt_id)
         if desc["Status"] == "FAILED":
             return {"error": desc.get("Error", "query failed")}
@@ -792,9 +860,12 @@ def launch_notebook():
     try:
         import jupyterlab  # noqa: F401
     except ImportError:
-        return {"error": "JupyterLab isn't installed. Run: pip install 'oblako[notebook]'"}
+        return {
+            "error": "JupyterLab isn't installed. Run: pip install 'oblako[notebook]'"
+        }
     try:
         from oblako import notebook
+
         return notebook.spawn(port=8888)
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
@@ -840,7 +911,10 @@ def launch_mlflow():
     try:
         oblako.sagemaker.mlflow.start()
         if not oblako.sagemaker.mlflow.wait_ready(timeout=120):
-            return {"status": "error", "error": "MLflow did not become ready within 120s"}
+            return {
+                "status": "error",
+                "error": "MLflow did not become ready within 120s",
+            }
         return {"status": "ready", **_mlflow_urls()}
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "error": str(e)}
@@ -919,7 +993,10 @@ def describe_stack(name: str):
             "stackName": stack["StackName"],
             "stackStatus": stack["StackStatus"],
             "creationTime": str(stack["CreationTime"]),
-            "outputs": [{"key": o["OutputKey"], "value": o["OutputValue"]} for o in stack.get("Outputs", [])],
+            "outputs": [
+                {"key": o["OutputKey"], "value": o["OutputValue"]}
+                for o in stack.get("Outputs", [])
+            ],
             "resources": [
                 {
                     "logicalId": r["LogicalResourceId"],
@@ -957,6 +1034,7 @@ def _zip_handler(filename: str, source: str) -> bytes:
     """Pack a single source file into a Lambda-deployable zip."""
     import io
     import zipfile
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
         z.writestr(filename, source)
@@ -979,7 +1057,7 @@ def _starter_source(runtime: str, handler: str) -> str:
     if runtime.startswith("python"):
         return (
             "def " + fn + "(event, context):\n"
-            "    return {\"statusCode\": 200, \"body\": \"hello from oblako\", \"event\": event}\n"
+            '    return {"statusCode": 200, "body": "hello from oblako", "event": event}\n'
         )
     if runtime.startswith("nodejs"):
         return (
@@ -996,19 +1074,22 @@ def lambda_list_functions():
     lam = oblako.awslambda.get_client()
     try:
         resp = lam.list_functions()
-        return {"functions": [
-            {
-                "name": f["FunctionName"],
-                "runtime": f.get("Runtime", ""),
-                "handler": f.get("Handler", ""),
-                "role": f.get("Role", ""),
-                "memory": f.get("MemorySize", 128),
-                "timeout": f.get("Timeout", 3),
-                "lastModified": f.get("LastModified", ""),
-                "codeSize": f.get("CodeSize", 0),
-                "layers": [lr["Arn"] for lr in f.get("Layers", [])],
-            } for f in resp.get("Functions", [])
-        ]}
+        return {
+            "functions": [
+                {
+                    "name": f["FunctionName"],
+                    "runtime": f.get("Runtime", ""),
+                    "handler": f.get("Handler", ""),
+                    "role": f.get("Role", ""),
+                    "memory": f.get("MemorySize", 128),
+                    "timeout": f.get("Timeout", 3),
+                    "lastModified": f.get("LastModified", ""),
+                    "codeSize": f.get("CodeSize", 0),
+                    "layers": [lr["Arn"] for lr in f.get("Layers", [])],
+                }
+                for f in resp.get("Functions", [])
+            ]
+        }
     except Exception as e:  # noqa: BLE001
         return {"error": str(e), "functions": []}
 
@@ -1067,7 +1148,10 @@ def lambda_create_function(body: dict):
         pass  # not fatal — moto will fall back to the local image
     try:
         lam.create_function(
-            FunctionName=name, Runtime=runtime, Role=role_arn, Handler=handler,
+            FunctionName=name,
+            Runtime=runtime,
+            Role=role_arn,
+            Handler=handler,
             Code={"ZipFile": _zip_handler(filename, source)},
             Architectures=[architecture],
             Timeout=int(body.get("timeout", 10)),
@@ -1087,10 +1171,12 @@ def lambda_update_code(name: str, body: dict):
     try:
         cfg = lam.get_function_configuration(FunctionName=name)
         filename = body.get("sourceFilename") or _runtime_filename(
-            cfg.get("Runtime", "python3.11"), cfg.get("Handler", "handler.handler"),
+            cfg.get("Runtime", "python3.11"),
+            cfg.get("Handler", "handler.handler"),
         )
         lam.update_function_code(
-            FunctionName=name, ZipFile=_zip_handler(filename, body["source"]),
+            FunctionName=name,
+            ZipFile=_zip_handler(filename, body["source"]),
         )
         _LAMBDA_SOURCE_CACHE[name] = {"filename": filename, "source": body["source"]}
         return {"ok": True, "lastModified": cfg.get("LastModified", "")}
@@ -1114,6 +1200,7 @@ def lambda_delete_function(name: str):
 def lambda_invoke(name: str, body: dict):
     """Invoke a function. body = {payload: <event JSON>} — returns the real handler output."""
     import time
+
     lam = oblako.awslambda.get_client()
     # The UI sends payload as a parsed object; tolerate a raw JSON string too
     # (json.dumps-ing a string would double-encode it, and moto then chokes
@@ -1138,8 +1225,11 @@ def lambda_invoke(name: str, body: dict):
     log_tail = ""
     if r.get("LogResult"):
         import base64
+
         try:
-            log_tail = base64.b64decode(r["LogResult"]).decode("utf-8", errors="replace")
+            log_tail = base64.b64decode(r["LogResult"]).decode(
+                "utf-8", errors="replace"
+            )
         except Exception:  # noqa: BLE001
             pass
     return {
@@ -1159,16 +1249,25 @@ def lambda_list_layers():
     lam = oblako.awslambda.get_client()
     try:
         resp = lam.list_layers()
-        return {"layers": [
-            {
-                "name": lr["LayerName"],
-                "arn": lr.get("LayerArn", ""),
-                "latestVersion": lr.get("LatestMatchingVersion", {}).get("Version"),
-                "latestVersionArn": lr.get("LatestMatchingVersion", {}).get("LayerVersionArn", ""),
-                "runtimes": lr.get("LatestMatchingVersion", {}).get("CompatibleRuntimes", []),
-                "description": lr.get("LatestMatchingVersion", {}).get("Description", ""),
-            } for lr in resp.get("Layers", [])
-        ]}
+        return {
+            "layers": [
+                {
+                    "name": lr["LayerName"],
+                    "arn": lr.get("LayerArn", ""),
+                    "latestVersion": lr.get("LatestMatchingVersion", {}).get("Version"),
+                    "latestVersionArn": lr.get("LatestMatchingVersion", {}).get(
+                        "LayerVersionArn", ""
+                    ),
+                    "runtimes": lr.get("LatestMatchingVersion", {}).get(
+                        "CompatibleRuntimes", []
+                    ),
+                    "description": lr.get("LatestMatchingVersion", {}).get(
+                        "Description", ""
+                    ),
+                }
+                for lr in resp.get("Layers", [])
+            ]
+        }
     except Exception as e:  # noqa: BLE001
         return {"error": str(e), "layers": []}
 
@@ -1199,11 +1298,13 @@ def lambda_publish_layer(body: dict):
     # just the version digit — Docker then rejects it ("volume name too short")
     # at *invoke* time, far from here. Reject it up front with a clear reason.
     if name.endswith("layer"):
-        return {"error": (
-            f"Layer name {name!r} ends in 'layer', which trips a moto volume-naming "
-            "bug (the function becomes uninvokable). Pick a name that doesn't end in "
-            "'layer' — e.g. 'oblako-pandas' or 'shared-deps'."
-        )}
+        return {
+            "error": (
+                f"Layer name {name!r} ends in 'layer', which trips a moto volume-naming "
+                "bug (the function becomes uninvokable). Pick a name that doesn't end in "
+                "'layer' — e.g. 'oblako-pandas' or 'shared-deps'."
+            )
+        }
     runtimes = body.get("runtimes") or ["python3.11"]
     if body.get("s3Bucket") and body.get("s3Key"):
         s3 = oblako.s3.get_client()
@@ -1215,8 +1316,10 @@ def lambda_publish_layer(body: dict):
         content = {"ZipFile": _zip_handler(filename, text)}
     try:
         resp = lam.publish_layer_version(
-            LayerName=name, Description=body.get("description", ""),
-            Content=content, CompatibleRuntimes=runtimes,
+            LayerName=name,
+            Description=body.get("description", ""),
+            Content=content,
+            CompatibleRuntimes=runtimes,
         )
         return {"ok": True, "version": resp["Version"], "arn": resp["LayerVersionArn"]}
     except Exception as e:  # noqa: BLE001
@@ -1233,19 +1336,27 @@ def lambda_layer_s3_upload(body: dict):
     import uuid
     from botocore.config import Config
     import boto3
+
     bucket = body.get("bucket") or "oblako-lambda-layers"
     key = body.get("key") or f"layers/{uuid.uuid4()}.zip"
     s3 = oblako.s3.get_client()
     if bucket not in {b["Name"] for b in s3.list_buckets().get("Buckets", [])}:
         s3.create_bucket(Bucket=bucket)
     signer = boto3.client(
-        "s3", endpoint_url=oblako.s3.endpoint_url,
-        aws_access_key_id="test", aws_secret_access_key="test", region_name=config.region(),
-        config=Config(signature_version="s3v4",
-                      s3={"addressing_style": "path", "payload_signing_enabled": False}),
+        "s3",
+        endpoint_url=oblako.s3.endpoint_url,
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+        region_name=config.region(),
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path", "payload_signing_enabled": False},
+        ),
     )
     put_url = signer.generate_presigned_url(
-        "put_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=600,
+        "put_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=600,
     )
     return {"bucket": bucket, "key": key, "putUrl": put_url}
 
@@ -1256,7 +1367,8 @@ def lambda_attach_layers(name: str, body: dict):
     lam = oblako.awslambda.get_client()
     try:
         lam.update_function_configuration(
-            FunctionName=name, Layers=body.get("layers", []),
+            FunctionName=name,
+            Layers=body.get("layers", []),
         )
         return {"ok": True}
     except Exception as e:  # noqa: BLE001
@@ -1279,10 +1391,12 @@ def glue_list_databases():
     g = oblako.glue_catalog.get_client()
     try:
         resp = g.get_databases()
-        return {"databases": [
-            {"name": d["Name"], "description": d.get("Description", "")}
-            for d in resp.get("DatabaseList", [])
-        ]}
+        return {
+            "databases": [
+                {"name": d["Name"], "description": d.get("Description", "")}
+                for d in resp.get("DatabaseList", [])
+            ]
+        }
     except Exception as e:  # noqa: BLE001
         return {"error": str(e), "databases": []}
 
@@ -1292,10 +1406,12 @@ def glue_create_database(body: dict):
     """Create a Glue Catalog database (Iceberg namespace under the hood)."""
     g = oblako.glue_catalog.get_client()
     try:
-        g.create_database(DatabaseInput={
-            "Name": body["name"],
-            "Description": body.get("description", ""),
-        })
+        g.create_database(
+            DatabaseInput={
+                "Name": body["name"],
+                "Description": body.get("description", ""),
+            }
+        )
         return {"ok": True}
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
@@ -1307,17 +1423,21 @@ def glue_list_tables(db: str):
     g = oblako.glue_catalog.get_client()
     try:
         resp = g.get_tables(DatabaseName=db)
-        return {"tables": [
-            {
-                "name": t["Name"], "tableType": t.get("TableType", ""),
-                "columns": [
-                    {"name": c["Name"], "type": c.get("Type", "")}
-                    for c in t.get("StorageDescriptor", {}).get("Columns", [])
-                ],
-                "location": t.get("StorageDescriptor", {}).get("Location", ""),
-                "parameters": t.get("Parameters", {}),
-            } for t in resp.get("TableList", [])
-        ]}
+        return {
+            "tables": [
+                {
+                    "name": t["Name"],
+                    "tableType": t.get("TableType", ""),
+                    "columns": [
+                        {"name": c["Name"], "type": c.get("Type", "")}
+                        for c in t.get("StorageDescriptor", {}).get("Columns", [])
+                    ],
+                    "location": t.get("StorageDescriptor", {}).get("Location", ""),
+                    "parameters": t.get("Parameters", {}),
+                }
+                for t in resp.get("TableList", [])
+            ]
+        }
     except Exception as e:  # noqa: BLE001
         return {"error": str(e), "tables": []}
 
@@ -1329,7 +1449,8 @@ def glue_get_table(db: str, name: str):
     try:
         t = g.get_table(DatabaseName=db, Name=name)["Table"]
         return {
-            "name": t["Name"], "databaseName": db,
+            "name": t["Name"],
+            "databaseName": db,
             "tableType": t.get("TableType", ""),
             "columns": [
                 {"name": c["Name"], "type": c.get("Type", "")}
@@ -1350,6 +1471,7 @@ def glue_run_job(body: dict):
     Returns {exitCode, logs, durationMs}.
     """
     import time
+
     script = body.get("script", "").strip()
     if not script:
         return {"error": "Empty script"}
@@ -1395,6 +1517,7 @@ def glue_run_workflow(body: dict):
     Returns {name, status, steps:[{name, status, exitCode, logs}], durationMs, ranAt}.
     """
     import time
+
     steps = body.get("steps") or []
     if not any((s.get("script") or "").strip() for s in steps):
         return {"error": "Provide at least one step with a script."}
@@ -1402,7 +1525,9 @@ def glue_run_workflow(body: dict):
     started = time.time()
     try:
         result = oblako.glue.run_workflow(
-            name, steps, timeout=int(body.get("timeout", 600)),
+            name,
+            steps,
+            timeout=int(body.get("timeout", 600)),
         )
     except Exception as e:  # noqa: BLE001
         return {"error": str(e), "durationMs": int((time.time() - started) * 1000)}
@@ -1440,15 +1565,19 @@ def ec2_list_instances():
                 continue
             iid = inst["InstanceId"]
             container = ec2.instance_container(iid)
-            name = next((t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), "")
-            instances.append({
-                "id": iid,
-                "name": name,
-                "type": inst.get("InstanceType", ""),
-                "state": inst.get("State", {}).get("Name", ""),
-                "imageId": inst.get("ImageId", ""),
-                "containerStatus": container.status if container else "—",
-            })
+            name = next(
+                (t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), ""
+            )
+            instances.append(
+                {
+                    "id": iid,
+                    "name": name,
+                    "type": inst.get("InstanceType", ""),
+                    "state": inst.get("State", {}).get("Name", ""),
+                    "imageId": inst.get("ImageId", ""),
+                    "containerStatus": container.status if container else "—",
+                }
+            )
     return {"instances": instances}
 
 
@@ -1463,7 +1592,8 @@ def ec2_run_instance(body: dict):
         )
         if body.get("name"):
             ec2.get_client().create_tags(
-                Resources=[iid], Tags=[{"Key": "Name", "Value": body["name"]}],
+                Resources=[iid],
+                Tags=[{"Key": "Name", "Value": body["name"]}],
             )
         return {"ok": True, "id": iid}
     except Exception as e:  # noqa: BLE001
@@ -1496,6 +1626,262 @@ def ec2_terminate_instance(iid: str):
     try:
         oblako.ec2.terminate_instance(iid)
         return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+# AppConfig
+def _ac():
+    return oblako.appconfig.get_client()
+
+
+@app.get("/api/appconfig/applications")
+def appconfig_applications():
+    """List AppConfig applications, each with its environment + profile counts."""
+    try:
+        ac = _ac()
+        apps = []
+        for a in ac.list_applications().get("Items", []):
+            envs = ac.list_environments(ApplicationId=a["Id"]).get("Items", [])
+            profs = ac.list_configuration_profiles(ApplicationId=a["Id"]).get(
+                "Items", []
+            )
+            apps.append(
+                {
+                    "id": a["Id"],
+                    "name": a["Name"],
+                    "description": a.get("Description", ""),
+                    "environments": len(envs),
+                    "profiles": len(profs),
+                }
+            )
+        return {"applications": apps}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.post("/api/appconfig/applications")
+def appconfig_create_application(body: dict):
+    """Create an AppConfig application."""
+    try:
+        a = _ac().create_application(
+            Name=body["name"], Description=body.get("description", "")
+        )
+        return {"id": a["Id"], "name": a["Name"]}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.get("/api/appconfig/applications/{app_id}/environments")
+def appconfig_environments(app_id: str):
+    """List an application's environments."""
+    try:
+        return {
+            "environments": [
+                {"id": e["Id"], "name": e["Name"], "state": e.get("State", "")}
+                for e in _ac().list_environments(ApplicationId=app_id).get("Items", [])
+            ]
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.post("/api/appconfig/applications/{app_id}/environments")
+def appconfig_create_environment(app_id: str, body: dict):
+    """Create an environment under an application."""
+    try:
+        e = _ac().create_environment(
+            ApplicationId=app_id,
+            Name=body["name"],
+            Description=body.get("description", ""),
+        )
+        return {"id": e["Id"], "name": e["Name"]}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.get("/api/appconfig/applications/{app_id}/profiles")
+def appconfig_profiles(app_id: str):
+    """List an application's configuration profiles."""
+    try:
+        return {
+            "profiles": [
+                {
+                    "id": p["Id"],
+                    "name": p["Name"],
+                    "type": p.get("Type", "AWS.Freeform"),
+                    "locationUri": p.get("LocationUri", "hosted"),
+                }
+                for p in _ac()
+                .list_configuration_profiles(ApplicationId=app_id)
+                .get("Items", [])
+            ]
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.post("/api/appconfig/applications/{app_id}/profiles")
+def appconfig_create_profile(app_id: str, body: dict):
+    """Create a configuration profile (Freeform or FeatureFlags)."""
+    try:
+        p = _ac().create_configuration_profile(
+            ApplicationId=app_id,
+            Name=body["name"],
+            LocationUri=body.get("locationUri", "hosted"),
+            Type=body.get("type", "AWS.Freeform"),
+        )
+        return {"id": p["Id"], "name": p["Name"]}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.get("/api/appconfig/applications/{app_id}/profiles/{profile_id}/versions")
+def appconfig_versions(app_id: str, profile_id: str):
+    """List hosted configuration versions for a profile (newest first)."""
+    try:
+        items = (
+            _ac()
+            .list_hosted_configuration_versions(
+                ApplicationId=app_id, ConfigurationProfileId=profile_id
+            )
+            .get("Items", [])
+        )
+        return {
+            "versions": [
+                {
+                    "versionNumber": v["VersionNumber"],
+                    "contentType": v.get("ContentType", ""),
+                    "description": v.get("Description", ""),
+                }
+                for v in items
+            ]
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.get("/api/appconfig/applications/{app_id}/profiles/{profile_id}/versions/{number}")
+def appconfig_version_content(app_id: str, profile_id: str, number: int):
+    """Return one hosted version's raw content (decoded as text)."""
+    try:
+        v = _ac().get_hosted_configuration_version(
+            ApplicationId=app_id,
+            ConfigurationProfileId=profile_id,
+            VersionNumber=number,
+        )
+        return {
+            "versionNumber": v["VersionNumber"],
+            "content": v["Content"].read().decode("utf-8", "replace"),
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.post("/api/appconfig/applications/{app_id}/profiles/{profile_id}/versions")
+def appconfig_create_version(app_id: str, profile_id: str, body: dict):
+    """Store a new hosted configuration version from JSON/text content."""
+    try:
+        content = body.get("content", "")
+        # Validate JSON early so the UI gets a clear error, not a wire failure.
+        json.loads(content)
+        v = _ac().create_hosted_configuration_version(
+            ApplicationId=app_id,
+            ConfigurationProfileId=profile_id,
+            Content=content.encode(),
+            ContentType=body.get("contentType", "application/json"),
+        )
+        return {"versionNumber": v["VersionNumber"]}
+    except json.JSONDecodeError as e:
+        return {"error": f"Invalid JSON: {e}"}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.get("/api/appconfig/strategies")
+def appconfig_strategies():
+    """List deployment strategies (predefined + custom)."""
+    try:
+        return {
+            "strategies": [
+                {
+                    "id": s["Id"],
+                    "name": s["Name"],
+                    "duration": s.get("DeploymentDurationInMinutes", 0),
+                    "growthFactor": s.get("GrowthFactor", 100.0),
+                }
+                for s in _ac().list_deployment_strategies().get("Items", [])
+            ]
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.get("/api/appconfig/applications/{app_id}/environments/{env_id}/deployments")
+def appconfig_deployments(app_id: str, env_id: str):
+    """List an environment's deployments (newest first)."""
+    try:
+        items = (
+            _ac()
+            .list_deployments(ApplicationId=app_id, EnvironmentId=env_id)
+            .get("Items", [])
+        )
+        return {
+            "deployments": [
+                {
+                    "deploymentNumber": d["DeploymentNumber"],
+                    "profileId": d.get("ConfigurationProfileId", ""),
+                    "version": d.get("ConfigurationVersion", ""),
+                    "strategyId": d.get("DeploymentStrategyId", ""),
+                    "state": d.get("State", ""),
+                    "percentageComplete": d.get("PercentageComplete", 0),
+                }
+                for d in items
+            ]
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.post("/api/appconfig/applications/{app_id}/environments/{env_id}/deployments")
+def appconfig_start_deployment(app_id: str, env_id: str, body: dict):
+    """Start a deployment of a profile version to an environment."""
+    try:
+        d = _ac().start_deployment(
+            ApplicationId=app_id,
+            EnvironmentId=env_id,
+            ConfigurationProfileId=body["profileId"],
+            ConfigurationVersion=str(body["version"]),
+            DeploymentStrategyId=body.get("strategyId", "AppConfig.AllAtOnce"),
+        )
+        return {"deploymentNumber": d["DeploymentNumber"], "state": d.get("State", "")}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.post("/api/appconfig/evaluate")
+def appconfig_evaluate(body: dict):
+    """Resolve feature-flag variants for a profile's latest version against a context.
+
+    This is the agent's job: fetch the raw config, then run the rule evaluator
+    (eq/and/or/split/…) over its ``values`` map. Returns the resolved flags so the
+    UI can show which variant each context lands in (incl. the A/B ``split``).
+    """
+    try:
+        from oblako.engines.appconfig import evaluate_config
+
+        ac = _ac()
+        v = ac.get_hosted_configuration_version(
+            ApplicationId=body["applicationId"],
+            ConfigurationProfileId=body["profileId"],
+            VersionNumber=int(body["version"]),
+        )
+        raw = json.loads(v["Content"].read())
+        values = raw.get("values", raw) if isinstance(raw, dict) else {}
+        context = body.get("context") or {}
+        return {"flags": evaluate_config(values, context)}
+    except json.JSONDecodeError as e:
+        return {"error": f"Configuration is not valid JSON: {e}"}
     except Exception as e:  # noqa: BLE001
         return {"error": str(e)}
 

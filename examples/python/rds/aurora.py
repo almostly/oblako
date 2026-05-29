@@ -1,4 +1,4 @@
-"""Example 10: Amazon RDS + Aurora (local).
+"""Amazon RDS + Aurora (local).
 
 Control plane via boto3 'rds' (instances & clusters, through moto); data plane
 via a direct psycopg2 connection to the real Postgres engine. Real SQL,
@@ -24,10 +24,17 @@ svc = RdsService()
 rds = svc.get_client()  # boto3.client("rds")
 
 # --- RDS: a standalone instance ---
-ignore_exists(lambda: rds.create_db_instance(
-    DBInstanceIdentifier="app-db", Engine="postgres", DBInstanceClass="db.t3.micro",
-    MasterUsername="oblako", MasterUserPassword="Oblako123", AllocatedStorage=20, DBName="oblako",
-))
+ignore_exists(
+    lambda: rds.create_db_instance(
+        DBInstanceIdentifier="app-db",
+        Engine="postgres",
+        DBInstanceClass="db.t3.micro",
+        MasterUsername="oblako",
+        MasterUserPassword="Oblako123",
+        AllocatedStorage=20,
+        DBName="oblako",
+    )
+)
 inst = rds.describe_db_instances(DBInstanceIdentifier="app-db")["DBInstances"][0]
 print("RDS instance:")
 print(f"id:       {inst['DBInstanceIdentifier']}")
@@ -35,20 +42,31 @@ print(f"engine:   {inst['Engine']} ({inst['DBInstanceClass']})")
 print(f"endpoint: {inst['Endpoint']['Address']}:{inst['Endpoint']['Port']}")
 
 # --- Aurora: a cluster with a writer instance ---
-ignore_exists(lambda: rds.create_db_cluster(
-    DBClusterIdentifier="analytics", Engine="aurora-postgresql",
-    MasterUsername="oblako", MasterUserPassword="Oblako123", DatabaseName="oblako",
-))
-ignore_exists(lambda: rds.create_db_instance(
-    DBInstanceIdentifier="analytics-1", DBClusterIdentifier="analytics",
-    Engine="aurora-postgresql", DBInstanceClass="db.r6g.large",
-))
+ignore_exists(
+    lambda: rds.create_db_cluster(
+        DBClusterIdentifier="analytics",
+        Engine="aurora-postgresql",
+        MasterUsername="oblako",
+        MasterUserPassword="Oblako123",
+        DatabaseName="oblako",
+    )
+)
+ignore_exists(
+    lambda: rds.create_db_instance(
+        DBInstanceIdentifier="analytics-1",
+        DBClusterIdentifier="analytics",
+        Engine="aurora-postgresql",
+        DBInstanceClass="db.r6g.large",
+    )
+)
 cluster = rds.describe_db_clusters(DBClusterIdentifier="analytics")["DBClusters"][0]
 print("\nAurora cluster:")
 print(f"id:      {cluster['DBClusterIdentifier']}")
 print(f"writer:  {cluster['Endpoint']}")
 print(f"reader:  {cluster['ReaderEndpoint']}")
-print(f"members: {[m['DBInstanceIdentifier'] for m in cluster.get('DBClusterMembers', [])]}")
+print(
+    f"members: {[m['DBInstanceIdentifier'] for m in cluster.get('DBClusterMembers', [])]}"
+)
 
 # --- Data plane: real SQL against the engine ---
 conn = svc.connect()

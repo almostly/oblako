@@ -1,4 +1,4 @@
-"""Example 11: SageMaker local-mode training — fully local, no cloud or ECR.
+"""SageMaker local-mode training — fully local, no cloud or ECR.
 
 Builds a bring-your-own-container training image, then runs it via SageMaker
 local mode (instance_type='local'): a REAL Docker container trains on local
@@ -29,7 +29,9 @@ HERE = pathlib.Path(__file__).parent
 sm = SageMakerService()
 
 # 1. Build the training image locally (no ECR pull)
-image = sm.build_image(path=str(HERE / "train_image"), tag="oblako-sagemaker-train:latest")
+image = sm.build_image(
+    path=str(HERE / "train_image"), tag="oblako-sagemaker-train:latest"
+)
 print("Built image:", image)
 
 # 2. Stage tiny training data (y = 2x + 1) as local files

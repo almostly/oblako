@@ -1,4 +1,4 @@
-"""Example 3: Amazon Redshift as a local data warehouse for batch scoring.
+"""Amazon Redshift as a local data warehouse for batch scoring.
 
 Mirrors the pattern from credit-risk-modeling batch_scoring:
 store customer scores and limit decisions in Redshift.
@@ -74,7 +74,9 @@ for cid, score in cur.fetchall():
     else:
         new_limit = current_limit
         decision, reason = "KEEP", "stable"
-    decisions.append((cid, round(current_limit, 2), round(new_limit, 2), decision, reason))
+    decisions.append(
+        (cid, round(current_limit, 2), round(new_limit, 2), decision, reason)
+    )
 
 cur.executemany(
     "INSERT INTO limit_decisions (customer_id, current_limit, new_limit, decision, reason) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (customer_id) DO UPDATE SET current_limit=EXCLUDED.current_limit, new_limit=EXCLUDED.new_limit, decision=EXCLUDED.decision, reason=EXCLUDED.reason",
@@ -96,7 +98,9 @@ for decision, count, avg_score in cur.fetchall():
     print(f"{decision:<12} {count:>6} {avg_score:>10}")
 
 # Segment distribution
-cur.execute("SELECT segment, COUNT(*) FROM customer_scores GROUP BY segment ORDER BY segment")
+cur.execute(
+    "SELECT segment, COUNT(*) FROM customer_scores GROUP BY segment ORDER BY segment"
+)
 print("\nSegment distribution:")
 for segment, count in cur.fetchall():
     print(f"{segment}: {count}")

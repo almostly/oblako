@@ -42,14 +42,14 @@ SCHEMA_DDL = textwrap.dedent("""
 """).strip()
 
 SEED_ROWS = [
-    (1, "alice",   1200.00, "approved", "card",     "2025-04-01"),
-    (2, "bob",     5000.00, "rejected", "loan",     "2025-04-02"),
-    (3, "carol",   3500.00, "approved", "loan",     "2025-04-08"),
-    (4, "david",   8000.00, "approved", "mortgage", "2025-04-10"),
-    (5, "eve",      900.00, "pending",  "card",     "2025-04-12"),
-    (6, "frank",   2100.00, "approved", "card",     "2025-04-12"),
-    (7, "grace",   4400.00, "rejected", "loan",     "2025-04-14"),
-    (8, "heidi",  12000.00, "approved", "mortgage", "2025-04-15"),
+    (1, "alice", 1200.00, "approved", "card", "2025-04-01"),
+    (2, "bob", 5000.00, "rejected", "loan", "2025-04-02"),
+    (3, "carol", 3500.00, "approved", "loan", "2025-04-08"),
+    (4, "david", 8000.00, "approved", "mortgage", "2025-04-10"),
+    (5, "eve", 900.00, "pending", "card", "2025-04-12"),
+    (6, "frank", 2100.00, "approved", "card", "2025-04-12"),
+    (7, "grace", 4400.00, "rejected", "loan", "2025-04-14"),
+    (8, "heidi", 12000.00, "approved", "mortgage", "2025-04-15"),
 ]
 
 
@@ -58,8 +58,12 @@ def ensure_cluster_and_table(rs: RedshiftService) -> None:
     redshift = rs.get_client()
     try:
         redshift.create_cluster(
-            ClusterIdentifier=CLUSTER, NodeType="ra3.xlplus", NumberOfNodes=2,
-            MasterUsername=USER, MasterUserPassword="Oblako123", DBName=DATABASE,
+            ClusterIdentifier=CLUSTER,
+            NodeType="ra3.xlplus",
+            NumberOfNodes=2,
+            MasterUsername=USER,
+            MasterUserPassword="Oblako123",
+            DBName=DATABASE,
         )
     except redshift.exceptions.ClusterAlreadyExistsFault:
         pass
@@ -69,8 +73,7 @@ def ensure_cluster_and_table(rs: RedshiftService) -> None:
     # Refill: TRUNCATE then INSERT, so the example is repeatable.
     run_sql(data, "TRUNCATE public.applications")
     values_sql = ", ".join(
-        f"({i},'{a}',{amt},'{s}','{p}','{d}')"
-        for i, a, amt, s, p, d in SEED_ROWS
+        f"({i},'{a}',{amt},'{s}','{p}','{d}')" for i, a, amt, s, p, d in SEED_ROWS
     )
     run_sql(data, f"INSERT INTO public.applications VALUES {values_sql}")
 
@@ -78,7 +81,10 @@ def ensure_cluster_and_table(rs: RedshiftService) -> None:
 def run_sql(data, sql: str):
     """Execute SQL via the Redshift Data API; return rows (or None for DML)."""
     stmt_id = data.execute_statement(
-        ClusterIdentifier=CLUSTER, Database=DATABASE, DbUser=USER, Sql=sql,
+        ClusterIdentifier=CLUSTER,
+        Database=DATABASE,
+        DbUser=USER,
+        Sql=sql,
     )["Id"]
     while True:
         desc = data.describe_statement(Id=stmt_id)
@@ -93,8 +99,14 @@ def run_sql(data, sql: str):
     columns = [c["name"] for c in result["ColumnMetadata"]]
     rows = []
     for row in result.get("Records", []):
-        rows.append({c: next(iter(cell.values()), None) if cell and "isNull" not in cell else None
-                     for c, cell in zip(columns, row)})
+        rows.append(
+            {
+                c: next(iter(cell.values()), None)
+                if cell and "isNull" not in cell
+                else None
+                for c, cell in zip(columns, row)
+            }
+        )
     return rows
 
 
@@ -144,7 +156,9 @@ def pretty(rows: list[dict]) -> str:
     widths = [max(len(c), *(len(str(r[c])) for r in rows)) for c in cols]
     header = " | ".join(c.ljust(w) for c, w in zip(cols, widths))
     sep = "-+-".join("-" * w for w in widths)
-    body = "\n".join(" | ".join(str(r[c]).ljust(w) for c, w in zip(cols, widths)) for r in rows)
+    body = "\n".join(
+        " | ".join(str(r[c]).ljust(w) for c, w in zip(cols, widths)) for r in rows
+    )
     return f"{header}\n{sep}\n{body}"
 
 

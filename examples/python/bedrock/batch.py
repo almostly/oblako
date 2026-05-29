@@ -1,4 +1,4 @@
-"""Example 9: Bedrock foundation models + batch model-invocation jobs (local).
+"""Bedrock foundation models + batch model-invocation jobs (local).
 
 Lists the foundation-model catalog via boto3 'bedrock', then runs a batch
 inference job: JSONL records in S3 (S3Proxy) -> the local engine (Ollama) ->
@@ -15,7 +15,7 @@ from oblako.services import BedrockService, S3ProxyService
 
 MODEL = "qwen2.5:0.5b"
 
-bedrock = BedrockService().get_control_client()   # boto3.client("bedrock")
+bedrock = BedrockService().get_control_client()  # boto3.client("bedrock")
 s3 = S3ProxyService().get_client()
 
 # 1. Foundation-model catalog (real Bedrock IDs + locally-available Ollama models)
@@ -30,7 +30,9 @@ for bucket in ("bedrock-batch-in", "bedrock-batch-out"):
         s3.create_bucket(Bucket=bucket)
     except Exception:
         pass
-for obj in s3.list_objects_v2(Bucket="bedrock-batch-in", Prefix="input/").get("Contents", []):
+for obj in s3.list_objects_v2(Bucket="bedrock-batch-in", Prefix="input/").get(
+    "Contents", []
+):
     s3.delete_object(Bucket="bedrock-batch-in", Key=obj["Key"])
 
 prompts = ["Name one primary color.", "What is 2+2?", "Say hello in French."]
@@ -58,7 +60,9 @@ job_arn = bedrock.create_model_invocation_job(
     roleArn="arn:aws:iam::000000000000:role/Dummy",
     modelId=MODEL,
     inputDataConfig={"s3InputDataConfig": {"s3Uri": "s3://bedrock-batch-in/input/"}},
-    outputDataConfig={"s3OutputDataConfig": {"s3Uri": "s3://bedrock-batch-out/output/"}},
+    outputDataConfig={
+        "s3OutputDataConfig": {"s3Uri": "s3://bedrock-batch-out/output/"}
+    },
 )["jobArn"]
 print(f"Submitted job {job_arn.split('/')[-1]}")
 
@@ -68,13 +72,17 @@ for _ in range(120):
     if details["status"] in ("Completed", "Failed", "Stopped"):
         break
     time.sleep(1)
-print(f"Status: {details['status']} ({details['successRecordCount']}/{details['totalRecordCount']} succeeded)")
+print(
+    f"Status: {details['status']} ({details['successRecordCount']}/{details['totalRecordCount']} succeeded)"
+)
 
 # 5. Read this job's results back from S3 (output is written under output/<jobId>/)
 job_id = job_arn.split("/")[-1]
 keys = [
     o["Key"]
-    for o in s3.list_objects_v2(Bucket="bedrock-batch-out", Prefix=f"output/{job_id}/").get("Contents", [])
+    for o in s3.list_objects_v2(
+        Bucket="bedrock-batch-out", Prefix=f"output/{job_id}/"
+    ).get("Contents", [])
 ]
 print("\nResults:")
 for key in keys:

@@ -31,21 +31,29 @@ def main() -> None:
         s3.create_bucket(Bucket=BUCKET)
 
     # 1. Backend (with credentials) issues short-lived signed URLs.
-    #    `payload_signing_enabled=False` is the AWS-recommended setting for
-    #    presigned PUTs (the client is anonymous; it can't compute the SHA256 hash
-    #    that signing the payload would require). S3Proxy needs this too —
-    #    otherwise the body isn't stored.
+    # `payload_signing_enabled=False` is the AWS-recommended setting for
+    # presigned PUTs (the client is anonymous; it can't compute the SHA256 hash
+    # that signing the payload would require).
     signer = boto3.client(
-        "s3", endpoint_url=o.s3.endpoint_url,
-        aws_access_key_id="test", aws_secret_access_key="test", region_name="us-east-1",
-        config=Config(signature_version="s3v4",
-                      s3={"addressing_style": "path", "payload_signing_enabled": False}),
+        "s3",
+        endpoint_url=o.s3.endpoint_url,
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+        region_name="us-east-1",
+        config=Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path", "payload_signing_enabled": False},
+        ),
     )
     put_url = signer.generate_presigned_url(
-        "put_object", Params={"Bucket": BUCKET, "Key": KEY}, ExpiresIn=300,
+        "put_object",
+        Params={"Bucket": BUCKET, "Key": KEY},
+        ExpiresIn=300,
     )
     get_url = signer.generate_presigned_url(
-        "get_object", Params={"Bucket": BUCKET, "Key": KEY}, ExpiresIn=300,
+        "get_object",
+        Params={"Bucket": BUCKET, "Key": KEY},
+        ExpiresIn=300,
     )
     print("PUT URL:", put_url[:90], "...")
     print("GET URL:", get_url[:90], "...")

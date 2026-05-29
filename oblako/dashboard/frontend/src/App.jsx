@@ -18,6 +18,7 @@ import AthenaPage from './pages/AthenaPage'
 import GluePage from './pages/GluePage'
 import LambdaPage from './pages/LambdaPage'
 import Ec2Page from './pages/Ec2Page'
+import AppConfigPage from './pages/AppConfigPage'
 
 const NAV_ITEMS = [
   { type: 'link', text: 'Services', href: '#services' },
@@ -31,6 +32,7 @@ const NAV_ITEMS = [
   { type: 'link', text: 'Kinesis', href: '#kinesis' },
   { type: 'link', text: 'Step Functions', href: '#stepfunctions' },
   { type: 'link', text: 'CloudFormation', href: '#cloudformation' },
+  { type: 'link', text: 'AppConfig', href: '#appconfig' },
   { type: 'link', text: 'Athena', href: '#athena' },
   { type: 'link', text: 'Glue', href: '#glue' },
   { type: 'link', text: 'Redshift', href: '#redshift' },
@@ -51,6 +53,7 @@ const PAGES = {
   '#glue': GluePage,
   '#stepfunctions': StepFunctionsPage,
   '#cloudformation': CloudFormationPage,
+  '#appconfig': AppConfigPage,
   '#redshift': RedshiftPage,
   '#rds': RdsPage,
   '#iam': IamPage,
