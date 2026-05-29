@@ -11,7 +11,7 @@ from .glue_catalog import GlueCatalogService
 from .iam import IamService
 from .iceberg import IcebergCatalogService
 from .kinesis import KinesisService
-from .lambda_ import LambdaService
+from .awslambda import LambdaService
 from .mlflow import MlflowService
 from .moto import MotoService
 from .opensearch import OpenSearchService
@@ -37,7 +37,10 @@ class Oblako:
         self.moto = MotoService()
         self.iam = IamService(moto=self.moto)  # IAM/STS control plane + policy evaluator
         # Lambda: moto's control plane + real Docker exec (socket mounted into moto).
-        self.lambda_ = LambdaService(moto=self.moto)
+        # Canonical attribute is `awslambda` (matches moto's own module name);
+        # `lambda_` stays as a boto3-style alias since `lambda` is a keyword.
+        self.awslambda = LambdaService(moto=self.moto)
+        self.lambda_ = self.awslambda
         self.s3 = S3ProxyService()
         self.dynamodb = DynamoDBService(host_port=8001)
         self.kinesis = KinesisService()

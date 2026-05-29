@@ -49,17 +49,7 @@ export default function GluePage() {
       <Tabs tabs={[
         { id: 'catalog', label: 'Data Catalog', content: <CatalogTab /> },
         { id: 'jobs', label: 'Jobs', content: <JobsTab /> },
-        { id: 'workflows', label: 'Workflows',
-          content: (
-            <Container>
-              <Alert type="info" header="Workflows are not yet implemented">
-                Glue Workflows orchestrate jobs + crawlers as a DAG. They're not in the
-                oblako backend yet — Step Functions is the closest local alternative
-                today. Track this in the project TODO.
-              </Alert>
-            </Container>
-          ),
-        },
+        { id: 'workflows', label: 'Workflows', content: <WorkflowsTab /> },
       ]} />
     </SpaceBetween>
   )
@@ -270,6 +260,128 @@ function JobsTab() {
             { id: 'ranAt', header: 'Started', cell: i => <Box fontSize="body-s">{i.ranAt}</Box> },
           ]}
           empty={<Box textAlign="center">No runs yet.</Box>}
+        />
+      </ExpandableSection>
+    </SpaceBetween>
+  )
+}
+
+const wfStatusType = (s) =>
+  s === 'SUCCEEDED' ? 'success' : s === 'FAILED' ? 'error' : s === 'SKIPPED' ? 'stopped' : 'in-progress'
+
+function WorkflowsTab() {
+  // A workflow is a sequential pipeline of PySpark steps; a step runs only if its
+  // predecessors succeeded (Glue's conditional-trigger-on-success, simulated).
+  const [name, setName] = useState('demo-pipeline')
+  const [steps, setSteps] = useState([
+    { name: 'extract', script: STARTER_SCRIPT },
+    { name: 'transform', script: STARTER_SCRIPT },
+  ])
+  const [running, setRunning] = useState(false)
+  const [latest, setLatest] = useState(null)
+  const [history, setHistory] = useState([])
+
+  // Effect body just kicks off async work — all setState happens inside .then().
+  useEffect(() => {
+    fetch(`${API}/api/glue/workflows/history`).then(r => r.json()).then(d => setHistory(d.workflows || []))
+  }, [])
+
+  const setStep = (i, patch) => setSteps(steps.map((s, j) => j === i ? { ...s, ...patch } : s))
+  const addStep = () => setSteps([...steps, { name: `step${steps.length + 1}`, script: STARTER_SCRIPT }])
+  const removeStep = (i) => setSteps(steps.filter((_, j) => j !== i))
+
+  const run = async () => {
+    setRunning(true); setLatest(null)
+    const r = await fetch(`${API}/api/glue/workflows/run`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, steps }),
+    }).then(r => r.json())
+    setRunning(false); setLatest(r)
+    fetch(`${API}/api/glue/workflows/history`).then(r => r.json()).then(d => setHistory(d.workflows || []))
+  }
+
+  return (
+    <SpaceBetween size="l">
+      <Container header={
+        <Header variant="h2"
+          actions={
+            <SpaceBetween direction="horizontal" size="xs">
+              <Button iconName="add-plus" onClick={addStep}>Add step</Button>
+              <Button variant="primary" iconName="play" loading={running} onClick={run}>Run workflow</Button>
+            </SpaceBetween>
+          }
+          description="Steps run in order; a step runs only if every prior step succeeded. First run pulls the ~5 GB Glue image.">
+          Workflow steps
+        </Header>
+      }>
+        <SpaceBetween size="m">
+          <FormField label="Workflow name">
+            <Input value={name} onChange={({ detail }) => setName(detail.value)} />
+          </FormField>
+          {steps.map((s, i) => (
+            <ExpandableSection key={i} defaultExpanded
+              headerText={`${i + 1}. ${s.name || '(unnamed)'}`}>
+              <SpaceBetween size="s">
+                <SpaceBetween direction="horizontal" size="xs">
+                  <FormField label="Step name">
+                    <Input value={s.name} onChange={({ detail }) => setStep(i, { name: detail.value })} />
+                  </FormField>
+                  <Box padding={{ top: 'l' }}>
+                    <Button iconName="remove" disabled={steps.length <= 1}
+                      onClick={() => removeStep(i)}>Remove</Button>
+                  </Box>
+                </SpaceBetween>
+                <CodeEditor value={s.script} onChange={(v) => setStep(i, { script: v })}
+                  language="python" rows={12} />
+              </SpaceBetween>
+            </ExpandableSection>
+          ))}
+        </SpaceBetween>
+      </Container>
+
+      {(latest || running) && (
+        <Container header={
+          <Header variant="h3"
+            actions={latest && !latest.error && (
+              <StatusIndicator type={wfStatusType(latest.status)}>{latest.status}</StatusIndicator>
+            )}>
+            Latest run{latest?.durationMs != null && <> · <Box variant="code" fontSize="body-s" display="inline">{latest.durationMs} ms</Box></>}
+          </Header>
+        }>
+          {running && <Box padding="m">Running… each step is a fresh Spark container, so this is slow.</Box>}
+          {latest?.error && <Alert type="error">{latest.error}</Alert>}
+          {latest?.steps && (
+            <SpaceBetween size="xs">
+              {latest.steps.map((s, i) => (
+                <ExpandableSection key={i}
+                  headerText={
+                    <SpaceBetween direction="horizontal" size="xs">
+                      <StatusIndicator type={wfStatusType(s.status)}>{s.status}</StatusIndicator>
+                      <Box variant="code">{s.name}</Box>
+                      {s.exitCode != null && <Box fontSize="body-s" color="text-status-inactive">exit {s.exitCode}</Box>}
+                    </SpaceBetween>
+                  }>
+                  <CodeEditor value={s.logs || '(no output)'} onChange={() => {}} language="javascript" rows={10} readOnly />
+                </ExpandableSection>
+              ))}
+            </SpaceBetween>
+          )}
+        </Container>
+      )}
+
+      <ExpandableSection headerText={`Run history (${history.length})`}>
+        <Table
+          items={history}
+          columnDefinitions={[
+            { id: 'name', header: 'Workflow', cell: i => <Box variant="code" fontSize="body-s">{i.name}</Box> },
+            { id: 'status', header: 'Status', cell: i => (
+              <StatusIndicator type={wfStatusType(i.status)}>{i.status}</StatusIndicator>
+            )},
+            { id: 'steps', header: 'Steps', cell: i => (i.steps || []).map(s => s.status[0]).join(' ') },
+            { id: 'duration', header: 'Duration', cell: i => `${i.durationMs} ms` },
+            { id: 'ranAt', header: 'Started', cell: i => <Box fontSize="body-s">{i.ranAt}</Box> },
+          ]}
+          empty={<Box textAlign="center">No workflow runs yet.</Box>}
         />
       </ExpandableSection>
     </SpaceBetween>

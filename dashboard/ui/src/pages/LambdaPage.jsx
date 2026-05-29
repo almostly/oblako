@@ -14,6 +14,8 @@ import Alert from '@cloudscape-design/components/alert'
 import Badge from '@cloudscape-design/components/badge'
 import StatusIndicator from '@cloudscape-design/components/status-indicator'
 import Multiselect from '@cloudscape-design/components/multiselect'
+import SegmentedControl from '@cloudscape-design/components/segmented-control'
+import FileUpload from '@cloudscape-design/components/file-upload'
 import CodeEditor from '../components/CodeEditor'
 
 const API = 'http://localhost:8000'
@@ -406,25 +408,58 @@ function CreateModal({ onClose, onCreated }) {
 
 function LayerModal({ onClose, onPublished }) {
   const [name, setName] = useState('oblako-shared')
+  // 'inline' packs a single text file (tiny, pure-Python). 'zip' uploads a real
+  // layer archive — the only way to ship compiled deps (numpy, pandas) that
+  // blow past Lambda's ~50 MB inline limit.
+  const [mode, setMode] = useState('inline')
   const [filename, setFilename] = useState('python/util.py')
   const [content, setContent] = useState("VERSION = '1.0'\n")
+  const [zipFiles, setZipFiles] = useState([])
   const [runtimes, setRuntimes] = useState([{ value: 'python3.11', label: 'python3.11' }])
   const [description, setDescription] = useState('Shared utilities')
   const [publishing, setPublishing] = useState(false)
+  const [progress, setProgress] = useState(null)
   const [err, setErr] = useState(null)
 
   const publish = async () => {
-    setPublishing(true); setErr(null)
-    const r = await fetch(`${API}/api/lambda/layers`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name, filename, content, description,
-        runtimes: runtimes.map(o => o.value),
-      }),
-    }).then(r => r.json())
-    setPublishing(false)
-    if (r.error) { setErr(r.error); return }
-    onPublished(); onClose()
+    setPublishing(true); setErr(null); setProgress(null)
+    try {
+      let body
+      if (mode === 'zip') {
+        const zip = zipFiles[0]
+        if (!zip) { setErr('Pick a .zip file to upload first.'); setPublishing(false); return }
+        // 1. Ask the API for a presigned PUT into S3Proxy.
+        setProgress('Staging upload…')
+        const stage = await fetch(`${API}/api/lambda/layers/s3-upload`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({}),
+        }).then(r => r.json())
+        if (stage.error) throw new Error(stage.error)
+        // 2. Upload the zip bytes straight to S3Proxy (bypasses the API's body
+        //    size limits — that's the whole point of the S3 path).
+        setProgress(`Uploading ${(zip.size / 1e6).toFixed(1)} MB…`)
+        const put = await fetch(stage.putUrl, { method: 'PUT', body: zip })
+        if (!put.ok) throw new Error(`upload failed: HTTP ${put.status}`)
+        // 3. Publish the layer version referencing the staged object.
+        setProgress('Publishing layer…')
+        body = {
+          name, description, s3Bucket: stage.bucket, s3Key: stage.key,
+          runtimes: runtimes.map(o => o.value),
+        }
+      } else {
+        body = { name, filename, content, description, runtimes: runtimes.map(o => o.value) }
+      }
+      const r = await fetch(`${API}/api/lambda/layers`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }).then(r => r.json())
+      if (r.error) throw new Error(r.error)
+      onPublished(); onClose()
+    } catch (e) {
+      setErr(String(e.message || e))
+    } finally {
+      setPublishing(false); setProgress(null)
+    }
   }
 
   return (
@@ -439,10 +474,46 @@ function LayerModal({ onClose, onPublished }) {
       }>
       <SpaceBetween size="m">
         {err && <Alert type="error">{err}</Alert>}
+        {progress && <Alert type="info">{progress}</Alert>}
         <FormField label="Layer name"><Input value={name} onChange={({ detail }) => setName(detail.value)} /></FormField>
-        <FormField label="File path inside layer" description="Lambda unpacks the layer into /opt, so python deps go under python/.">
-          <Input value={filename} onChange={({ detail }) => setFilename(detail.value)} />
+        <FormField label="Source">
+          <SegmentedControl
+            selectedId={mode}
+            onChange={({ detail }) => setMode(detail.selectedId)}
+            options={[
+              { id: 'inline', text: 'Inline file' },
+              { id: 'zip', text: 'Upload .zip' },
+            ]}
+          />
         </FormField>
+        {mode === 'inline' ? (
+          <>
+            <FormField label="File path inside layer" description="Lambda unpacks the layer into /opt, so python deps go under python/.">
+              <Input value={filename} onChange={({ detail }) => setFilename(detail.value)} />
+            </FormField>
+            <FormField label="Content">
+              <CodeEditor value={content} onChange={setContent} language="python" rows={8} />
+            </FormField>
+          </>
+        ) : (
+          <FormField label="Layer .zip"
+            description="A layer archive with deps under python/ (e.g. python/lib/python3.12/site-packages/…). Build with the matching arch + glibc — see the page header.">
+            <FileUpload
+              value={zipFiles}
+              onChange={({ detail }) => setZipFiles(detail.value)}
+              accept=".zip,application/zip"
+              constraintText="One .zip, staged to S3Proxy then referenced by the layer version."
+              i18nStrings={{
+                uploadButtonText: () => 'Choose .zip',
+                dropzoneText: () => 'Drop .zip to upload',
+                removeFileAriaLabel: i => `Remove file ${i + 1}`,
+                limitShowFewer: 'Show fewer files',
+                limitShowMore: 'Show more files',
+                errorIconAriaLabel: 'Error',
+              }}
+            />
+          </FormField>
+        )}
         <FormField label="Compatible runtimes">
           <Multiselect selectedOptions={runtimes}
             onChange={({ detail }) => setRuntimes(detail.selectedOptions)}
@@ -450,9 +521,6 @@ function LayerModal({ onClose, onPublished }) {
         </FormField>
         <FormField label="Description">
           <Input value={description} onChange={({ detail }) => setDescription(detail.value)} />
-        </FormField>
-        <FormField label="Content">
-          <CodeEditor value={content} onChange={setContent} language="python" rows={8} />
         </FormField>
       </SpaceBetween>
     </Modal>

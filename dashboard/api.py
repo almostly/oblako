@@ -604,7 +604,8 @@ def redshift_schema():
         for schema, table, column, dtype in cur.fetchall():
             tables = schemas.setdefault(schema, {})
             tables.setdefault(table, []).append({"name": column, "type": dtype})
-        cur.close(); conn.close()
+        cur.close()
+        conn.close()
         return {"schemas": [{"name": s, "tables": [{"name": t, "columns": cols}
                              for t, cols in ts.items()]} for s, ts in schemas.items()]}
     except Exception as e:
@@ -948,7 +949,7 @@ def _starter_source(runtime: str, handler: str) -> str:
 @app.get("/api/lambda/functions")
 def lambda_list_functions():
     """List Lambda functions registered with moto."""
-    lam = oblako.lambda_.get_client()
+    lam = oblako.awslambda.get_client()
     try:
         resp = lam.list_functions()
         return {"functions": [
@@ -961,7 +962,7 @@ def lambda_list_functions():
                 "timeout": f.get("Timeout", 3),
                 "lastModified": f.get("LastModified", ""),
                 "codeSize": f.get("CodeSize", 0),
-                "layers": [l["Arn"] for l in f.get("Layers", [])],
+                "layers": [lr["Arn"] for lr in f.get("Layers", [])],
             } for f in resp.get("Functions", [])
         ]}
     except Exception as e:  # noqa: BLE001
@@ -971,7 +972,7 @@ def lambda_list_functions():
 @app.get("/api/lambda/functions/{name}")
 def lambda_get_function(name: str):
     """Fetch full function detail incl. handler source (from server-side cache)."""
-    lam = oblako.lambda_.get_client()
+    lam = oblako.awslambda.get_client()
     try:
         resp = lam.get_function(FunctionName=name)
     except Exception as e:  # noqa: BLE001
@@ -990,7 +991,7 @@ def lambda_get_function(name: str):
         "description": cfg.get("Description", ""),
         "lastModified": cfg.get("LastModified", ""),
         "codeSize": cfg.get("CodeSize", 0),
-        "layers": [l["Arn"] for l in cfg.get("Layers", [])],
+        "layers": [lr["Arn"] for lr in cfg.get("Layers", [])],
         "envVars": cfg.get("Environment", {}).get("Variables", {}),
         "source": source,
         "sourceFilename": source_filename,
@@ -1005,7 +1006,7 @@ def lambda_create_function(body: dict):
     the host arch is arm64, so we also pre-pull the x86_64 runtime image so moto
     picks the AWS-default variant when it spawns the function container.
     """
-    lam = oblako.lambda_.get_client()
+    lam = oblako.awslambda.get_client()
     name = body["name"]
     # Default to python3.12 — its shogo82148 image is on AL2023 (glibc 2.34),
     # matching real-AWS Lambda. python3.11 is still on AL2 (glibc 2.26) and
@@ -1014,10 +1015,10 @@ def lambda_create_function(body: dict):
     handler = body.get("handler", "handler.handler")
     source = body.get("source") or _starter_source(runtime, handler)
     filename = _runtime_filename(runtime, handler)
-    role_arn = body.get("role") or oblako.lambda_.ensure_exec_role()
+    role_arn = body.get("role") or oblako.awslambda.ensure_exec_role()
     architecture = body.get("architecture", "x86_64")
     try:
-        oblako.lambda_.ensure_runtime_image(runtime, architecture=architecture)
+        oblako.awslambda.ensure_runtime_image(runtime, architecture=architecture)
     except Exception:  # noqa: BLE001
         pass  # not fatal — moto will fall back to the local image
     try:
@@ -1038,7 +1039,7 @@ def lambda_create_function(body: dict):
 @app.put("/api/lambda/functions/{name}/code")
 def lambda_update_code(name: str, body: dict):
     """Update inline source for an existing function (rezips, calls UpdateFunctionCode)."""
-    lam = oblako.lambda_.get_client()
+    lam = oblako.awslambda.get_client()
     try:
         cfg = lam.get_function_configuration(FunctionName=name)
         filename = body.get("sourceFilename") or _runtime_filename(
@@ -1056,7 +1057,7 @@ def lambda_update_code(name: str, body: dict):
 @app.delete("/api/lambda/functions/{name}")
 def lambda_delete_function(name: str):
     """Delete a function."""
-    lam = oblako.lambda_.get_client()
+    lam = oblako.awslambda.get_client()
     try:
         lam.delete_function(FunctionName=name)
         _LAMBDA_SOURCE_CACHE.pop(name, None)
@@ -1069,8 +1070,15 @@ def lambda_delete_function(name: str):
 def lambda_invoke(name: str, body: dict):
     """Invoke a function. body = {payload: <event JSON>} — returns the real handler output."""
     import time
-    lam = oblako.lambda_.get_client()
-    payload = json.dumps(body.get("payload") or {}).encode()
+    lam = oblako.awslambda.get_client()
+    # The UI sends payload as a parsed object; tolerate a raw JSON string too
+    # (json.dumps-ing a string would double-encode it, and moto then chokes
+    # parsing the invoke body for the qualifier).
+    p = body.get("payload")
+    if isinstance(p, str):
+        payload = p.encode() if p.strip() else b"{}"
+    else:
+        payload = json.dumps(p or {}).encode()
     started = time.time()
     try:
         r = lam.invoke(FunctionName=name, Payload=payload, LogType="Tail")
@@ -1104,18 +1112,18 @@ def lambda_invoke(name: str, body: dict):
 @app.get("/api/lambda/layers")
 def lambda_list_layers():
     """List Lambda layers (with their latest version)."""
-    lam = oblako.lambda_.get_client()
+    lam = oblako.awslambda.get_client()
     try:
         resp = lam.list_layers()
         return {"layers": [
             {
-                "name": l["LayerName"],
-                "arn": l.get("LayerArn", ""),
-                "latestVersion": l.get("LatestMatchingVersion", {}).get("Version"),
-                "latestVersionArn": l.get("LatestMatchingVersion", {}).get("LayerVersionArn", ""),
-                "runtimes": l.get("LatestMatchingVersion", {}).get("CompatibleRuntimes", []),
-                "description": l.get("LatestMatchingVersion", {}).get("Description", ""),
-            } for l in resp.get("Layers", [])
+                "name": lr["LayerName"],
+                "arn": lr.get("LayerArn", ""),
+                "latestVersion": lr.get("LatestMatchingVersion", {}).get("Version"),
+                "latestVersionArn": lr.get("LatestMatchingVersion", {}).get("LayerVersionArn", ""),
+                "runtimes": lr.get("LatestMatchingVersion", {}).get("CompatibleRuntimes", []),
+                "description": lr.get("LatestMatchingVersion", {}).get("Description", ""),
+            } for lr in resp.get("Layers", [])
         ]}
     except Exception as e:  # noqa: BLE001
         return {"error": str(e), "layers": []}
@@ -1128,16 +1136,35 @@ def lambda_publish_layer(body: dict):
     Two modes:
     - Inline (small): {name, filename, content, runtimes, description} packs a
       single text file into a zip and ships it via Content={ZipFile: ...}.
-    - S3 reference (large): {name, s3Bucket, s3Key, runtimes, description}
-      uses Content={S3Bucket, S3Key}, the real-Lambda way of avoiding the
-      ~50 MB inline payload limit. Pair with POST /api/lambda/layers/s3-upload
-      to stage a zip first.
+    - S3 staged (large): {name, s3Bucket, s3Key, runtimes, description} — the
+      client first uploads a zip to S3Proxy via POST /api/lambda/layers/s3-upload
+      (bypassing this API's request-body limit). We fetch those bytes back here
+      and hand them to moto as ZipFile.
+
+      Why not pass Content={S3Bucket, S3Key} straight through? moto's Lambda
+      backend resolves an S3 layer reference against *moto's own* in-memory S3
+      (port 5500), not S3Proxy (port 9000) — they're separate stores, so moto
+      would 404. Bridging the bytes server-side (localhost, no browser limit)
+      keeps the big-file upload path working against the real S3 surface.
     """
-    lam = oblako.lambda_.get_client()
+    lam = oblako.awslambda.get_client()
     name = body["name"]
+    # moto derives the layer's /opt mount-volume name by splitting the version
+    # ARN on the literal "layer:" and taking the tail. A name ending in "layer"
+    # makes "...-layer:<version>" match a second time, so the tail collapses to
+    # just the version digit — Docker then rejects it ("volume name too short")
+    # at *invoke* time, far from here. Reject it up front with a clear reason.
+    if name.endswith("layer"):
+        return {"error": (
+            f"Layer name {name!r} ends in 'layer', which trips a moto volume-naming "
+            "bug (the function becomes uninvokable). Pick a name that doesn't end in "
+            "'layer' — e.g. 'oblako-pandas' or 'shared-deps'."
+        )}
     runtimes = body.get("runtimes") or ["python3.11"]
     if body.get("s3Bucket") and body.get("s3Key"):
-        content = {"S3Bucket": body["s3Bucket"], "S3Key": body["s3Key"]}
+        s3 = oblako.s3.get_client()
+        obj = s3.get_object(Bucket=body["s3Bucket"], Key=body["s3Key"])
+        content = {"ZipFile": obj["Body"].read()}
     else:
         filename = body.get("filename", "python/oblako_layer.py")
         text = body.get("content", "# layer content\n")
@@ -1182,7 +1209,7 @@ def lambda_layer_s3_upload(body: dict):
 @app.post("/api/lambda/functions/{name}/layers")
 def lambda_attach_layers(name: str, body: dict):
     """Replace the layer list on a function (Lambda's API is set-not-append)."""
-    lam = oblako.lambda_.get_client()
+    lam = oblako.awslambda.get_client()
     try:
         lam.update_function_configuration(
             FunctionName=name, Layers=body.get("layers", []),
@@ -1309,6 +1336,46 @@ def glue_run_job(body: dict):
 def glue_job_history():
     """Most recent Glue job runs (this dashboard process only — not persisted)."""
     return {"jobs": list(reversed(_GLUE_JOB_HISTORY))}
+
+
+# Workflows: a sequential pipeline of PySpark job steps, success-gated (a step
+# runs only if its predecessors succeeded). In-memory run history, like jobs.
+_GLUE_WORKFLOW_HISTORY: list[dict] = []
+
+
+@app.post("/api/glue/workflows/run")
+def glue_run_workflow(body: dict):
+    """Run a Glue workflow of PySpark steps. Synchronous (blocks until done).
+
+    body = {name?: str, steps: [{name, script}], timeout?: int}
+    Returns {name, status, steps:[{name, status, exitCode, logs}], durationMs, ranAt}.
+    """
+    import time
+    steps = body.get("steps") or []
+    if not any((s.get("script") or "").strip() for s in steps):
+        return {"error": "Provide at least one step with a script."}
+    name = body.get("name") or f"workflow-{int(time.time())}"
+    started = time.time()
+    try:
+        result = oblako.glue.run_workflow(
+            name, steps, timeout=int(body.get("timeout", 600)),
+        )
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e), "durationMs": int((time.time() - started) * 1000)}
+    record = {
+        **result,
+        "durationMs": int((time.time() - started) * 1000),
+        "ranAt": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(started)),
+    }
+    _GLUE_WORKFLOW_HISTORY.append(record)
+    del _GLUE_WORKFLOW_HISTORY[:-20]
+    return record
+
+
+@app.get("/api/glue/workflows/history")
+def glue_workflow_history():
+    """Most recent Glue workflow runs (this dashboard process only — not persisted)."""
+    return {"workflows": list(reversed(_GLUE_WORKFLOW_HISTORY))}
 
 
 # Static frontend (production build)

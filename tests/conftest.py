@@ -19,6 +19,7 @@ _INTEGRATION_DIRS = (
     "tests/rds/",
     "tests/opensearch/",
     "tests/sagemaker/",
+    "tests/awslambda/",
 )
 
 # Individual integration tests inside mixed directories (the rest of the dir is
