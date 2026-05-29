@@ -18,7 +18,7 @@ venv/
 .coverage
 htmlcov/
 
-# Node (dashboard UI) — note: oblako/frontend/dist is committed (served by the app)
+# Node (dashboard UI) — note: oblako/dashboard/frontend/dist is committed (served by the app)
 node_modules/
 
 # Editors / OS
