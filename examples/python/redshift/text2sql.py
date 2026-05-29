@@ -13,7 +13,7 @@ What's local here:
 
 Run from the repo root:
 
-    uv run python examples/text2sql-bedrock-redshift/text2sql.py
+    uv run python examples/python/redshift/text2sql.py
 """
 
 from __future__ import annotations

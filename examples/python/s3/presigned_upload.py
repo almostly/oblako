@@ -6,7 +6,7 @@ directly. S3Proxy honours the signed URL like real S3 does.
 
 Run from the repo root:
 
-    uv run python examples/s3-direct-upload/presigned.py
+    uv run python examples/python/s3/presigned_upload.py
 """
 
 from __future__ import annotations

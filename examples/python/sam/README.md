@@ -119,7 +119,7 @@ The object/item are really in oblako afterward (verify from the host with the sa
 
   An `AWS::S3::Bucket` lands in S3Proxy, an `AWS::DynamoDB::Table` in DynamoDB
   Local, etc. (supported: S3::Bucket, DynamoDB::Table, Redshift::Cluster,
-  RDS::DBInstance). See `examples/13_cloudformation.py` and the README.
+  RDS::DBInstance). See `examples/python/cloudformation/deploy.py` and the README.
 - ✅ The SAM **transform** (`AWS::Serverless-2016-10-31`) is expanded by the local
   CloudFormation. `AWS::Serverless::SimpleTable` becomes a **real** DynamoDB Local
   table; `AWS::Serverless::Function` becomes `AWS::Lambda::Function` + its implicit

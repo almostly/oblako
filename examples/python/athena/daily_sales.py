@@ -13,7 +13,7 @@ the same Iceberg catalog, so the queryable result is identical.
 
 Run from the repo root:
 
-    uv run --extra iceberg python examples/athena-s3-tables/daily_sales.py
+    uv run --extra iceberg python examples/python/athena/daily_sales.py
 """
 
 from __future__ import annotations

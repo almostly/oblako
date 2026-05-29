@@ -153,15 +153,22 @@ def write_starter(workdir: Path) -> Path:
 
 
 def seed_workspace(workdir: Path) -> Path:
-    """Seed the workspace with the welcome notebook + the SageMaker example notebooks."""
+    """Seed the workspace with the welcome notebook + the example notebooks.
+
+    The workspace (``~/.oblako/notebooks``, JupyterLab's root) is oblako's analog
+    of a SageMaker notebook instance's EBS-backed home (``/home/ec2-user/SageMaker``):
+    persistent, and where the example notebooks land. The repo source for those is
+    ``examples/demo-notebooks`` (the Jupyter examples, vs. the ``.py`` CLI scripts
+    under ``examples/python``).
+    """
     import shutil
 
     write_starter(workdir)
-    example = Path(__file__).resolve().parents[1] / "examples" / "sagemaker-examples"
-    dst = workdir / "sagemaker-examples"
-    if example.exists() and not dst.exists():
+    examples = Path(__file__).resolve().parents[1] / "examples" / "demo-notebooks"
+    dst = workdir / "examples"
+    if examples.exists() and not dst.exists():
         shutil.copytree(
-            example,
+            examples,
             dst,
             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".aws-sam"),
         )

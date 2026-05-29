@@ -29,7 +29,7 @@ HERE = pathlib.Path(__file__).parent
 sm = SageMakerService()
 
 # 1. Build the training image locally (no ECR pull)
-image = sm.build_image(path=str(HERE / "sagemaker"), tag="oblako-sagemaker-train:latest")
+image = sm.build_image(path=str(HERE / "train_image"), tag="oblako-sagemaker-train:latest")
 print("Built image:", image)
 
 # 2. Stage tiny training data (y = 2x + 1) as local files

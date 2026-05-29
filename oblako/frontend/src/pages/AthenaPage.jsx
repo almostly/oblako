@@ -24,7 +24,7 @@ const STARTER_SQL = {
   trino: 'SELECT * FROM iceberg.credit.applicants LIMIT 50',
   duckdb: `-- DuckDB-Wasm reads parquet directly from S3Proxy over HTTP.
 -- (CORS is on for local dev; no Trino, no Iceberg catalog — just parquet.)
--- Seed the demo file: uv run --extra iceberg python examples/athena-s3-tables/daily_sales.py
+-- Seed the demo file: uv run --extra iceberg python examples/python/athena/daily_sales.py
 SELECT product_category, COUNT(*) AS units, SUM(sales_amount) AS revenue
 FROM read_parquet('${S3_BASE}/oblako-iceberg/demos/daily_sales.parquet')
 GROUP BY product_category

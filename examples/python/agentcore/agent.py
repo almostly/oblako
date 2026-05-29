@@ -7,7 +7,7 @@ Run it:
     pip install 'oblako[agentcore]'
     make up && oblako pull qwen2.5:0.5b
     oblako bedrock-runtime &                                  # local Bedrock on :8004
-    oblako agentcore run examples/08_agentcore_agent.py       # serves agent on :8080
+    oblako agentcore run examples/python/agentcore/agent.py       # serves agent on :8080
     oblako agentcore invoke '{"prompt": "Explain credit risk in one sentence."}'
 """
 

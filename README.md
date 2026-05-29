@@ -17,7 +17,7 @@ Unlike LocalStack, oblako wires together **real local modes** of AWS services an
 | SageMaker | SDK local mode | `instance_type="local"` uses Docker |
 | Step Functions | aws-stepfunctions-local | Official AWS Docker image |
 | Lambda | AWS SAM CLI (external) | `sam local invoke` — oblako doesn't manage it; bring your own SAM CLI |
-| API Gateway | AWS SAM CLI (external) | `sam local start-api` — real local API Gateway routing HTTP to your functions (which use oblako's services); see `examples/sam/` |
+| API Gateway | AWS SAM CLI (external) | `sam local start-api` — real local API Gateway routing HTTP to your functions (which use oblako's services); see `examples/python/sam/` |
 | S3 | S3Proxy | S3 API over local filesystem |
 | DynamoDB | dynamodb-local | Official AWS Docker image |
 | Redshift (storage) | pgredshift | PostgreSQL 10 + Redshift system tables, `SET query_group`, and UDFs |
@@ -249,7 +249,7 @@ oblako agentcore run my_agent.py  # serves the agent on :8080
 oblako agentcore invoke '{"prompt": "Hi"}'  # POST /invocations
 ```
 
-See `examples/08_agentcore_agent.py`. (Only the AgentCore *Runtime* is local; Gateway/Memory/Identity remain managed services.)
+See `examples/python/agentcore/`. (Only the AgentCore *Runtime* is local; Gateway/Memory/Identity remain managed services.)
 
 ### SageMaker (local mode)
 
@@ -267,7 +267,7 @@ from oblako.services import SageMakerService
 
 sm = SageMakerService()
 sm.build_image(
-    path="examples/sagemaker", tag="oblako-sagemaker-train:latest"
+    path="examples/python/sagemaker/train_image", tag="oblako-sagemaker-train:latest"
 )  # build locally
 
 estimator = Estimator(
@@ -286,7 +286,7 @@ sm.list_training_containers()  # docker-py view of sagemaker-local-* containers
 sm.cleanup()  # remove stopped ones
 ```
 
-See `examples/11_sagemaker_local.py` (end-to-end: builds the image, trains `y = 2x + 1` in a real container, reads back the model artifact).
+See `examples/python/sagemaker/` (end-to-end: builds the image, trains `y = 2x + 1` in a real container, reads back the model artifact).
 
 ### S3 (via S3Proxy)
 
@@ -427,7 +427,7 @@ All three of Redshift ML's supervised model types work — for regression, binar
 | `MLP` | scikit-learn MLP (scaled) | forward pass (argmax over outputs for multiclass) |
 | `XGBOOST` | xgboost | tree-walk over the booster dump (per-class sum + argmax for multiclass) |
 
-XGBoost accepts Redshift's `AUTO OFF MODEL_TYPE xgboost OBJECTIVE 'reg:squarederror'|'binary:logistic' HYPERPARAMETERS … (NUM_ROUND, MAX_DEPTH)` syntax. See `examples/12_redshift_ml.py`. (Syntax/use cases follow [aws-samples/amazon-redshift-ml-getting-started](https://github.com/aws-samples/amazon-redshift-ml-getting-started); the local training + inference are oblako's.)
+XGBoost accepts Redshift's `AUTO OFF MODEL_TYPE xgboost OBJECTIVE 'reg:squarederror'|'binary:logistic' HYPERPARAMETERS … (NUM_ROUND, MAX_DEPTH)` syntax. See `examples/python/redshift/`. (Syntax/use cases follow [aws-samples/amazon-redshift-ml-getting-started](https://github.com/aws-samples/amazon-redshift-ml-getting-started); the local training + inference are oblako's.)
 
 ### RDS / Aurora
 
@@ -512,7 +512,7 @@ rd.commit_transaction(
 )
 ```
 
-See `examples/10_rds_aurora.py`. Run the Data API server standalone with `oblako rds-data`.
+See `examples/python/rds/`. Run the Data API server standalone with `oblako rds-data`.
 
 **Engine choice.** `RdsService(engine="mysql")` runs a MySQL 8 engine instead of Postgres (`connect()` then uses PyMySQL — install `pip install 'oblako[mysql]'`). The control plane is engine-agnostic (`create_db_cluster(Engine="aurora-mysql")` works), and **`rds-data` supports both engines** — `get_data_client()` runs SQL against whichever engine the `RdsService` uses.
 
@@ -587,7 +587,7 @@ sam local start-lambda --port 3001    # you run this; oblako's Step Functions ca
 
 There's no `oblako.lambda` service — it's intentionally external (the same way the real local Lambda tool, SAM, is a standalone CLI).
 
-**SAM functions can use oblako's services.** A `sam local invoke` / `start-api` Lambda reaches oblako on the host via `host.docker.internal` (point boto3 at oblako's ports). See `examples/sam/` — a Lambda that does a real S3 + DynamoDB round-trip against S3Proxy and DynamoDB Local. (`sam local` runs *functions*; to provision a template's *resources* into oblako, point `sam deploy` / `aws cloudformation deploy` at oblako's local CloudFormation — see below.)
+**SAM functions can use oblako's services.** A `sam local invoke` / `start-api` Lambda reaches oblako on the host via `host.docker.internal` (point boto3 at oblako's ports). See `examples/python/sam/` — a Lambda that does a real S3 + DynamoDB round-trip against S3Proxy and DynamoDB Local. (`sam local` runs *functions*; to provision a template's *resources* into oblako, point `sam deploy` / `aws cloudformation deploy` at oblako's local CloudFormation — see below.)
 
 ### CloudFormation (declarative provisioning into oblako)
 
@@ -622,7 +622,7 @@ cfn.get_waiter("stack_create_complete").wait(StackName="demo")
 
 It parses JSON and YAML templates (including `!Ref`/`!GetAtt`/`!Sub`/`!Join` short tags), core intrinsics, parameter defaults, and `DependsOn`/`Ref` ordering. Stack metadata is in-memory (lives with the running server); the provisioned resources are real and persist in the engines.
 
-The **SAM transform** (`AWS::Serverless-2016-10-31`) is expanded server-side, so `sam deploy` works: `AWS::Serverless::SimpleTable` → a real DynamoDB Local table; `AWS::Serverless::Function` → `AWS::Lambda::Function` + its implicit `AWS::IAM::Role` registered in moto (describable via `aws lambda get-function` / `aws iam get-role`). oblako has no Lambda runtime — the function record stores a placeholder; you still **invoke** functions via `sam local`. Event sources (implicit APIs, permissions) aren't wired. See `examples/13_cloudformation.py`.
+The **SAM transform** (`AWS::Serverless-2016-10-31`) is expanded server-side, so `sam deploy` works: `AWS::Serverless::SimpleTable` → a real DynamoDB Local table; `AWS::Serverless::Function` → `AWS::Lambda::Function` + its implicit `AWS::IAM::Role` registered in moto (describable via `aws lambda get-function` / `aws iam get-role`). oblako has no Lambda runtime — the function record stores a placeholder; you still **invoke** functions via `sam local`. Event sources (implicit APIs, permissions) aren't wired. See `examples/python/cloudformation/`.
 
 > **Recommended path: `aws cloudformation deploy`** (or boto3) — it has no packaging step, so it provisions into oblako cleanly. `sam deploy` *packages* code to S3 first: the checksum issue is solvable (`export AWS_REQUEST_CHECKSUM_CALCULATION=when_required` + S3 path-style), but SAM also hardcodes `x-amz-server-side-encryption: AES256` on upload, which S3Proxy doesn't implement (501) — the same class of S3Proxy gap that led us to decline MinIO. So full `sam deploy` packaging needs an SSE-capable S3; the local CFN itself (change sets, the SAM transform, `TemplateURL`) is verified working with it.
 
