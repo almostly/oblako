@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 import docker
 from docker.errors import NotFound
 
-# A "Studio domain" notebook instance runs a Jupyter-capable image (override via
-# OBLAKO_NOTEBOOK_IMAGE). The kernel inside reaches oblako's services on the host.
-NOTEBOOK_IMAGE = os.environ.get("OBLAKO_NOTEBOOK_IMAGE", "jupyter/base-notebook")
+# A "Studio domain" notebook instance runs a Jupyter-capable image. The default
+# is oblako's own slim image (JupyterLab + boto3 pre-wired), built on demand from
+# oblako/images/notebook. Override with OBLAKO_NOTEBOOK_IMAGE (any pullable image).
+OBLAKO_NOTEBOOK_IMAGE = "oblako/sagemaker-notebook:latest"
+NOTEBOOK_IMAGE = os.environ.get("OBLAKO_NOTEBOOK_IMAGE", OBLAKO_NOTEBOOK_IMAGE)
 NOTEBOOK_PORT = 8889  # host port the in-instance JupyterLab is published on
 
 
@@ -111,6 +114,24 @@ class SageMakerService:
 
         return Ec2Service(MotoService()).get_client()
 
+    def ensure_notebook_image(self) -> str:
+        """Build oblako's slim notebook image (JupyterLab + boto3) if it's absent.
+
+        Only builds the bundled image; a custom OBLAKO_NOTEBOOK_IMAGE is left to be
+        pulled by the instance container as usual.
+        """
+        if NOTEBOOK_IMAGE != OBLAKO_NOTEBOOK_IMAGE:
+            return NOTEBOOK_IMAGE  # user override — not ours to build
+        try:
+            self.client.images.get(NOTEBOOK_IMAGE)
+            return NOTEBOOK_IMAGE
+        except NotFound:
+            pass
+        context = Path(__file__).resolve().parents[1] / "images" / "notebook"
+        print(f"Building {NOTEBOOK_IMAGE} (JupyterLab + boto3) — first time only…")
+        self.build_image(str(context), NOTEBOOK_IMAGE)
+        return NOTEBOOK_IMAGE
+
     def _notebook_instance_id(self, name: str) -> str | None:
         """The domain's notebook EC2 instance id (by Name tag), or None."""
         resp = self._ec2().describe_instances(
@@ -129,6 +150,7 @@ class SageMakerService:
         The notebook instance is a real container (Jupyter image) publishing
         JupyterLab on ``notebook_port``. Returns the domain status.
         """
+        self.ensure_notebook_image()  # build the slim image if needed (local tag)
         bucket = f"oblako-sagemaker-{name}"
         template = json.dumps({"Resources": {
             "Artifacts": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": bucket}},
