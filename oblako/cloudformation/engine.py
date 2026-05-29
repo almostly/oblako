@@ -215,12 +215,20 @@ class StackStore:
         }
 
     def create_change_set(self, name, template_body, params, cs_name, cs_type):
-        """Create a change set for the named stack, creating the stack record if needed."""
+        """Create a change set for the named stack, creating the stack record if needed.
+
+        The change set is a real diff of the new template against what the stack
+        last knew: brand-new logical ids are ``Add``, ids whose definition changed
+        are ``Modify``, ids that disappeared are ``Remove``, and unchanged ids are
+        omitted (as real CloudFormation does). For a first deploy everything is an
+        ``Add``, which keeps CREATE behavior identical.
+        """
         template = parse_template(template_body or "{}")
         if is_sam(template):
             template = transform_sam(template)  # expand SAM to base CFN resources
         with self._lock:
-            if name not in self._stacks:
+            creating = name not in self._stacks
+            if creating:
                 self._stacks[name] = self._new_stack(name, template, params)
                 # a stack-level event so describe_stack_events is never empty
                 # (sam deploy reads StackEvents[0] right after CreateChangeSet)
@@ -234,13 +242,31 @@ class StackStore:
                     )
                 )
             stack = self._stacks[name]
+            # Diff against the previously-adopted template (empty for a new stack).
+            old_resources = {} if creating else stack["template"].get("Resources", {})
+            new_resources = template.get("Resources", {})
+            changes = []
+            for rid, r in new_resources.items():
+                if rid not in old_resources:
+                    action = "Add"
+                elif old_resources[rid] != r:
+                    action = "Modify"
+                else:
+                    continue  # unchanged — CloudFormation omits it from the change set
+                changes.append(
+                    {"Action": action, "LogicalResourceId": rid, "ResourceType": r["Type"]}
+                )
+            for rid, r in old_resources.items():
+                if rid not in new_resources:
+                    changes.append({
+                        "Action": "Remove",
+                        "LogicalResourceId": rid,
+                        "ResourceType": r.get("Type", ""),
+                    })
+            # Adopt the new template + params only after diffing the old one.
             stack["template"] = template
             stack["params"] = params
             cs_id = f"arn:aws:cloudformation:{REGION}:{ACCOUNT}:changeSet/{cs_name}/{uuid.uuid4()}"
-            changes = [
-                {"Action": "Add", "LogicalResourceId": rid, "ResourceType": r["Type"]}
-                for rid, r in template.get("Resources", {}).items()
-            ]
             stack["change_sets"][cs_name] = {
                 "id": cs_id,
                 "changes": changes,
@@ -273,10 +299,23 @@ class StackStore:
         }
 
     def execute_change_set(self, name, cs_ref):
-        """Execute the named change set, provisioning all template resources into oblako."""
+        """Apply the change set, provisioning only what actually changed.
+
+        Adds and Modifies run the create provider (a Modify first tears down the
+        old physical resource — CloudFormation replacement semantics, which is the
+        honest simulation given providers expose create/delete but no in-place
+        update). Removes run the delete provider. Resources untouched by the change
+        set keep their existing physical ids, so Refs to them still resolve.
+        """
         stack = self.get(name)
-        self._find_cs(stack, cs_ref)  # validate the change set exists
+        _, cs = self._find_cs(stack, cs_ref)
         template = stack["template"]
+        resources = template.get("Resources", {})
+        # A stack that already has provisioned resources is being updated, not
+        # created — drives UPDATE_* vs CREATE_* status/events.
+        is_update = cs.get("type") == "UPDATE" or bool(stack["resources"])
+        verb = "UPDATE" if is_update else "CREATE"
+
         # Template defaults first, then overlay any parameters the client passed.
         params = {
             p: spec["Default"]
@@ -284,16 +323,32 @@ class StackStore:
             if "Default" in spec
         }
         params.update(stack["params"])
+        # Seed the context with already-provisioned resources so intrinsics that
+        # reference unchanged resources resolve during this run.
         ctx = {"stack": name, "params": params, "physical": {}, "attrs": {}}
-        resources = template.get("Resources", {})
+        for rid, res in stack["resources"].items():
+            ctx["physical"][rid] = res["PhysicalId"]
+            ctx["attrs"][rid] = res.get("Attributes", {})
+
+        changes = cs["changes"]
+        to_apply = [c["LogicalResourceId"] for c in changes if c["Action"] in ("Add", "Modify")]
+        to_remove = [c["LogicalResourceId"] for c in changes if c["Action"] == "Remove"]
+
+        if is_update:
+            stack["StackStatus"] = "UPDATE_IN_PROGRESS"
         try:
-            for rid in _ordered(resources):
+            # Adds + Modifies, in intra-template dependency order.
+            for rid in _ordered({rid: resources[rid] for rid in to_apply}):
                 r = resources[rid]
                 rtype = r["Type"]
                 if rtype not in PROVIDERS:
                     raise ValueError(
                         f"unsupported resource type {rtype} (oblako CFN supports {sorted(PROVIDERS)})"
                     )
+                # Modify == replace: delete the old physical resource first.
+                if rid in stack["resources"]:
+                    old = stack["resources"][rid]
+                    PROVIDERS[old["Type"]][1](old["PhysicalId"], old["Properties"])
                 props = _resolve(r.get("Properties", {}), ctx)
                 result = PROVIDERS[rtype][0](rid, props, ctx)
                 # a provider returns a physical id, or {"PhysicalId", "Attributes"}
@@ -310,7 +365,18 @@ class StackStore:
                     "Attributes": attrs,
                 }
                 stack["events"].append(
-                    _event(stack, rid, rtype, physical, "CREATE_COMPLETE")
+                    _event(stack, rid, rtype, physical, f"{verb}_COMPLETE")
+                )
+            # Removes, in reverse of provisioning order so dependents go first.
+            for rid in reversed(list(stack["resources"])):
+                if rid not in to_remove:
+                    continue
+                old = stack["resources"].pop(rid)
+                PROVIDERS[old["Type"]][1](old["PhysicalId"], old["Properties"])
+                ctx["physical"].pop(rid, None)
+                ctx["attrs"].pop(rid, None)
+                stack["events"].append(
+                    _event(stack, rid, old["Type"], old["PhysicalId"], "DELETE_COMPLETE")
                 )
             stack["Outputs"] = [
                 {
@@ -320,14 +386,14 @@ class StackStore:
                 }
                 for k, o in template.get("Outputs", {}).items()
             ]
-            stack["StackStatus"] = "CREATE_COMPLETE"
+            stack["StackStatus"] = f"{verb}_COMPLETE"
             stack["events"].append(
                 _event(
-                    stack, name, "AWS::CloudFormation::Stack", name, "CREATE_COMPLETE"
+                    stack, name, "AWS::CloudFormation::Stack", name, f"{verb}_COMPLETE"
                 )
             )
         except Exception as e:  # noqa: BLE001
-            stack["StackStatus"] = "CREATE_FAILED"
+            stack["StackStatus"] = f"{verb}_FAILED"
             stack["StackStatusReason"] = str(e)
             stack["events"].append(
                 _event(
@@ -335,7 +401,7 @@ class StackStore:
                     name,
                     "AWS::CloudFormation::Stack",
                     name,
-                    "CREATE_FAILED",
+                    f"{verb}_FAILED",
                     str(e),
                 )
             )
