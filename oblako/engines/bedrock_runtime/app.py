@@ -27,10 +27,10 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
-from oblako.bedrock import foundation_models
-from oblako.bedrock.adapter import BedrockAdapter
-from oblako.bedrock.backends import make_backend
-from oblako.bedrock.jobs import JobStore, new_job_details
+from oblako.engines.bedrock import foundation_models
+from oblako.engines.bedrock.adapter import BedrockAdapter
+from oblako.engines.bedrock.backends import make_backend
+from oblako.engines.bedrock.jobs import JobStore, new_job_details
 
 
 def _jsonable(obj):

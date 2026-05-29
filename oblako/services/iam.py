@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 
-from oblako.iam import evaluator
+from oblako.engines.iam import evaluator
 from .boto import BotoService
 from .moto import MotoService
 

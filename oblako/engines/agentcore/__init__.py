@@ -8,7 +8,7 @@ agent runs locally with no cloud at all. Pair it with oblako's local Bedrock
 
     pip install 'oblako[agentcore]'
 
-    from oblako.agentcore import BedrockAgentCoreApp
+    from oblako.engines.agentcore import BedrockAgentCoreApp
     app = BedrockAgentCoreApp()
 
     @app.entrypoint
@@ -47,7 +47,7 @@ def _agentcore_app_class():
 
 
 def __getattr__(name: str):
-    # Lazy re-export so `from oblako.agentcore import BedrockAgentCoreApp` works
+    # Lazy re-export so `from oblako.engines.agentcore import BedrockAgentCoreApp` works
     # without importing the optional dependency until it's actually used.
     if name == "BedrockAgentCoreApp":
         return _agentcore_app_class()

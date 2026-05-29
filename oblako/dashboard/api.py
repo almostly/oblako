@@ -22,7 +22,7 @@ async def lifespan(app: FastAPI):
     # Bring up the Lambda shim so Step Functions lambda:invoke tasks (e.g. the
     # Bedrock prompt-chain -> local model) can run live against oblako services.
     try:
-        from oblako import lambda_shim
+        from oblako.engines import lambda_shim
 
         lambda_shim.start_in_thread()
     except Exception:  # noqa: BLE001 - dashboard still works without live SFN runs
@@ -680,7 +680,7 @@ def list_models():
 
 @app.post("/api/bedrock/converse")
 def converse(body: dict):
-    from oblako.bedrock.adapter import BedrockAdapter
+    from oblako.engines.bedrock.adapter import BedrockAdapter
 
     adapter = BedrockAdapter()
     try:

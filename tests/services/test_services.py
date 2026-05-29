@@ -125,7 +125,7 @@ def test_rds_invalid_engine():
 
 def test_rds_data_executor_engines():
     import pytest
-    from oblako.rds_data.executor import RdsDataExecutor
+    from oblako.engines.rds_data.executor import RdsDataExecutor
 
     assert RdsDataExecutor().engine == "postgres"
     assert RdsDataExecutor(engine="mysql", port=3306).engine == "mysql"
@@ -135,7 +135,7 @@ def test_rds_data_executor_engines():
 
 def test_redshift_ml_parse_create_model():
     import pytest
-    from oblako.redshift_ml import is_create_model, parse_create_model
+    from oblako.engines.redshift_ml import is_create_model, parse_create_model
 
     sql = (
         "CREATE MODEL m FROM (SELECT a, b, y FROM t) TARGET y FUNCTION predict_y "
@@ -175,7 +175,7 @@ def test_moto_service_defaults():
 def test_redshift_data_field_encoding():
     import datetime
     import decimal
-    from oblako.redshift_data.executor import RedshiftDataExecutor, _to_pg_array
+    from oblako.engines.redshift_data.executor import RedshiftDataExecutor, _to_pg_array
 
     enc = RedshiftDataExecutor._encode_field
     assert enc(None) == {"isNull": True}

@@ -11,9 +11,9 @@ import json
 import boto3
 import pytest
 
-from oblako.cloudformation import create_app, start_in_thread
-from oblako.cloudformation.engine import StackStore, _ordered, _resolve, parse_template
-from oblako.cloudformation.transform import is_sam, transform_sam
+from oblako.engines.cloudformation import create_app, start_in_thread
+from oblako.engines.cloudformation.engine import StackStore, _ordered, _resolve, parse_template
+from oblako.engines.cloudformation.transform import is_sam, transform_sam
 from oblako.services import DynamoDBService, S3ProxyService
 
 CREDS = dict(
@@ -184,7 +184,7 @@ def test_change_set_diffs_add_modify_remove():
 
 def test_template_url_parsing(monkeypatch):
     import oblako.services as svc
-    from oblako.cloudformation.app import _fetch_template_url
+    from oblako.engines.cloudformation.app import _fetch_template_url
 
     captured = {}
 
@@ -227,7 +227,7 @@ def _serve(store=None):
 
     threading.Thread(target=server.run, daemon=True).start()
     for _ in range(100):
-        from oblako.cloudformation import is_running
+        from oblako.engines.cloudformation import is_running
 
         if is_running(_PORT):
             break

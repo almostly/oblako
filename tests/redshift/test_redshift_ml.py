@@ -14,7 +14,7 @@ try:
 except Exception:  # pragma: no cover
     pytest.skip("sagemaker local mode unavailable", allow_module_level=True)
 
-from oblako.redshift_data.executor import RedshiftDataExecutor
+from oblako.engines.redshift_data.executor import RedshiftDataExecutor
 
 PG = dict(
     host="localhost", port=5439, user="oblako", password="oblako", database="oblako"

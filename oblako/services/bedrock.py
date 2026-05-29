@@ -44,7 +44,7 @@ class BedrockService(Service):
     # -------------------------------------------------------------------------------
     def pull_model(self, model: str | None = None) -> None:
         """Pull a model into the engine (defaults to the small qwen default)."""
-        from oblako.bedrock.models import DEFAULT_MODEL
+        from oblako.engines.bedrock.models import DEFAULT_MODEL
 
         model = model or DEFAULT_MODEL
         container = self.client.containers.get(self.container_name)
@@ -62,12 +62,12 @@ class BedrockService(Service):
     # -------------------------------------------------------------------------------
     def start_runtime_server(self):
         """Start the local bedrock-runtime server in-process (idempotent)."""
-        from oblako.bedrock_runtime import start_in_thread
+        from oblako.engines.bedrock_runtime import start_in_thread
 
         return start_in_thread(port=self.runtime_port, ollama_url=self.url)
 
     def _boto_client(self, service: str, autostart: bool):
-        from oblako import bedrock_runtime
+        from oblako.engines import bedrock_runtime
         from . import boto
 
         if autostart and not bedrock_runtime.is_running(self.runtime_port):

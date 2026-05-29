@@ -26,13 +26,13 @@ class GlueCatalogService:
 
     def start_server(self) -> str:
         """Start the in-process Glue-API shim (idempotent)."""
-        from oblako.glue_catalog import start_in_thread
+        from oblako.engines.glue_catalog import start_in_thread
 
         return start_in_thread(port=self.port)
 
     def get_client(self, autostart: bool = True):
         """Return a boto3 ``glue`` client (auto-starts the shim if it isn't running)."""
-        from oblako import glue_catalog
+        from oblako.engines import glue_catalog
 
         if autostart and not glue_catalog.is_running(self.port):
             self.start_server()

@@ -22,7 +22,7 @@ import re
 import textwrap
 import time
 
-from oblako.bedrock.adapter import BedrockAdapter
+from oblako.engines.bedrock.adapter import BedrockAdapter
 from oblako.services import RedshiftService
 
 CLUSTER = "rencode-dw"

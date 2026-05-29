@@ -1,7 +1,7 @@
 """Unit tests for the compact IAM policy evaluator."""
 
-from oblako.iam import evaluator
-from oblako.iam.evaluator import ALLOW, DENY, IMPLICIT_DENY
+from oblako.engines.iam import evaluator
+from oblako.engines.iam.evaluator import ALLOW, DENY, IMPLICIT_DENY
 
 
 def test_allow_via_wildcard_action():

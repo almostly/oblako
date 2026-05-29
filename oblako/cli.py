@@ -82,7 +82,7 @@ def cmd_logs(args):
 def cmd_pull(args):
     """Pull a model into the Ollama engine."""
     _check_docker()
-    from oblako.bedrock.models import DEFAULT_MODEL
+    from oblako.engines.bedrock.models import DEFAULT_MODEL
 
     oblako = Oblako()
     model = args.model or DEFAULT_MODEL
@@ -158,7 +158,7 @@ def cmd_redshift_data(args):
     port = args.port or 8002
     print(f"Starting Redshift Data API on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('redshift-data', endpoint_url=...)")
-    uvicorn.run("oblako.redshift_data.app:app", host="0.0.0.0", port=port)
+    uvicorn.run("oblako.engines.redshift_data.app:app", host="0.0.0.0", port=port)
 
 
 def cmd_bedrock_runtime(args):
@@ -168,7 +168,7 @@ def cmd_bedrock_runtime(args):
     port = args.port or 8004
     print(f"Starting Bedrock Runtime on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('bedrock-runtime', endpoint_url=...)")
-    uvicorn.run("oblako.bedrock_runtime.app:app", host="0.0.0.0", port=port)
+    uvicorn.run("oblako.engines.bedrock_runtime.app:app", host="0.0.0.0", port=port)
 
 
 def cmd_rds_data(args):
@@ -178,7 +178,7 @@ def cmd_rds_data(args):
     port = args.port or 8006
     print(f"Starting RDS Data API on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('rds-data', endpoint_url=...)")
-    uvicorn.run("oblako.rds_data.app:app", host="0.0.0.0", port=port)
+    uvicorn.run("oblako.engines.rds_data.app:app", host="0.0.0.0", port=port)
 
 
 # CloudFormation
@@ -197,7 +197,7 @@ def cmd_cloudformation(args):
     print(
         "supported resources: S3::Bucket, DynamoDB::Table, Redshift::Cluster, RDS::DBInstance"
     )
-    uvicorn.run("oblako.cloudformation.app:app", host="0.0.0.0", port=port)
+    uvicorn.run("oblako.engines.cloudformation.app:app", host="0.0.0.0", port=port)
 
 
 # -----------------------------------------------------------------------------------------------
@@ -205,7 +205,7 @@ def cmd_cloudformation(args):
 # -----------------------------------------------------------------------------------------------
 def cmd_agentcore(args):
     """Run or invoke a local Bedrock AgentCore agent."""
-    from oblako import agentcore
+    from oblako.engines import agentcore
 
     if args.action == "run":
         agentcore.run(args.target, port=args.port)

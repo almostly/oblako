@@ -12,8 +12,8 @@ import json
 import boto3
 import pytest
 
-from oblako.rds_data import start_in_thread
-from oblako.rds_data.executor import RdsDataExecutor
+from oblako.engines.rds_data import start_in_thread
+from oblako.engines.rds_data.executor import RdsDataExecutor
 
 CREDS = dict(
     region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"

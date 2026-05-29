@@ -11,8 +11,8 @@ import time
 import boto3
 import pytest
 
-from oblako.bedrock.ollama_client import OllamaClient
-from oblako.bedrock_runtime import start_in_thread
+from oblako.engines.bedrock.ollama_client import OllamaClient
+from oblako.engines.bedrock_runtime import start_in_thread
 from oblako.services import S3ProxyService
 
 CREDS = dict(

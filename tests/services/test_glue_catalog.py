@@ -1,6 +1,6 @@
 """Unit tests for the Glue Data Catalog shim (boto3 ``glue`` over Iceberg REST)."""
 
-from oblako.glue_catalog import _ACTIONS, _iceberg_to_glue_type, _table_to_glue
+from oblako.engines.glue_catalog import _ACTIONS, _iceberg_to_glue_type, _table_to_glue
 from oblako.services.glue_catalog import GlueCatalogService
 
 

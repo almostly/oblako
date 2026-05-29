@@ -29,13 +29,13 @@ class CloudFormationService:
 
     def start_server(self) -> str:
         """Start the CloudFormation server in-process (idempotent). Returns its URL."""
-        from oblako.cloudformation import start_in_thread
+        from oblako.engines.cloudformation import start_in_thread
 
         return start_in_thread(port=self.port)
 
     def get_client(self, autostart: bool = True):
         """boto3 ``cloudformation`` client whose stacks provision into oblako."""
-        from oblako import cloudformation
+        from oblako.engines import cloudformation
         from . import boto
 
         if autostart and not cloudformation.is_running(self.port):
@@ -44,6 +44,6 @@ class CloudFormationService:
 
     def is_running(self) -> bool:
         """Return True if the local CloudFormation server is already listening."""
-        from oblako import cloudformation
+        from oblako.engines import cloudformation
 
         return cloudformation.is_running(self.port)

@@ -9,8 +9,8 @@ import json
 import boto3
 import pytest
 
-from oblako.bedrock.ollama_client import OllamaClient
-from oblako.bedrock_runtime import start_in_thread
+from oblako.engines.bedrock.ollama_client import OllamaClient
+from oblako.engines.bedrock_runtime import start_in_thread
 
 CREDS = dict(
     region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"

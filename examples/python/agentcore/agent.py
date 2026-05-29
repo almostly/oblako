@@ -13,7 +13,7 @@ Run it:
 
 import boto3
 
-from oblako.agentcore import BedrockAgentCoreApp
+from oblako.engines.agentcore import BedrockAgentCoreApp
 
 app = BedrockAgentCoreApp()
 

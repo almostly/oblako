@@ -17,7 +17,7 @@ import re
 import threading
 import uuid
 
-from oblako.redshift_data.executor import RedshiftDataExecutor
+from oblako.engines.redshift_data.executor import RedshiftDataExecutor
 
 _encode_field = RedshiftDataExecutor._encode_field  # generic PG/py value -> Field
 _NAMED_PARAM = re.compile(r"(?<!:):([a-zA-Z_][a-zA-Z0-9_]*)")

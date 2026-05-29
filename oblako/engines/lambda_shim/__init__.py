@@ -37,8 +37,8 @@ def _get_adapter():
     global _adapter
     with _adapter_lock:
         if _adapter is None:
-            from oblako.bedrock.adapter import BedrockAdapter
-            from oblako.bedrock.backends import make_backend
+            from oblako.engines.bedrock.adapter import BedrockAdapter
+            from oblako.engines.bedrock.backends import make_backend
 
             _adapter = BedrockAdapter(make_backend())
         return _adapter

@@ -164,7 +164,7 @@ print(json.loads(resp["body"].read())["content"][0]["text"])
 Or call the translation layer (`BedrockAdapter`) directly, without the HTTP server:
 
 ```python
-from oblako.bedrock.adapter import BedrockAdapter
+from oblako.engines.bedrock.adapter import BedrockAdapter
 
 adapter = BedrockAdapter()
 result = adapter.converse(
@@ -222,7 +222,7 @@ The AgentCore Runtime contract — `POST /invocations` + `GET /ping` — runs lo
 
 ```python
 import boto3
-from oblako.agentcore import BedrockAgentCoreApp
+from oblako.engines.agentcore import BedrockAgentCoreApp
 
 app = BedrockAgentCoreApp()
 bedrock = boto3.client(

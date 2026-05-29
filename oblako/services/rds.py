@@ -167,7 +167,7 @@ class RdsService(Service):
     # -------------------------------------------------------------------------------
     def start_data_server(self):
         """Start the rds-data server in-process (idempotent). Returns its URL."""
-        from oblako.rds_data import RdsDataExecutor, start_in_thread
+        from oblako.engines.rds_data import RdsDataExecutor, start_in_thread
 
         executor = RdsDataExecutor(
             host="localhost",
@@ -181,7 +181,7 @@ class RdsService(Service):
 
     def get_data_client(self, autostart: bool = True):
         """boto3 ``rds-data`` client executing real SQL against the engine."""
-        from oblako import rds_data
+        from oblako.engines import rds_data
         from . import boto
 
         if autostart and not rds_data.is_running(self.data_port):
