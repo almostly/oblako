@@ -218,16 +218,16 @@ def test_sagemaker_image_exists():
 
 def test_oblako_status():
     from oblako.services import Oblako
+    from oblako.services import backends
 
     oblako = Oblako()
-    mock_client = MagicMock()
-    from docker.errors import NotFound
-
-    mock_client.containers.get.side_effect = NotFound("not found")
-    mock_client.containers.list.return_value = []
+    # status() goes through each service's ContainerBackend, so mock that (not the
+    # docker client) — otherwise the result depends on whatever is really running.
     for svc in oblako._docker_services:
-        svc._client = mock_client
-    oblako.sagemaker._client = mock_client
+        svc.backend = MagicMock()
+        svc.backend.status.return_value = backends.ABSENT
+    oblako.sagemaker._client = MagicMock()
+    oblako.sagemaker._client.containers.list.return_value = []
 
     result = oblako.status()
     assert result["bedrock"] == "stopped"
