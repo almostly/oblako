@@ -20,6 +20,22 @@ def test_kubernetes_backend_selected(monkeypatch):
     assert isinstance(backends.get_backend(), backends.KubernetesBackend)
 
 
+def test_socket_selection_for_runtimes(monkeypatch, tmp_path):
+    # DOCKER_HOST always wins (docker-py honours it) — no explicit socket.
+    monkeypatch.setenv("DOCKER_HOST", "unix:///tmp/x.sock")
+    assert backends._socket_for("colima") is None
+
+    # Otherwise the runtime's socket is auto-detected if it exists — this is what
+    # lets the compute paths (via docker_client) target podman/colima, not just
+    # the default Docker socket.
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    sock = tmp_path / "docker.sock"
+    sock.write_text("")
+    monkeypatch.setattr(backends, "_CANDIDATE_SOCKETS", {"colima": [str(sock)]})
+    assert backends._socket_for("colima") == f"unix://{sock}"
+    assert backends._socket_for("podman") is None  # no candidate -> ambient/default
+
+
 def test_build_k8s_manifests():
     # A dynamodb-like Service maps to a Deployment + Service.
     manifest = backends.build_k8s_manifests(
