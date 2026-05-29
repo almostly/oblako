@@ -146,28 +146,32 @@ def _iam_delete(physical_id, props):
         pass
 
 
-# AWS::EC2::Instance (control plane via moto) — instance metadata; describe
-# fidelity, no compute (a later stage backs instances with real containers).
+# AWS::EC2::Instance — moto metadata + a real container-backed instance
+# (instance == container, EBS == Docker volume), same as Ec2Service.run_instance.
 def _ec2_create(logical_id, props, ctx):
+    from oblako.services.ec2 import start_instance_container
+
     ec2 = _moto_client("ec2")
-    kwargs = {
-        "ImageId": props.get("ImageId", "ami-0abcdef1234567890"),
-        "InstanceType": props.get("InstanceType", "t3.micro"),
-        "MinCount": 1,
-        "MaxCount": 1,
-    }
-    iid = ec2.run_instances(**kwargs)["Instances"][0]["InstanceId"]
+    image_id = props.get("ImageId", "ami-0abcdef1234567890")
+    iid = ec2.run_instances(
+        ImageId=image_id, InstanceType=props.get("InstanceType", "t3.micro"),
+        MinCount=1, MaxCount=1,
+    )["Instances"][0]["InstanceId"]
     tags = props.get("Tags")
     if tags:
         ec2.create_tags(Resources=[iid], Tags=tags)
+    start_instance_container(iid, image_id=image_id)  # back it with a real container
     return iid  # physical id is the InstanceId
 
 
 def _ec2_delete(physical_id, props):
+    from oblako.services.ec2 import terminate_instance_container
+
     try:
         _moto_client("ec2").terminate_instances(InstanceIds=[physical_id])
     except Exception:  # noqa: BLE001
         pass
+    terminate_instance_container(physical_id)
 
 
 # AWS::Lambda::Function (control plane via moto). oblako has no Lambda engine —
