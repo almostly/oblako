@@ -135,7 +135,7 @@ class SageMakerService:
         return NOTEBOOK_IMAGE
 
     def _notebook_instance_id(self, name: str) -> str | None:
-        """The domain's notebook EC2 instance id (by Name tag), or None."""
+        """Return the domain's notebook EC2 instance id (by Name tag), or None."""
         resp = self._ec2().describe_instances(
             Filters=[{"Name": "tag:Name", "Values": [f"{name}-notebook"]}]
         )

@@ -437,7 +437,7 @@ class KubernetesBackend(ContainerBackend):
 
 
 def _socket_for(runtime: str) -> str | None:
-    """The Docker-API socket URL for a runtime (podman/colima), or None."""
+    """Return the Docker-API socket URL for a runtime (podman/colima), or None."""
     if os.environ.get("DOCKER_HOST"):
         return None  # explicit DOCKER_HOST wins (docker-py honours it)
     for candidate in _CANDIDATE_SOCKETS.get(runtime, []):
@@ -452,7 +452,7 @@ def _docker_backend_for(runtime: str) -> DockerBackend:
 
 
 def docker_client():
-    """A docker-py client for the configured Docker-API backend.
+    """Return a docker-py client for the configured Docker-API backend.
 
     The per-task compute paths (Lambda exec, Glue jobs, SageMaker local, EC2
     instances, the Studio notebook) talk to Docker directly rather than through a

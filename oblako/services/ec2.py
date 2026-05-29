@@ -127,7 +127,7 @@ class Ec2Service:
 
     @property
     def endpoint_url(self) -> str:
-        """moto serves EC2 at the same endpoint as every other AWS API."""
+        """Moto serves EC2 at the same endpoint as every other AWS API."""
         return self.moto.endpoint_url
 
     # Control plane + real compute
