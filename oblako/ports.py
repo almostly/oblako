@@ -27,6 +27,7 @@ REDSHIFT_DATA = 8002
 RDS_DATA = 8006
 BEDROCK_RUNTIME = 8004
 GLUE_CATALOG = 8486
+APPCONFIG = 8003  # appconfig (management) + appconfigdata (data)
 
 # Engines / data plane
 OLLAMA = 11434  # Bedrock runtime is backed by Ollama

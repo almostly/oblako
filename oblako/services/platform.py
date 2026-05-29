@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .appconfig import AppConfigService
 from .bedrock import BedrockService
 from .caddy import CaddyService
 from .cloudformation import CloudFormationService
@@ -73,6 +74,9 @@ class Oblako:
         # In-process orchestration server (no container): provisions stacks into
         # the engines above. Started lazily on first get_client().
         self.cloudformation = CloudFormationService()
+        # AppConfig (control + data plane) + the rule-evaluation agent — also an
+        # in-process server, started lazily on first get_client().
+        self.appconfig = AppConfigService()
 
     @property
     def _docker_services(self):
