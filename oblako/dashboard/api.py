@@ -85,6 +85,7 @@ def _service_type(name: str) -> str:
         "stepfunctions": "Step Functions",
         "sagemaker": "SageMaker",
         "lambda": "Lambda",
+        "ec2": "EC2",
     }
     return types.get(name, name)
 
@@ -1377,6 +1378,84 @@ def glue_run_workflow(body: dict):
 def glue_workflow_history():
     """Most recent Glue workflow runs (this dashboard process only — not persisted)."""
     return {"workflows": list(reversed(_GLUE_WORKFLOW_HISTORY))}
+
+
+# EC2
+# moto control plane + container-backed instances (instance == container, EBS ==
+# Docker volume). Each row shows both the moto state and the live container state.
+@app.get("/api/ec2/instances")
+def ec2_list_instances():
+    """List EC2 instances (moto metadata) with their backing-container status."""
+    ec2 = oblako.ec2
+    try:
+        reservations = ec2.get_client().describe_instances().get("Reservations", [])
+    except Exception as e:  # noqa: BLE001
+        return {"instances": [], "error": str(e)}
+    instances = []
+    for r in reservations:
+        for inst in r.get("Instances", []):
+            if inst.get("State", {}).get("Name") == "terminated":
+                continue
+            iid = inst["InstanceId"]
+            container = ec2.instance_container(iid)
+            name = next((t["Value"] for t in inst.get("Tags", []) if t["Key"] == "Name"), "")
+            instances.append({
+                "id": iid,
+                "name": name,
+                "type": inst.get("InstanceType", ""),
+                "state": inst.get("State", {}).get("Name", ""),
+                "imageId": inst.get("ImageId", ""),
+                "containerStatus": container.status if container else "—",
+            })
+    return {"instances": instances}
+
+
+@app.post("/api/ec2/instances")
+def ec2_run_instance(body: dict):
+    """Launch a container-backed instance. body = {instanceType?, name?, backed?}."""
+    ec2 = oblako.ec2
+    try:
+        iid = ec2.run_instance(
+            instance_type=body.get("instanceType", "t3.micro"),
+            backed=body.get("backed", True),
+        )
+        if body.get("name"):
+            ec2.get_client().create_tags(
+                Resources=[iid], Tags=[{"Key": "Name", "Value": body["name"]}],
+            )
+        return {"ok": True, "id": iid}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.post("/api/ec2/instances/{iid}/stop")
+def ec2_stop_instance(iid: str):
+    """Stop an instance (container stops; EBS volume kept)."""
+    try:
+        oblako.ec2.stop_instance(iid)
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.post("/api/ec2/instances/{iid}/start")
+def ec2_start_instance(iid: str):
+    """Start a stopped instance (container starts)."""
+    try:
+        oblako.ec2.start_instance(iid)
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
+
+
+@app.delete("/api/ec2/instances/{iid}")
+def ec2_terminate_instance(iid: str):
+    """Terminate an instance (container + EBS volume removed)."""
+    try:
+        oblako.ec2.terminate_instance(iid)
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)}
 
 
 # Static frontend (production build)

@@ -17,6 +17,7 @@ import KinesisPage from './pages/KinesisPage'
 import AthenaPage from './pages/AthenaPage'
 import GluePage from './pages/GluePage'
 import LambdaPage from './pages/LambdaPage'
+import Ec2Page from './pages/Ec2Page'
 
 const NAV_ITEMS = [
   { type: 'link', text: 'Services', href: '#services' },
@@ -24,6 +25,7 @@ const NAV_ITEMS = [
   { type: 'link', text: 'Bedrock', href: '#bedrock' },
   { type: 'link', text: 'SageMaker', href: '#sagemaker' },
   { type: 'link', text: 'Lambda', href: '#lambda' },
+  { type: 'link', text: 'EC2', href: '#ec2' },
   { type: 'link', text: 'S3', href: '#s3' },
   { type: 'link', text: 'DynamoDB', href: '#dynamodb' },
   { type: 'link', text: 'Kinesis', href: '#kinesis' },
@@ -41,6 +43,7 @@ const PAGES = {
   '#bedrock': BedrockPage,
   '#sagemaker': SageMakerPage,
   '#lambda': LambdaPage,
+  '#ec2': Ec2Page,
   '#s3': S3Page,
   '#dynamodb': DynamoDBPage,
   '#kinesis': KinesisPage,
