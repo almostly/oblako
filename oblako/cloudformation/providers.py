@@ -24,15 +24,9 @@ def _dynamodb_client():
 
 
 def _moto_client(service):
-    import boto3
+    from oblako.services import boto
 
-    return boto3.client(
-        service,
-        endpoint_url="http://localhost:5500",
-        region_name="us-east-1",
-        aws_access_key_id="test",
-        aws_secret_access_key="test",
-    )
+    return boto.client(service, "http://localhost:5500", region="us-east-1")
 
 
 # AWS::S3::Bucket

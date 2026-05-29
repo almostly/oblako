@@ -1,11 +1,10 @@
 """DynamoDB Local service: official AWS Docker image."""
 
-import boto3
-
-from oblako import config
 from .base import Service, PortMapping
+from .boto import BotoService, resource
 
 
+@BotoService("dynamodb")
 class DynamoDBService(Service):
     """DynamoDB Local service backed by the official Amazon Docker image."""
 
@@ -33,25 +32,9 @@ class DynamoDBService(Service):
         """Return the DynamoDB Local endpoint URL."""
         return f"http://localhost:{self.host_port}"
 
-    def get_client(self):
-        """Return a boto3 DynamoDB client pointing at local instance."""
-        return boto3.client(
-            "dynamodb",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
-            region_name=config.region(),
-        )
-
     def get_resource(self):
         """Return a boto3 DynamoDB resource for higher-level API."""
-        return boto3.resource(
-            "dynamodb",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
-            region_name=config.region(),
-        )
+        return resource("dynamodb", self.endpoint_url)
 
     def _health_check(self) -> bool:
         try:

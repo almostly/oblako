@@ -115,14 +115,10 @@ class RdsService(Service):
 
     def get_client(self):
         """boto3 ``rds`` control-plane client (RDS instances + Aurora clusters, via moto)."""
-        import boto3
+        from . import boto
 
-        return boto3.client(
-            "rds",
-            endpoint_url=f"http://localhost:{self.control_port}",
-            region_name=self.region,
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
+        return boto.client(
+            "rds", f"http://localhost:{self.control_port}", region=self.region,
         )
 
     # -------------------------------------------------------------------------------
@@ -185,17 +181,13 @@ class RdsService(Service):
 
     def get_data_client(self, autostart: bool = True):
         """boto3 ``rds-data`` client executing real SQL against the engine."""
-        import boto3
         from oblako import rds_data
+        from . import boto
 
         if autostart and not rds_data.is_running(self.data_port):
             self.start_data_server()
-        return boto3.client(
-            "rds-data",
-            endpoint_url=f"http://localhost:{self.data_port}",
-            region_name=self.region,
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
+        return boto.client(
+            "rds-data", f"http://localhost:{self.data_port}", region=self.region,
         )
 
     def _health_check(self) -> bool:

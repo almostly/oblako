@@ -3,11 +3,11 @@
 import json
 from pathlib import Path
 
-import boto3
 import httpx
 
 from oblako import config
 from .base import Service, PortMapping
+from .boto import BotoService
 
 DUMMY_ROLE = config.arn("iam", "role/DummyRole", region_scoped=False)
 
@@ -16,6 +16,7 @@ DUMMY_ROLE = config.arn("iam", "role/DummyRole", region_scoped=False)
 MOCK_CONFIG_MOUNT = "/oblako/sfn"
 
 
+@BotoService("stepfunctions")
 class StepFunctionsService(Service):
     """Step Functions Local service backed by the official Amazon image."""
 
@@ -58,16 +59,6 @@ class StepFunctionsService(Service):
     def endpoint_url(self) -> str:
         """Return the Step Functions Local endpoint URL."""
         return f"http://localhost:{self.host_port}"
-
-    def get_client(self):
-        """Return a boto3 Step Functions client."""
-        return boto3.client(
-            "stepfunctions",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
-            region_name=config.region(),
-        )
 
     def create_state_machine(
         self, name: str, definition: dict, role_arn: str = DUMMY_ROLE

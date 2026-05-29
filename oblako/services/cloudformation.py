@@ -35,18 +35,12 @@ class CloudFormationService:
 
     def get_client(self, autostart: bool = True):
         """boto3 ``cloudformation`` client whose stacks provision into oblako."""
-        import boto3
         from oblako import cloudformation
+        from . import boto
 
         if autostart and not cloudformation.is_running(self.port):
             self.start_server()
-        return boto3.client(
-            "cloudformation",
-            endpoint_url=self.endpoint_url,
-            region_name=self.region,
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
-        )
+        return boto.client("cloudformation", self.endpoint_url, region=self.region)
 
     def is_running(self) -> bool:
         """Return True if the local CloudFormation server is already listening."""

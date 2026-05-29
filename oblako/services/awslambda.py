@@ -13,9 +13,7 @@ ergonomics.
 
 from __future__ import annotations
 
-import boto3
-
-from oblako import config
+from .boto import BotoService
 from .moto import MotoService
 
 DEFAULT_EXEC_ROLE_NAME = "oblako-lambda-exec"
@@ -25,6 +23,7 @@ ASSUME_ROLE_POLICY = (
 )
 
 
+@BotoService("lambda", "iam")
 class LambdaService:
     """AWS Lambda — control plane + invocation via moto + Docker."""
 
@@ -37,25 +36,9 @@ class LambdaService:
         """Moto serves Lambda at the same endpoint as every other AWS API."""
         return self.moto.endpoint_url
 
-    def get_client(self):
-        """boto3 Lambda client pointed at moto."""
-        return boto3.client(
-            "lambda",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
-            region_name=config.region(),
-        )
-
     def get_iam_client(self):
         """boto3 IAM client pointed at moto (for the exec role)."""
-        return boto3.client(
-            "iam",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
-            region_name=config.region(),
-        )
+        return self.get_client("iam")
 
     def ensure_exec_role(self, name: str = DEFAULT_EXEC_ROLE_NAME) -> str:
         """Create (idempotent) and return the ARN of the default Lambda exec role."""

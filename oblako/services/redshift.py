@@ -68,14 +68,10 @@ class RedshiftService(Service):
 
     def get_client(self):
         """boto3 ``redshift`` control-plane client (clusters/nodes via moto)."""
-        import boto3
+        from . import boto
 
-        return boto3.client(
-            "redshift",
-            endpoint_url=f"http://localhost:{self.control_port}",
-            region_name=self.region,
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
+        return boto.client(
+            "redshift", f"http://localhost:{self.control_port}", region=self.region,
         )
 
     def start_data_server(self):
@@ -93,17 +89,13 @@ class RedshiftService(Service):
 
     def get_data_client(self, autostart: bool = True):
         """boto3 ``redshift-data`` client executing real SQL against pgredshift."""
-        import boto3
         from oblako import redshift_data
+        from . import boto
 
         if autostart and not redshift_data.is_running(self.data_port):
             self.start_data_server()
-        return boto3.client(
-            "redshift-data",
-            endpoint_url=f"http://localhost:{self.data_port}",
-            region_name=self.region,
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
+        return boto.client(
+            "redshift-data", f"http://localhost:{self.data_port}", region=self.region,
         )
 
     def _health_check(self) -> bool:

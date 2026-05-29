@@ -11,13 +11,12 @@ from __future__ import annotations
 
 import json
 
-import boto3
-
-from oblako import config
 from oblako.iam import evaluator
+from .boto import BotoService
 from .moto import MotoService
 
 
+@BotoService("iam", "sts")
 class IamService:
     """IAM/STS control plane (moto) plus oblako's trust + authorization evaluator."""
 
@@ -31,13 +30,6 @@ class IamService:
     def endpoint_url(self) -> str:
         """Return the moto endpoint that backs the IAM/STS control plane."""
         return self._moto.endpoint_url
-
-    def get_client(self, service: str = "iam"):
-        """Return a boto3 ``iam`` (default) or ``sts`` client pointed at moto."""
-        return boto3.client(
-            service, endpoint_url=self.endpoint_url, region_name=config.region(),
-            aws_access_key_id="test", aws_secret_access_key="test",
-        )
 
     def create_user(self, name: str) -> dict:
         """Create an IAM user and return its description."""

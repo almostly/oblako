@@ -1,11 +1,10 @@
 """S3Proxy service: S3-compatible object storage."""
 
 import httpx
-import boto3
 from botocore.config import Config
 
-from oblako import config
 from .base import Service, PortMapping
+from . import boto
 
 
 class S3ProxyService(Service):
@@ -41,12 +40,8 @@ class S3ProxyService(Service):
         "when_required" — otherwise uploads fail with 501 NotImplemented.
         (Real checksum support would mean switching the backend to MinIO.)
         """
-        return boto3.client(
-            "s3",
-            endpoint_url=self.endpoint_url,
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
-            region_name=config.region(),
+        return boto.client(
+            "s3", self.endpoint_url,
             config=Config(
                 signature_version="s3v4",
                 request_checksum_calculation="when_required",

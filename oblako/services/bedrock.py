@@ -67,17 +67,13 @@ class BedrockService(Service):
         return start_in_thread(port=self.runtime_port, ollama_url=self.url)
 
     def _boto_client(self, service: str, autostart: bool):
-        import boto3
         from oblako import bedrock_runtime
+        from . import boto
 
         if autostart and not bedrock_runtime.is_running(self.runtime_port):
             self.start_runtime_server()
-        return boto3.client(
-            service,
-            endpoint_url=f"http://localhost:{self.runtime_port}",
-            region_name=self.region,
-            aws_access_key_id="test",
-            aws_secret_access_key="test",
+        return boto.client(
+            service, f"http://localhost:{self.runtime_port}", region=self.region,
         )
 
     def get_client(self, autostart: bool = True):

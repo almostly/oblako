@@ -7,9 +7,7 @@ thin Service-style accessor that starts it on demand and hands out a boto3
 
 from __future__ import annotations
 
-import boto3
-
-from oblako import config
+from . import boto
 
 
 class GlueCatalogService:
@@ -38,7 +36,4 @@ class GlueCatalogService:
 
         if autostart and not glue_catalog.is_running(self.port):
             self.start_server()
-        return boto3.client(
-            "glue", endpoint_url=self.endpoint_url, region_name=config.region(),
-            aws_access_key_id="test", aws_secret_access_key="test",
-        )
+        return boto.client("glue", self.endpoint_url)

@@ -7,12 +7,11 @@ State persists in a named volume so streams survive restarts.
 
 from __future__ import annotations
 
-import boto3
-
-from oblako import config
 from .base import Service, PortMapping
+from .boto import BotoService
 
 
+@BotoService("kinesis")
 class KinesisService(Service):
     """Local Kinesis Data Streams (kinesalite-backed)."""
 
@@ -33,14 +32,6 @@ class KinesisService(Service):
     def endpoint_url(self) -> str:
         """Return the local Kinesis endpoint URL for boto3 clients."""
         return f"http://localhost:{self.host_port}"
-
-    def get_client(self):
-        """Return a boto3 ``kinesis`` client pointed at the local emulator."""
-        return boto3.client(
-            "kinesis", endpoint_url=self.endpoint_url,
-            region_name=config.region(),
-            aws_access_key_id="test", aws_secret_access_key="test",
-        )
 
     def _health_check(self) -> bool:
         try:
