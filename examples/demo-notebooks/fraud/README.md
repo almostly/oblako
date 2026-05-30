@@ -6,7 +6,7 @@ Two notebooks:
 | | What it does |
 |---|---|
 | `01_kinesis_transaction_stream.ipynb` | Reads transactions from a CSV and `put_record`s them onto a Kinesis stream (`TransactionsStream`) — the "simulator" half of real-time fraud detection. |
-| `02_linear_learner_training.ipynb` | Trains SageMaker's built-in `LinearLearner` on labelled card-transaction data, deploys a real-time endpoint, and invokes it. |
+| `02_linear_learner_training.ipynb` | Builds a bring-your-own-container **linear SVM** (hinge loss + balanced classes — the same model as the managed `LinearLearner`), trains it in SageMaker **local mode** (`instance_type="local"`), evaluates precision/recall on held-out transactions, and stores the model in oblako's S3Proxy. No AWS account. |
 
 ## Running against oblako
 
