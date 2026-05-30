@@ -887,6 +887,8 @@ def _mlflow_urls() -> dict:
         "url": oblako.sagemaker.mlflow.tracking_uri,
         "vanityUrl": vanity_url,
         "hostsLine": hosts_line,
+        "arn": oblako.sagemaker.mlflow.tracking_server_arn,
+        "customEndpoint": oblako.sagemaker.mlflow.custom_endpoint,
     }
 
 
@@ -1890,12 +1892,17 @@ def appconfig_evaluate(body: dict):
 if DIST_DIR.exists():
     app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="assets")
 
+    # index.html must never be cached: it references the hashed JS bundle, so a
+    # cached copy pins the browser to a stale build after a rebuild. The hashed
+    # assets under /assets are immutable (name changes per build) and cache freely.
+    _NO_CACHE = {"Cache-Control": "no-cache, no-store, must-revalidate"}
+
     @app.get("/{path:path}")
     def serve_frontend(path: str):
         file = DIST_DIR / path
-        if file.exists() and file.is_file():
+        if file.exists() and file.is_file() and file.name != "index.html":
             return FileResponse(file)
-        return FileResponse(DIST_DIR / "index.html")
+        return FileResponse(DIST_DIR / "index.html", headers=_NO_CACHE)
 
 
 if __name__ == "__main__":

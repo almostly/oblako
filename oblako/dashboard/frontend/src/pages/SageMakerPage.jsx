@@ -23,7 +23,7 @@ const API = 'http://localhost:8000'
 // kicks off the App; the UI polls /api/mlflow/status until ready, then embeds.
 function MlflowTab() {
   const [status, setStatus] = useState('idle')   // idle | starting | ready | error
-  const [urls, setUrls] = useState({ url: null, vanityUrl: null, hostsLine: null })
+  const [urls, setUrls] = useState({ url: null, vanityUrl: null, hostsLine: null, arn: null, customEndpoint: null })
   const [error, setError] = useState(null)
 
   // Probe once on mount: if MLflow was already started this session, jump
@@ -32,7 +32,7 @@ function MlflowTab() {
     fetch(`${API}/api/mlflow/status`).then(r => r.json()).then(d => {
       if (d.status === 'ready') {
         setStatus('ready')
-        setUrls({ url: d.url, vanityUrl: d.vanityUrl, hostsLine: d.hostsLine })
+        setUrls({ url: d.url, vanityUrl: d.vanityUrl, hostsLine: d.hostsLine, arn: d.arn, customEndpoint: d.customEndpoint })
       }
     }).catch(() => {})
   }, [])
@@ -43,7 +43,7 @@ function MlflowTab() {
       const d = await fetch(`${API}/api/mlflow/launch`, { method: 'POST' }).then(r => r.json())
       if (d.status === 'ready') {
         setStatus('ready')
-        setUrls({ url: d.url, vanityUrl: d.vanityUrl, hostsLine: d.hostsLine })
+        setUrls({ url: d.url, vanityUrl: d.vanityUrl, hostsLine: d.hostsLine, arn: d.arn, customEndpoint: d.customEndpoint })
       } else {
         setStatus('error'); setError(d.error || 'MLflow did not become ready')
       }
@@ -79,23 +79,56 @@ function MlflowTab() {
       </SpaceBetween>
     )
   }
+  // Open the direct localhost URL — it always works. The vanity SageMaker-style
+  // host needs an /etc/hosts entry, so it's shown only as an optional note.
+  const webUrl = urls.url || urls.vanityUrl
   return (
-    <SpaceBetween size="s">
-      {urls.vanityUrl && (
-        <Box padding="s" color="text-body-secondary" fontSize="body-s" variant="div">
-          <strong>Tracking server URL:</strong>{' '}
-          <Box variant="code" fontSize="body-s">{urls.vanityUrl}</Box>
-          {urls.hostsLine && (
-            <Box variant="div" padding={{ top: 'xxs' }}>
-              First time only — add to <Box variant="code" fontSize="body-s">/etc/hosts</Box>:{' '}
-              <Box variant="code" fontSize="body-s">{urls.hostsLine}</Box>
+    <SpaceBetween size="l">
+      <Container header={
+        <Header variant="h2"
+          description="Point MLflow at the tracking-server ARN — exactly like real SageMaker. The sagemaker-mlflow plugin resolves the ARN and SigV4-signs the traffic.">
+          Tracking server ARN
+        </Header>
+      }>
+        <SpaceBetween size="m">
+          {urls.arn && <Box variant="code" fontSize="body-s">{urls.arn}</Box>}
+          <PythonCode code={`import mlflow
+
+mlflow.set_tracking_uri(\n    "${urls.arn || 'arn:aws:sagemaker:...:mlflow-tracking-server/mlflow-oblako'}"\n)
+mlflow.set_experiment("my-experiment")
+with mlflow.start_run():
+    mlflow.log_metric("rmse", 0.1)`} />
+          <Box color="text-body-secondary" fontSize="body-s">
+            In an oblako notebook this works as-is. Elsewhere, set{' '}
+            <Box variant="code" fontSize="body-s" display="inline">
+              SAGEMAKER_MLFLOW_CUSTOM_ENDPOINT={urls.customEndpoint || urls.url}
+            </Box>{' '}so the plugin resolves the ARN to the local server.
+          </Box>
+        </SpaceBetween>
+      </Container>
+
+      {/* No iframe: MLflow sends X-Frame-Options: SAMEORIGIN, so it refuses to
+          render cross-origin from the dashboard. Link out instead. */}
+      <Container header={
+        <Header variant="h2"
+          actions={<Button iconName="external" href={webUrl} target="_blank">Open MLflow UI</Button>}
+          description="The MLflow tracking UI — experiments, runs, models and the model registry.">
+          Web UI
+        </Header>
+      }>
+        <SpaceBetween size="xs">
+          <Box>
+            <strong>URL:</strong> <Link external href={webUrl}>{webUrl}</Link>
+          </Box>
+          {urls.vanityUrl && urls.hostsLine && (
+            <Box color="text-body-secondary" fontSize="body-s">
+              SageMaker-style address: <Box variant="code" fontSize="body-s" display="inline">{urls.vanityUrl}</Box>
+              {' '}— to use it, add to <Box variant="code" fontSize="body-s" display="inline">/etc/hosts</Box>:{' '}
+              <Box variant="code" fontSize="body-s" display="inline">{urls.hostsLine}</Box>
             </Box>
           )}
-        </Box>
-      )}
-      <Box float="right"><Link external href={urls.vanityUrl || urls.url}>Open in a new tab</Link></Box>
-      <iframe title="MLflow" src={urls.url}
-        style={{ width: '100%', height: '78vh', border: '1px solid #d5dbdb', borderRadius: 4 }} />
+        </SpaceBetween>
+      </Container>
     </SpaceBetween>
   )
 }

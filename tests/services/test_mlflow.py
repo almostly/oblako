@@ -1,8 +1,10 @@
 """Unit tests for the MLflow App service (pure config; no container required)."""
 
+from oblako import config
 from oblako.services.mlflow import (
     ARTIFACT_BUCKET,
     IMAGE_TAG,
+    TRACKING_SERVER_NAME,
     MlflowService,
 )
 
@@ -13,6 +15,21 @@ def test_default_port_and_image():
     assert svc.host_port == 5050
     assert svc.image == IMAGE_TAG == "oblako-mlflow:latest"
     assert svc.tracking_uri == "http://localhost:5050"
+
+
+def test_tracking_server_arn_is_sagemaker_faithful():
+    # The value users pass to mlflow.set_tracking_uri is a SageMaker ARN, not an
+    # http URL — the sagemaker-mlflow plugin resolves it (via the custom endpoint).
+    svc = MlflowService()
+    arn = svc.tracking_server_arn
+    assert arn == (
+        f"arn:aws:sagemaker:{config.region()}:{config.account_id()}"
+        f":mlflow-tracking-server/{TRACKING_SERVER_NAME}"
+    )
+    assert arn.startswith("arn:aws:sagemaker:")
+    assert ":mlflow-tracking-server/mlflow-oblako" in arn
+    # The plugin's SAGEMAKER_MLFLOW_CUSTOM_ENDPOINT points at the local server.
+    assert svc.custom_endpoint == svc.tracking_uri == "http://localhost:5050"
 
 
 def test_artifact_bucket():

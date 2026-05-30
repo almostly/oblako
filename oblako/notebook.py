@@ -43,6 +43,11 @@ ENDPOINTS = {
     "AWS_ENDPOINT_URL_BEDROCK": _local(ports.BEDROCK_RUNTIME),
     "AWS_ENDPOINT_URL_APPCONFIG": _local(ports.APPCONFIG),
     "AWS_ENDPOINT_URL_APPCONFIGDATA": _local(ports.APPCONFIG),
+    # SageMaker-managed MLflow: the sagemaker-mlflow plugin resolves an
+    # `arn:aws:sagemaker:...:mlflow-tracking-server/...` URI to this endpoint, so
+    # `mlflow.set_tracking_uri(arn)` reaches the local MLflow container (no
+    # SageMaker control plane needed). Faithful to the real ARN-based flow.
+    "SAGEMAKER_MLFLOW_CUSTOM_ENDPOINT": _local(ports.MLFLOW),
 }
 
 _AWS_CONFIG = (

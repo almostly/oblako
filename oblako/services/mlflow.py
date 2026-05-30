@@ -30,6 +30,8 @@ from .base import Service, PortMapping
 
 IMAGE_TAG = "oblako-mlflow:latest"
 ARTIFACT_BUCKET = "oblako-mlflow"
+# The SageMaker-managed MLflow tracking server's name; the ARN derives from it.
+TRACKING_SERVER_NAME = "mlflow-oblako"
 _DOCKERFILE_DIR = Path(__file__).resolve().parent.parent / "mlflow"
 
 
@@ -112,8 +114,32 @@ class MlflowService(Service):
 
     @property
     def tracking_uri(self) -> str:
-        """The URL clients pass to ``mlflow.set_tracking_uri``."""
+        """Return the direct HTTP URL of the MLflow server (for the web UI)."""
         return f"http://localhost:{self.host_port}"
+
+    @property
+    def tracking_server_arn(self) -> str:
+        """Return the SageMaker MLflow tracking-server ARN.
+
+        This is the value you pass to ``mlflow.set_tracking_uri`` — exactly like
+        real SageMaker-managed MLflow. The ``sagemaker-mlflow`` plugin resolves it
+        to the server URL (via SAGEMAKER_MLFLOW_CUSTOM_ENDPOINT locally) and
+        SigV4-signs the traffic.
+        """
+        return (
+            f"arn:aws:sagemaker:{config.region()}:{config.account_id()}"
+            f":mlflow-tracking-server/{TRACKING_SERVER_NAME}"
+        )
+
+    @property
+    def custom_endpoint(self) -> str:
+        """Return the value for SAGEMAKER_MLFLOW_CUSTOM_ENDPOINT.
+
+        Tells the sagemaker-mlflow plugin where to send tracking traffic when the
+        URI is an ARN — locally, the MLflow container — so the ARN resolves
+        without a SageMaker control plane.
+        """
+        return self.tracking_uri
 
     def ensure_image(self) -> None:
         """Build the MLflow image (and slim it if docker-slim is available)."""
