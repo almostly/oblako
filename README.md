@@ -326,7 +326,7 @@ ddb.create_table(
 
 Redshift comes in three layers, all local and boto3-compatible:
 
-**1. Storage engine (pgredshift).** Runs on port 5439 (Redshift's port) with user `oblako`, password `oblako`, database `oblako`. It's `hearthsim/pgredshift` — PostgreSQL 10 plus Redshift system tables (`stl_scan`, `stv_tbl_perm`, ...), `SET query_group`, and Redshift UDFs (`json_array_length`, `median`, ...). Connect with psycopg2:
+**1. Storage engine (pgredshift).** The Redshift endpoint is port 5439 (Redshift's port) with user `oblako`, password `oblako`, database `oblako` — a thin Postgres-wire proxy fronting the engine so both psycopg2 and dbt-redshift connect there (see "dbt-redshift" below; the raw engine itself is on 5438). It's `hearthsim/pgredshift` — PostgreSQL 10 plus Redshift system tables (`stl_scan`, `stv_tbl_perm`, ...), `SET query_group`, and Redshift UDFs (`json_array_length`, `median`, ...). Connect with psycopg2:
 
 ```python
 import psycopg2
@@ -388,6 +388,26 @@ For an external process (not the one that called `get_data_client`), run the Dat
 ```bash
 oblako redshift-data            # serves boto3 'redshift-data' on http://localhost:8002
 ```
+
+**4. redshift-connector (incl. dbt-redshift).** The Redshift endpoint on 5439 is a thin Postgres-wire proxy in front of the engine, so Amazon's `redshift-connector` driver works without any extra step — just `make up`. Why it's needed: the driver puts Redshift-only parameters (`client_protocol_version`, `driver_version`, …) in the Postgres startup handshake, which PostgreSQL 10 rejects with `FATAL: unrecognized configuration parameter "client_protocol_version"`; the proxy strips those from the handshake and reports `server_version` as Redshift's `8.0.2`. It's transparent for psycopg2 (the rewrites apply only to redshift-connector clients). Anything built on redshift-connector — most commonly dbt-redshift — then just works; point it at 5439:
+
+```yaml
+# ~/.dbt/profiles.yml
+my_project:
+  target: dev
+  outputs:
+    dev:
+      type: redshift
+      host: localhost
+      port: 5439          # the Redshift endpoint (proxy in front of pgredshift)
+      user: oblako
+      password: oblako
+      dbname: oblako
+      schema: public
+      sslmode: disable    # proxy terminates SSL negotiation as unsupported
+```
+
+`dbt debug`, `dbt run`, and `dbt test` then run through the genuine dbt-redshift adapter. Only the handshake is shimmed — Redshift-physical DDL the adapter emits (`DISTKEY`/`SORTKEY`/`ENCODE`, late-binding views, `SUPER`) still runs on PostgreSQL semantics underneath, so models using those configs will hit Postgres syntax errors. (The raw engine is also on 5438 for direct psql/debug access.)
 
 ### Redshift ML (CREATE MODEL)
 
@@ -686,7 +706,8 @@ oblako test-integration  # integration tests (requires oblako up)
 | OpenSearch | 9200 |
 | RDS / Aurora (PostgreSQL) | 5432 |
 | RDS Data API | 8006 |
-| Redshift (pgredshift) | 5439 |
+| Redshift endpoint (dbt-redshift + psycopg2) | 5439 |
+| Redshift raw engine (pgredshift, direct/debug) | 5438 |
 | Redshift management API (moto) | 5500 |
 | Redshift Data API | 8002 |
 | S3Proxy | 9000 |

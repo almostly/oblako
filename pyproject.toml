@@ -19,6 +19,7 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.4",
     "opensearch-py>=2.0",  # test_opensearch.py uses the OpenSearch client
+    "redshift_connector>=2.1",  # test_redshift_proxy.py drives the redshift-connector driver
 ]
 agentcore = [
     "bedrock-agentcore>=0.1",

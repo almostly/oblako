@@ -18,16 +18,36 @@ services:
     volumes:
       - opensearch_data:/usr/share/opensearch/data
 
-  redshift:
+  # Raw pgredshift engine (PostgreSQL 10 + Redshift system tables). It sits
+  # behind the redshift proxy; published on 5438 for direct psql/debug access.
+  pgredshift:
     image: hearthsim/pgredshift:latest
     ports:
-      - "5439:5432"
+      - "5438:5432"
     environment:
       POSTGRES_USER: oblako
       POSTGRES_PASSWORD: oblako
       POSTGRES_DB: oblako
     volumes:
       - redshift_data:/var/lib/postgresql/data
+
+  # Redshift endpoint, on Redshift's port 5439: a Postgres-wire proxy that fixes
+  # the startup handshake so the redshift-connector driver (used by dbt-redshift)
+  # connects (pgredshift would otherwise reject it), and passes psycopg2 through
+  # untouched. See oblako/engines/redshift_proxy.
+  redshift:
+    image: python:3.12-slim
+    depends_on:
+      - pgredshift
+    ports:
+      - "5439:5439"
+    environment:
+      OBLAKO_RS_PROXY_LISTEN: "5439"
+      OBLAKO_RS_PROXY_BACKEND_HOST: pgredshift
+      OBLAKO_RS_PROXY_BACKEND_PORT: "5432"
+    volumes:
+      - ./oblako/engines/redshift_proxy/__init__.py:/proxy.py:ro
+    command: ["python", "/proxy.py"]
 
   # RDS / Aurora data-plane engine (control plane is moto's 'rds' API).
   rds:
