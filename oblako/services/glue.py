@@ -18,13 +18,22 @@ from oblako import config
 
 IMAGE_TAG = "amazon/aws-glue-libs:5"
 
-# Glue's bundled AWS SDK adds `x-amz-optional-object-attributes: RestoreStatus`
-# to listObjectsV2 (a Glacier restore-status optimization). S3Proxy 501s on it
-# ("functionality not implemented"). A tiny SDK ExecutionInterceptor strips the
-# header before signing; it's registered on every job via this S3A config.
-_INTERCEPTOR_CLASS = "io.oblako.glue.StripOptionalObjectAttributes"
-_INTERCEPTOR_CONF = (
-    f"spark.hadoop.fs.s3a.audit.execution.interceptors={_INTERCEPTOR_CLASS}"
+# Glue's bundled AWS SDK v2 trips over two gaps in oblako's S3Proxy backend: it
+# 501s on the `x-amz-optional-object-attributes` header the SDK adds to
+# listObjectsV2, and it omits `<Size>` for the zero-byte directory markers Spark
+# writes (so hadoop-aws NPEs on S3Object.size() at commit). A tiny SDK
+# ExecutionInterceptor fixes both (strip the request header; default null list
+# sizes to 0); registered on every job via this S3A config.
+_INTERCEPTOR_CLASS = "io.oblako.glue.S3ProxyCompatInterceptor"
+# Spark/Hadoop config every job needs for S3A to work against the S3Proxy backend.
+_SPARK_CONFS = (
+    # the compat interceptor: strips the 501 header, fills null marker fields,
+    # and turns S3Proxy's 500 on a single directory-marker DELETE into success
+    f"spark.hadoop.fs.s3a.audit.execution.interceptors={_INTERCEPTOR_CLASS}",
+    # use single-object DELETEs (not the bulk POST ?delete S3Proxy 500s on, and
+    # which the interceptor can't cleanly fix up — its response carries a body),
+    # so marker deletes go through the DELETE-500 -> 204 path above.
+    "spark.hadoop.fs.s3a.multiobjectdelete.enable=false",
 )
 
 
@@ -57,23 +66,33 @@ class GlueService:
             self.client.images.pull(IMAGE_TAG)
 
     def _ensure_interceptor_jar(self) -> Path:
-        """Build (once, cached) the S3A header-stripping interceptor jar.
+        """Build (once, cached) the S3Proxy-compat interceptor jar.
 
         Compiled in the Glue image itself (it ships javac 17 + the AWS SDK), so
-        no host Java toolchain is needed. Returns the host path to the jar, which
-        ``submit_job`` mounts onto the Spark classpath.
+        no host Java toolchain is needed. The cache filename includes a hash of
+        the sources, so editing the interceptor transparently triggers a rebuild.
+        Returns the host path to the jar, which ``submit_job`` mounts onto the
+        Spark classpath.
         """
-        jar = Path(tempfile.gettempdir()) / "oblako-glue" / "oblako-glue-s3a.jar"
+        import hashlib
+
+        src_dir = Path(__file__).parent / "glue_assets"
+        sources = sorted(src_dir.glob("*.java"))
+        digest = hashlib.sha256(b"".join(s.read_bytes() for s in sources)).hexdigest()
+        jar = (
+            Path(tempfile.gettempdir())
+            / "oblako-glue"
+            / f"oblako-glue-s3a-{digest[:12]}.jar"
+        )
         if jar.exists():
             return jar
         jar.parent.mkdir(parents=True, exist_ok=True)
         self.ensure_image()
-        src_dir = Path(__file__).parent / "glue_assets"
         build = (
             'set -e; BUNDLE=$(find /root/.m2 -name "bundle-*.jar" | head -1); '
             "mkdir -p /tmp/c && "
-            'javac -cp "$BUNDLE" -d /tmp/c /src/StripOptionalObjectAttributes.java && '
-            "(cd /tmp/c && jar cf /out/oblako-glue-s3a.jar io)"
+            'javac -cp "$BUNDLE" -d /tmp/c /src/*.java && '
+            f"(cd /tmp/c && jar cf /out/{jar.name} io)"
         )
         container = self.client.containers.run(
             IMAGE_TAG,
@@ -126,8 +145,7 @@ class GlueService:
                 IMAGE_TAG,
                 command=[
                     "spark-submit",
-                    "--conf",
-                    _INTERCEPTOR_CONF,
+                    *[arg for conf in _SPARK_CONFS for arg in ("--conf", conf)],
                     "/scripts/job.py",
                     *(args or []),
                 ],
