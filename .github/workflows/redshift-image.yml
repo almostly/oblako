@@ -10,6 +10,8 @@ on:
   push:
     branches: [main]
     paths: ["oblako/images/redshift/**", ".github/workflows/redshift-image.yml"]
+  schedule:
+    - cron: "0 6 1 * *" # monthly (1st, 06:00 UTC): pick up postgres:16 base-image CVE fixes
   workflow_dispatch:
 
 jobs:
