@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://oblako-public.s3.amazonaws.com/oblako_logo.png" width="320" alt="oblako">
+</p>
+
 # oblako
 
 [![CI](https://github.com/almostly/oblako/actions/workflows/ci.yml/badge.svg)](https://github.com/almostly/oblako/actions/workflows/ci.yml)
