@@ -44,7 +44,7 @@ jobs:
       - name: Start services
         run: >
           uv run --python 3.12 --extra dev python -c "from oblako.services import Oblako as O; import sys;
-          o = O(); svcs = [o.s3, o.dynamodb, o.moto, o.stepfunctions, o.pgredshift, o.redshift, o.rds, o.opensearch];
+          o = O(); svcs = [o.s3, o.dynamodb, o.moto, o.stepfunctions, o.redshift, o.rds, o.opensearch];
           [s.start() for s in svcs];
           r = {s.name: s.wait_ready(timeout=180) for s in svcs};
           print('ready:', r); sys.exit(0 if all(r.values()) else 1)"

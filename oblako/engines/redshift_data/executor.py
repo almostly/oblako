@@ -1,8 +1,8 @@
-"""Redshift Data API executor: runs SQL against the pgredshift container.
+"""Redshift Data API executor: runs SQL against the oblako/redshift container.
 
 Shapes results like the real ``redshift-data`` API (Field / ColumnMetadata).
 Ported from the aws-samples LocalStack Redshift provider, but backed by the
-single local pgredshift container instead of a per-cluster Postgres server.
+single local oblako/redshift container instead of a per-cluster Postgres server.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ _NAMED_PARAM = re.compile(r"(?<!:):([a-zA-Z_][a-zA-Z0-9_]*)")
 
 
 class RedshiftDataExecutor:
-    """Executes SQL against pgredshift and stores statement results in memory."""
+    """Executes SQL against the Redshift engine and stores statement results in memory."""
 
     def __init__(
         self,

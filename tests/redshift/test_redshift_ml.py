@@ -1,6 +1,6 @@
 """Integration tests for Redshift ML (CREATE MODEL) across model types.
 
-Requires: pip install 'oblako[sagemaker]', Docker, and pgredshift on 5439.
+Requires: pip install 'oblako[sagemaker]', Docker, and the Redshift engine on 5439.
 Each model is trained in a real SageMaker local container, so this is slow and
 skipped unless the pieces are present.
 """
@@ -40,7 +40,7 @@ def executor():
             dbname="oblako",
         ).close()
     except Exception:
-        pytest.skip("Docker or pgredshift not available")
+        pytest.skip("Docker or the Redshift engine not available")
 
     conn = psycopg2.connect(
         host="localhost", port=5439, user="oblako", password="oblako", dbname="oblako"

@@ -18,7 +18,7 @@ from .mlflow import MlflowService
 from .moto import MotoService
 from .opensearch import OpenSearchService
 from .rds import RdsService
-from .redshift import PgRedshiftService, RedshiftService
+from .redshift import RedshiftService
 from .s3proxy import S3ProxyService
 from .sagemaker import SageMakerService
 from .stepfunctions import StepFunctionsService
@@ -33,11 +33,9 @@ class Oblako:
         self.bedrock = BedrockService()
         self.ollama = self.bedrock  # backwards-compatible alias (engine is Ollama)
         self.opensearch = OpenSearchService()
-        # Redshift = raw pgredshift engine (5438) fronted by a wire proxy that is
-        # the Redshift endpoint (5439). The proxy lets redshift-connector clients
-        # (e.g. dbt-redshift) connect; psycopg2 passes through untouched.
-        # See services/redshift.py.
-        self.pgredshift = PgRedshiftService()
+        # Redshift = oblako's own PostgreSQL-16 image impersonating Redshift, so
+        # redshift-connector (dbt-redshift) connects natively — no wire proxy.
+        # See services/redshift.py + oblako/images/redshift.
         self.redshift = RedshiftService()
         self.rds = RdsService()
         self.aurora = self.rds  # Aurora shares the rds control plane + engine
@@ -91,7 +89,6 @@ class Oblako:
         return [
             self.bedrock,
             self.opensearch,
-            self.pgredshift,  # engine first — the proxy in front of it depends on it
             self.redshift,
             self.rds,
             self.moto,
@@ -105,10 +102,9 @@ class Oblako:
         """Internal infra containers: started with `up`, hidden from `status`.
 
         moto backs the Redshift/RDS/Aurora control planes; it is plumbing, not
-        a peer service like S3 or DynamoDB. pgredshift is the raw engine behind
-        the Redshift endpoint (`redshift`), so it is hidden the same way.
+        a peer service like S3 or DynamoDB.
         """
-        return [self.moto, self.pgredshift]
+        return [self.moto]
 
     def up(self) -> None:
         """Start all Docker-managed services."""

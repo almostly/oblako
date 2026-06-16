@@ -1,6 +1,6 @@
 """Integration tests for Redshift (requires: docker compose up redshift).
 
-Backed by hearthsim/pgredshift on port 5439.
+Backed by oblako/redshift on port 5439.
 """
 
 import psycopg2
@@ -69,19 +69,19 @@ def test_aggregation(cursor):
 
 
 def test_query_group(cursor):
-    """pgredshift accepts Redshift's `SET query_group`."""
+    """the Redshift engine accepts Redshift's `SET query_group`."""
     cursor.execute("SET query_group TO 'batch_scoring'")
     cursor.execute("SHOW query_group")
     assert cursor.fetchone()[0] == "batch_scoring"
 
 
 def test_stl_system_table(cursor):
-    """pgredshift ships Redshift STL/STV system tables (e.g. stl_scan)."""
+    """the Redshift engine ships Redshift STL/STV system tables (e.g. stl_scan)."""
     cursor.execute("SELECT COUNT(*) FROM stl_scan")
     assert cursor.fetchone()[0] > 0
 
 
 def test_redshift_json_udf(cursor):
-    """pgredshift provides Redshift JSON UDFs not present in stock PostgreSQL."""
+    """the Redshift engine provides Redshift JSON UDFs not present in stock PostgreSQL."""
     cursor.execute("SELECT json_array_length(%s)", ("[1, 2, 3]",))
     assert cursor.fetchone()[0] == 3

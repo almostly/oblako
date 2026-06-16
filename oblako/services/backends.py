@@ -57,6 +57,10 @@ class ContainerBackend:
         """Pull the image if it is not present locally."""
         raise NotImplementedError
 
+    def build_image(self, image: str, context_dir: str) -> None:
+        """Build an oblako-owned image from a Dockerfile context."""
+        raise NotImplementedError
+
     def run(
         self,
         *,
@@ -122,6 +126,18 @@ class DockerBackend(ContainerBackend):
         except NotFound:
             print(f"Pulling {image}...")
             self.client.images.pull(image)
+
+    def build_image(self, image: str, context_dir: str) -> None:
+        """Build an image from a Dockerfile context (skips if already present)."""
+        from docker.errors import NotFound
+
+        try:
+            self.client.images.get(image)
+            return
+        except NotFound:
+            pass
+        print(f"Building {image} from {context_dir} (first run, ~1-2 min)...")
+        self.client.images.build(path=context_dir, tag=image, rm=True, pull=True)
 
     def run(
         self,
@@ -505,6 +521,18 @@ class AppleContainerBackend(ContainerBackend):
     def ensure_image(self, image: str) -> None:
         """Pre-pull the image (best effort; `container run` also auto-pulls)."""
         self._cli("image", "pull", self._qualify(image), check=False)
+
+    def build_image(self, image: str, context_dir: str) -> None:
+        """Build an image from a Dockerfile context via `container build`."""
+        inspect = self._cli("image", "inspect", image, check=False)
+        if inspect.returncode == 0:
+            return
+        print(f"Building {image} from {context_dir} (first run, ~1-2 min)...")
+        result = self._cli("build", "-t", image, context_dir, check=False)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"`container build` failed for {image}:\n{result.stderr or result.stdout}"
+            )
 
     def run(
         self,

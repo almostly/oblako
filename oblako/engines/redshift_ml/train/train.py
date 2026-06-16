@@ -2,7 +2,7 @@
 """Redshift ML training entry point (SageMaker 'bring your own container').
 
 Trains the model type requested by hyperparameters and exports it to plain JSON
-that a pure-Python plpython3u UDF can evaluate in pgredshift (which has no
+that a pure-Python plpython3u UDF can evaluate in the Redshift engine (which has no
 numpy/sklearn/xgboost). Supports Redshift ML's supervised types —
   LINEAR_LEARNER -> linear / logistic regression (scikit-learn)
   MLP            -> multilayer perceptron        (scikit-learn, with scaling)

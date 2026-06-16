@@ -1,7 +1,7 @@
 """Local Redshift ML: CREATE MODEL via SageMaker-local training and an in-DB plpython3u inference UDF.
 
 `CREATE MODEL name FROM (SELECT ...) TARGET col FUNCTION fn [MODEL_TYPE ...]`:
-  1. run the SELECT against pgredshift -> features + target rows
+  1. run the SELECT against the Redshift engine -> features + target rows
   2. train in a real SageMaker local container (LINEAR_LEARNER / MLP / XGBOOST)
   3. store the exported model (plain JSON) in the `_ml_models` table
   4. generate a pure-Python plpython3u UDF `fn(...)` -> in-DB inference
@@ -11,7 +11,7 @@ from the target, or set via PROBLEM_TYPE / OBJECTIVE). With no MODEL_TYPE,
 Autopilot (AUTO ON, the default) trains all three types and keeps the one with
 the best holdout score; MODEL_TYPE (or AUTO OFF) pins a single type.
 
-Inference is pure Python because pgredshift's plpython3u has no numpy/sklearn/
+Inference is pure Python because the Redshift engine's plpython3u has no numpy/sklearn/
 xgboost; the trained model is exported to plain numbers/trees and evaluated in
 the UDF (linear: dot product / argmax; MLP: forward pass / argmax; XGBoost:
 tree-walk, summing per-class for multiclass).

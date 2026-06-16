@@ -1,10 +1,10 @@
 """Integration tests for the Redshift management + Data APIs.
 
 Requires running services:
-    docker compose up -d redshift moto   # pgredshift on 5439, moto on 5500
+    docker compose up -d redshift moto   # the Redshift engine on 5439, moto on 5500
 
 Exercises real boto3 'redshift' (control plane) and 'redshift-data' (executing
-SQL against pgredshift) clients.
+SQL against the Redshift engine) clients.
 """
 
 import boto3

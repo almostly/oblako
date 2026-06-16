@@ -1,0 +1,38 @@
+name: redshift-image
+
+# Build + publish the oblako Redshift image (deburky/redshift-local on Docker Hub)
+# whenever its source changes, so `oblako up` / docker-compose can just pull it.
+#
+# Needs two repo secrets:
+#   DOCKERHUB_USERNAME = deburky
+#   DOCKERHUB_TOKEN    = a Docker Hub access token (PAT) with Read/Write
+on:
+  push:
+    branches: [main]
+    paths: ["oblako/images/redshift/**", ".github/workflows/redshift-image.yml"]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3 # emulation for the arm64 build leg
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push (multi-arch)
+        uses: docker/build-push-action@v6
+        with:
+          context: oblako/images/redshift
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            deburky/redshift-local:16
+            deburky/redshift-local:latest

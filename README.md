@@ -20,9 +20,9 @@ Unlike LocalStack, oblako wires together **real local modes** of AWS services an
 | API Gateway | AWS SAM CLI (external) | `sam local start-api` — real local API Gateway routing HTTP to your functions (which use oblako's services); see `examples/python/sam/` |
 | S3 | S3Proxy | S3 API over local filesystem |
 | DynamoDB | dynamodb-local | Official AWS Docker image |
-| Redshift (storage) | pgredshift | PostgreSQL 10 + Redshift system tables, `SET query_group`, and UDFs |
+| Redshift (storage) | oblako image (PostgreSQL 16) | impersonates Redshift: accepts redshift-connector natively, system tables, `SET query_group`, UDFs |
 | Redshift (management API) | moto | boto3 `redshift` control plane: clusters, nodes, endpoints |
-| Redshift Data API | oblako server | boto3 `redshift-data`, executes real SQL against pgredshift |
+| Redshift Data API | oblako server | boto3 `redshift-data`, executes real SQL against the Redshift engine |
 | Redshift ML | SageMaker local + plpython3u | `CREATE MODEL` trains in a real container; predict UDF runs in-DB |
 | RDS | moto + PostgreSQL | boto3 `rds` control plane (instances) + real Postgres engine |
 | Aurora | moto + PostgreSQL | boto3 `rds` clusters (writer/reader endpoints) + real Postgres engine |
@@ -322,11 +322,11 @@ ddb.create_table(
 )
 ```
 
-### Redshift (via pgredshift)
+### Redshift
 
 Redshift comes in three layers, all local and boto3-compatible:
 
-**1. Storage engine (pgredshift).** The Redshift endpoint is port 5439 (Redshift's port) with user `oblako`, password `oblako`, database `oblako` — a thin Postgres-wire proxy fronting the engine so both psycopg2 and dbt-redshift connect there (see "dbt-redshift" below; the raw engine itself is on 5438). It's `hearthsim/pgredshift` — PostgreSQL 10 plus Redshift system tables (`stl_scan`, `stv_tbl_perm`, ...), `SET query_group`, and Redshift UDFs (`json_array_length`, `median`, ...). Connect with psycopg2:
+**1. Storage engine.** Port 5439 (Redshift's port) with user `oblako`, password `oblako`, database `oblako`. It's oblako's own image — `deburky/redshift-local` — a PostgreSQL 16 that *impersonates* Amazon Redshift: a `shared_preload` C extension accepts the Redshift-only startup parameters Amazon's `redshift-connector` driver sends and reports `server_version 8.0.2`, so that driver (and dbt-redshift) connect natively — no proxy. It ships the Redshift system tables (`stl_scan`, `stv_tbl_perm`, ...), `SET query_group`, and UDFs (`json_array_length`, `median`, ...). Built multi-arch, so it runs on Docker and Apple `container` alike; `make up` pulls it (building locally from `oblako/images/redshift` if it isn't pullable). Connect with psycopg2:
 
 ```python
 import psycopg2
@@ -360,7 +360,7 @@ cluster = redshift.describe_clusters(ClusterIdentifier="credit-dw")["Clusters"][
 print(cluster["NumberOfNodes"], cluster["NodeType"], cluster["ClusterStatus"])
 ```
 
-**3. Redshift Data API (data plane).** Run SQL over HTTP — but unlike moto's mock, statements execute **for real** against the pgredshift container and return real rows. Served on port 8002. Use a real boto3 `redshift-data` client:
+**3. Redshift Data API (data plane).** Run SQL over HTTP — but unlike moto's mock, statements execute **for real** against the Redshift engine and return real rows. Served on port 8002. Use a real boto3 `redshift-data` client:
 
 ```python
 rd = (
@@ -389,7 +389,7 @@ For an external process (not the one that called `get_data_client`), run the Dat
 oblako redshift-data            # serves boto3 'redshift-data' on http://localhost:8002
 ```
 
-**4. redshift-connector (incl. dbt-redshift).** The Redshift endpoint on 5439 is a thin Postgres-wire proxy in front of the engine, so Amazon's `redshift-connector` driver works without any extra step — just `make up`. Why it's needed: the driver puts Redshift-only parameters (`client_protocol_version`, `driver_version`, …) in the Postgres startup handshake, which PostgreSQL 10 rejects with `FATAL: unrecognized configuration parameter "client_protocol_version"`; the proxy strips those from the handshake and reports `server_version` as Redshift's `8.0.2`. It's transparent for psycopg2 (the rewrites apply only to redshift-connector clients). Anything built on redshift-connector — most commonly dbt-redshift — then just works; point it at 5439:
+**4. redshift-connector (incl. dbt-redshift).** Amazon's `redshift-connector` driver connects straight to 5439 — no proxy, no shim. Stock PostgreSQL would reject the driver's startup handshake with `FATAL: unrecognized configuration parameter "client_protocol_version"`, but oblako's image registers those Redshift-only parameters as accepted GUCs and reports `server_version 8.0.2` at the source. So anything built on redshift-connector — most commonly dbt-redshift — just works after `make up`; point it at 5439:
 
 ```yaml
 # ~/.dbt/profiles.yml
@@ -399,19 +399,21 @@ my_project:
     dev:
       type: redshift
       host: localhost
-      port: 5439          # the Redshift endpoint (proxy in front of pgredshift)
+      port: 5439          # the Redshift engine
       user: oblako
       password: oblako
       dbname: oblako
       schema: public
-      sslmode: disable    # proxy terminates SSL negotiation as unsupported
+      sslmode: disable    # the local engine isn't SSL-configured
 ```
 
-`dbt debug`, `dbt run`, and `dbt test` then run through the genuine dbt-redshift adapter. Only the handshake is shimmed — Redshift-physical DDL the adapter emits (`DISTKEY`/`SORTKEY`/`ENCODE`, late-binding views, `SUPER`) still runs on PostgreSQL semantics underneath, so models using those configs will hit Postgres syntax errors. (The raw engine is also on 5438 for direct psql/debug access.)
+`dbt debug`, `dbt run`, and `dbt test` then run through the genuine dbt-redshift adapter. Caveat: Redshift-*physical* DDL the adapter emits (`DISTKEY`/`SORTKEY`/`ENCODE`, late-binding views, `SUPER`) runs on PostgreSQL semantics underneath, so models using those configs will hit Postgres syntax errors.
+
+**Python UDFs.** `CREATE FUNCTION … LANGUAGE plpythonu` works (it's aliased to PostgreSQL's Python 3 handler), so Redshift-style scalar UDFs run. One divergence to know: real Redshift Python UDFs are **Python 2**, which is EOL and unavailable on PostgreSQL 16 — so oblako runs them as **Python 3**. This matters less than it sounds: Amazon is **sunsetting Python UDFs** (no new ones from Patch 198; existing run until 2026-06-30) in favor of Lambda UDFs. For Python-3 parity oblako is already where Redshift is headed.
 
 ### Redshift ML (CREATE MODEL)
 
-Real `CREATE MODEL` SQL, fully local: the `redshift-data` server intercepts it, exports the `FROM (SELECT …)` rows, **trains in a real SageMaker local container** (scikit-learn), stores the coefficients, and generates a **`plpython3u` prediction UDF** in pgredshift. Then `SELECT my_predict(...)` is real in-database inference. Needs `pip install 'oblako[sagemaker]'` + Docker.
+Real `CREATE MODEL` SQL, fully local: the `redshift-data` server intercepts it, exports the `FROM (SELECT …)` rows, **trains in a real SageMaker local container** (scikit-learn), stores the coefficients, and generates a **`plpython3u` prediction UDF** in the Redshift engine. Then `SELECT my_predict(...)` is real in-database inference. Needs `pip install 'oblako[sagemaker]'` + Docker.
 
 ```sql
 CREATE MODEL price_model
@@ -439,7 +441,7 @@ FROM (SELECT sqft, beds, price FROM homes)
 TARGET price FUNCTION predict_best;  -- trains LINEAR_LEARNER + MLP + XGBOOST, keeps the winner
 ```
 
-All three of Redshift ML's supervised model types work — for regression, binary, and multiclass — trained in the SageMaker container, exported to a pure-Python UDF (pgredshift's `plpython3u` has no numpy/sklearn/xgboost):
+All three of Redshift ML's supervised model types work — for regression, binary, and multiclass — trained in the SageMaker container, exported to a pure-Python UDF (the engine's `plpython3u` has no numpy/sklearn/xgboost):
 
 | `MODEL_TYPE` | trained with | in-DB inference UDF |
 |---|---|---|
@@ -660,7 +662,7 @@ print(oblako.status())  # {'bedrock': 'running', ...}
 
 s3 = oblako.s3.get_client()  # boto3 S3 client
 br = oblako.bedrock.get_client()  # boto3 'bedrock-runtime' (-> Ollama)
-conn = oblako.redshift.connect()  # psycopg2 connection to pgredshift
+conn = oblako.redshift.connect()  # psycopg2 connection to the Redshift engine
 rs = oblako.redshift.get_client()  # boto3 'redshift' (clusters/nodes via moto)
 rd = (
     oblako.redshift.get_data_client()
@@ -706,8 +708,7 @@ oblako test-integration  # integration tests (requires oblako up)
 | OpenSearch | 9200 |
 | RDS / Aurora (PostgreSQL) | 5432 |
 | RDS Data API | 8006 |
-| Redshift endpoint (dbt-redshift + psycopg2) | 5439 |
-| Redshift raw engine (pgredshift, direct/debug) | 5438 |
+| Redshift (oblako image; redshift-connector + psycopg2) | 5439 |
 | Redshift management API (moto) | 5500 |
 | Redshift Data API | 8002 |
 | S3Proxy | 9000 |

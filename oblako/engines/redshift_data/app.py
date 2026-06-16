@@ -2,7 +2,7 @@
 
 boto3's ``redshift-data`` client can talk to this directly via ``endpoint_url``.
 Each request is a POST with header ``X-Amz-Target: RedshiftData.<Operation>``
-and a JSON body. Statements execute against the local pgredshift container.
+and a JSON body. Statements execute against the local oblako/redshift container.
 """
 
 from __future__ import annotations

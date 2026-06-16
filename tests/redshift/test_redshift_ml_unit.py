@@ -1,4 +1,4 @@
-"""Pure-unit tests for Redshift ML (no SageMaker / Docker / pgredshift).
+"""Pure-unit tests for Redshift ML (no SageMaker / Docker / the Redshift engine).
 
 Covers the CREATE MODEL parser, problem-type auto-detection, and the in-DB
 inference math of the generated plpython3u UDF bodies — including multiclass.

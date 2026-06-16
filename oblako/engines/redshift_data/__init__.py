@@ -1,4 +1,4 @@
-"""Local AWS Redshift Data API over the pgredshift container.
+"""Local AWS Redshift Data API over the oblako/redshift container.
 
 Exposes the `redshift-data` wire protocol so a real boto3 client works:
 
@@ -47,7 +47,7 @@ def start_in_thread(
 ) -> str:
     """Start the redshift-data server in a daemon thread (idempotent).
 
-    ``port`` is the HTTP server port; ``executor`` configures the pgredshift
+    ``port`` is the HTTP server port; ``executor`` configures the the Redshift engine
     backend (defaults to env-configured localhost:5439). Returns the endpoint
     URL. Safe to call repeatedly; only starts once per port.
     """

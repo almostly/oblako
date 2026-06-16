@@ -33,8 +33,7 @@ APPCONFIG = 8003  # appconfig (management) + appconfigdata (data)
 
 # Engines / data plane
 OLLAMA = 11434  # Bedrock runtime is backed by Ollama
-REDSHIFT_PG = 5439  # Redshift endpoint — the wire proxy (redshift-connector + psycopg2)
-REDSHIFT_ENGINE = 5438  # raw pgredshift engine, behind the proxy (direct/debug)
+REDSHIFT_PG = 5439  # oblako/redshift engine (redshift-connector + psycopg2, no proxy)
 RDS_PG = 5432
 RDS_MYSQL = 3306
 TRINO = 8485  # Athena equivalent

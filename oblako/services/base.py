@@ -40,6 +40,9 @@ class Service:
     command: str | list[str] | None = None
     working_dir: str | None = None
     container_user: str | None = None  # OS user inside the container (not a DB user)
+    # For oblako-owned images: a Dockerfile context to build from if the image
+    # can't be pulled (not published yet / offline). Pull is still preferred.
+    build_context: str | None = None
     backend: ContainerBackend = field(default_factory=get_backend, repr=False)
     _client: object = field(default=None, repr=False)
 
@@ -68,7 +71,14 @@ class Service:
     # Lifecycle
     def start(self) -> None:
         """Pull the image if needed and start the container (idempotent)."""
-        self.backend.ensure_image(self.image)
+        if self.build_context:
+            # Prefer the published image; build from source if it isn't pullable.
+            try:
+                self.backend.ensure_image(self.image)
+            except Exception:  # noqa: BLE001 - any pull failure -> local build
+                self.backend.build_image(self.image, self.build_context)
+        else:
+            self.backend.ensure_image(self.image)
         status = self.backend.status(self.container_name)
         if status == RUNNING:
             print(f"{self.name} is already running")
