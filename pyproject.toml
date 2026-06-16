@@ -33,6 +33,10 @@ notebook = [
 sagemaker = [
     # v2 SDK has classic local mode (LocalSession, Estimator instance_type="local");
     # v3 restructured the package and dropped it.
+    # NOTE (accepted advisory): GHSA-5r2p-pjr8-7fh7 (HIGH) is only fixed in
+    # sagemaker 3.4.0, which we can't take without losing local mode. The flaw is
+    # an eval() in JumpStart *search*, a path oblako never exercises, so we hold
+    # at <3 and accept it. Revisit if local mode returns to v3.
     "sagemaker>=2.200,<3",
     "pytz",  # sagemaker.workflow.pipeline imports it but doesn't always pull it in
 ]
