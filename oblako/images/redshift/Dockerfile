@@ -1,18 +1,25 @@
 # oblako's Amazon Redshift: a modern PostgreSQL that impersonates Redshift, so
 # redshift_connector (dbt-redshift, etc.) connects with no wire proxy. Built
 # multi-arch (arm64 + amd64) so it runs on both Docker and Apple `container`.
-FROM postgres:16
 
-# plpython3u for the Redshift UDFs / Redshift ML prediction UDFs, and the build
-# toolchain for the compatibility extension.
+# --- build stage: compile the compatibility extension, then throw the toolchain away
+FROM postgres:16 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        postgresql-plpython3-16 \
         postgresql-server-dev-16 gcc make \
     && rm -rf /var/lib/apt/lists/*
-
-# Build + install the shared_preload compatibility extension.
 COPY ext/ /tmp/ext/
-RUN make -C /tmp/ext && make -C /tmp/ext install && rm -rf /tmp/ext
+RUN make -C /tmp/ext && make -C /tmp/ext install   # -> $pkglibdir/oblako_redshift.so
+
+# --- runtime: stock postgres + plpython3u + the built .so (no compilers/headers)
+FROM postgres:16
+
+# plpython3u for the Redshift UDFs / Redshift ML prediction UDFs (runtime only).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        postgresql-plpython3-16 \
+    && rm -rf /var/lib/apt/lists/*
+
+# The shared_preload extension, compiled in the build stage.
+COPY --from=build /usr/lib/postgresql/16/lib/oblako_redshift.so /usr/lib/postgresql/16/lib/
 
 # Load it at startup (registers the Redshift startup GUCs + server_version 8.0.2).
 RUN echo "shared_preload_libraries = 'oblako_redshift'" \
