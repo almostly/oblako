@@ -1,0 +1,397 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>oblako.services.dynamodb &mdash; oblako</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/custom.css?v=f32f4e7e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            oblako
+              <img src="../../../_static/oblako_almostly_logo.png" class="logo" alt="Logo"/>
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Documentation</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#every-service-maps-1-1-to-boto3">Every service maps 1:1 to boto3</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#real-engines-not-mocks">Real engines, not mocks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#caddy-ties-the-topology-together">Caddy ties the topology together</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#what-this-buys-you">What this buys you</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../services.html">Services</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../services.html#ai-ml">AI / ML</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../services.html#storage-databases">Storage &amp; databases</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../services.html#analytics">Analytics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../services.html#orchestration-compute">Orchestration &amp; compute</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../services.html#management-control-planes">Management &amp; control planes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../services.html#redshift">Redshift</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../services.html#s3">S3</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../services.html#sagemaker">SageMaker</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api.html">Python API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../api.html#platform">Platform</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.platform.Oblako"><code class="docutils literal notranslate"><span class="pre">Oblako</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.platform.Oblako.up"><code class="docutils literal notranslate"><span class="pre">Oblako.up()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.platform.Oblako.down"><code class="docutils literal notranslate"><span class="pre">Oblako.down()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.platform.Oblako.status"><code class="docutils literal notranslate"><span class="pre">Oblako.status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.platform.Oblako.wait_ready"><code class="docutils literal notranslate"><span class="pre">Oblako.wait_ready()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api.html#ai-ml">AI / ML</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.bedrock.BedrockService"><code class="docutils literal notranslate"><span class="pre">BedrockService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.bedrock.BedrockService.url"><code class="docutils literal notranslate"><span class="pre">BedrockService.url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.bedrock.BedrockService.pull_model"><code class="docutils literal notranslate"><span class="pre">BedrockService.pull_model()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.bedrock.BedrockService.list_models"><code class="docutils literal notranslate"><span class="pre">BedrockService.list_models()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.bedrock.BedrockService.start_runtime_server"><code class="docutils literal notranslate"><span class="pre">BedrockService.start_runtime_server()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.bedrock.BedrockService.get_client"><code class="docutils literal notranslate"><span class="pre">BedrockService.get_client()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.bedrock.BedrockService.get_control_client"><code class="docutils literal notranslate"><span class="pre">BedrockService.get_control_client()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService"><code class="docutils literal notranslate"><span class="pre">SageMakerService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService.client"><code class="docutils literal notranslate"><span class="pre">SageMakerService.client</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService.get_session"><code class="docutils literal notranslate"><span class="pre">SageMakerService.get_session()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService.build_image"><code class="docutils literal notranslate"><span class="pre">SageMakerService.build_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService.list_training_containers"><code class="docutils literal notranslate"><span class="pre">SageMakerService.list_training_containers()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService.list_endpoint_containers"><code class="docutils literal notranslate"><span class="pre">SageMakerService.list_endpoint_containers()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService.cleanup"><code class="docutils literal notranslate"><span class="pre">SageMakerService.cleanup()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService.image_exists"><code class="docutils literal notranslate"><span class="pre">SageMakerService.image_exists()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService.ensure_notebook_image"><code class="docutils literal notranslate"><span class="pre">SageMakerService.ensure_notebook_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService.create_domain"><code class="docutils literal notranslate"><span class="pre">SageMakerService.create_domain()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService.domain_status"><code class="docutils literal notranslate"><span class="pre">SageMakerService.domain_status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService.launch_notebook"><code class="docutils literal notranslate"><span class="pre">SageMakerService.launch_notebook()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.sagemaker.SageMakerService.delete_domain"><code class="docutils literal notranslate"><span class="pre">SageMakerService.delete_domain()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.mlflow.MlflowService"><code class="docutils literal notranslate"><span class="pre">MlflowService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.mlflow.MlflowService.tracking_uri"><code class="docutils literal notranslate"><span class="pre">MlflowService.tracking_uri</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.mlflow.MlflowService.tracking_server_arn"><code class="docutils literal notranslate"><span class="pre">MlflowService.tracking_server_arn</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.mlflow.MlflowService.custom_endpoint"><code class="docutils literal notranslate"><span class="pre">MlflowService.custom_endpoint</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.mlflow.MlflowService.ensure_image"><code class="docutils literal notranslate"><span class="pre">MlflowService.ensure_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.mlflow.MlflowService.start"><code class="docutils literal notranslate"><span class="pre">MlflowService.start()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api.html#storage-databases">Storage &amp; databases</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.s3proxy.S3ProxyService"><code class="docutils literal notranslate"><span class="pre">S3ProxyService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.s3proxy.S3ProxyService.endpoint_url"><code class="docutils literal notranslate"><span class="pre">S3ProxyService.endpoint_url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.s3proxy.S3ProxyService.get_client"><code class="docutils literal notranslate"><span class="pre">S3ProxyService.get_client()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.dynamodb.DynamoDBService"><code class="docutils literal notranslate"><span class="pre">DynamoDBService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.dynamodb.DynamoDBService.endpoint_url"><code class="docutils literal notranslate"><span class="pre">DynamoDBService.endpoint_url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.dynamodb.DynamoDBService.get_resource"><code class="docutils literal notranslate"><span class="pre">DynamoDBService.get_resource()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.dynamodb.DynamoDBService.get_client"><code class="docutils literal notranslate"><span class="pre">DynamoDBService.get_client()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.kinesis.KinesisService"><code class="docutils literal notranslate"><span class="pre">KinesisService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.kinesis.KinesisService.endpoint_url"><code class="docutils literal notranslate"><span class="pre">KinesisService.endpoint_url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.kinesis.KinesisService.get_client"><code class="docutils literal notranslate"><span class="pre">KinesisService.get_client()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.redshift.RedshiftService"><code class="docutils literal notranslate"><span class="pre">RedshiftService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.redshift.RedshiftService.connect"><code class="docutils literal notranslate"><span class="pre">RedshiftService.connect()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.redshift.RedshiftService.get_client"><code class="docutils literal notranslate"><span class="pre">RedshiftService.get_client()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.redshift.RedshiftService.start_data_server"><code class="docutils literal notranslate"><span class="pre">RedshiftService.start_data_server()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.redshift.RedshiftService.get_data_client"><code class="docutils literal notranslate"><span class="pre">RedshiftService.get_data_client()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.rds.RdsService"><code class="docutils literal notranslate"><span class="pre">RdsService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.rds.RdsService.connect"><code class="docutils literal notranslate"><span class="pre">RdsService.connect()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.rds.RdsService.get_client"><code class="docutils literal notranslate"><span class="pre">RdsService.get_client()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.rds.RdsService.seed"><code class="docutils literal notranslate"><span class="pre">RdsService.seed()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.rds.RdsService.start_data_server"><code class="docutils literal notranslate"><span class="pre">RdsService.start_data_server()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.rds.RdsService.get_data_client"><code class="docutils literal notranslate"><span class="pre">RdsService.get_data_client()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.iceberg.IcebergCatalogService"><code class="docutils literal notranslate"><span class="pre">IcebergCatalogService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.iceberg.IcebergCatalogService.endpoint_url"><code class="docutils literal notranslate"><span class="pre">IcebergCatalogService.endpoint_url</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api.html#analytics">Analytics</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.trino.TrinoService"><code class="docutils literal notranslate"><span class="pre">TrinoService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.trino.TrinoService.endpoint_url"><code class="docutils literal notranslate"><span class="pre">TrinoService.endpoint_url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.trino.TrinoService.query"><code class="docutils literal notranslate"><span class="pre">TrinoService.query()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.glue.GlueService"><code class="docutils literal notranslate"><span class="pre">GlueService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.glue.GlueService.client"><code class="docutils literal notranslate"><span class="pre">GlueService.client</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.glue.GlueService.ensure_image"><code class="docutils literal notranslate"><span class="pre">GlueService.ensure_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.glue.GlueService.submit_job"><code class="docutils literal notranslate"><span class="pre">GlueService.submit_job()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.glue.GlueService.run_workflow"><code class="docutils literal notranslate"><span class="pre">GlueService.run_workflow()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.glue_catalog.GlueCatalogService"><code class="docutils literal notranslate"><span class="pre">GlueCatalogService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.glue_catalog.GlueCatalogService.endpoint_url"><code class="docutils literal notranslate"><span class="pre">GlueCatalogService.endpoint_url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.glue_catalog.GlueCatalogService.start_server"><code class="docutils literal notranslate"><span class="pre">GlueCatalogService.start_server()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.glue_catalog.GlueCatalogService.get_client"><code class="docutils literal notranslate"><span class="pre">GlueCatalogService.get_client()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api.html#orchestration-compute-management">Orchestration, compute &amp; management</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.stepfunctions.StepFunctionsService"><code class="docutils literal notranslate"><span class="pre">StepFunctionsService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.stepfunctions.StepFunctionsService.write_mock_config"><code class="docutils literal notranslate"><span class="pre">StepFunctionsService.write_mock_config()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.stepfunctions.StepFunctionsService.start"><code class="docutils literal notranslate"><span class="pre">StepFunctionsService.start()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.stepfunctions.StepFunctionsService.endpoint_url"><code class="docutils literal notranslate"><span class="pre">StepFunctionsService.endpoint_url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.stepfunctions.StepFunctionsService.create_state_machine"><code class="docutils literal notranslate"><span class="pre">StepFunctionsService.create_state_machine()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.stepfunctions.StepFunctionsService.execute"><code class="docutils literal notranslate"><span class="pre">StepFunctionsService.execute()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.stepfunctions.StepFunctionsService.get_client"><code class="docutils literal notranslate"><span class="pre">StepFunctionsService.get_client()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.awslambda.LambdaService"><code class="docutils literal notranslate"><span class="pre">LambdaService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.awslambda.LambdaService.endpoint_url"><code class="docutils literal notranslate"><span class="pre">LambdaService.endpoint_url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.awslambda.LambdaService.get_iam_client"><code class="docutils literal notranslate"><span class="pre">LambdaService.get_iam_client()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.awslambda.LambdaService.ensure_exec_role"><code class="docutils literal notranslate"><span class="pre">LambdaService.ensure_exec_role()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.awslambda.LambdaService.ensure_runtime_image"><code class="docutils literal notranslate"><span class="pre">LambdaService.ensure_runtime_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.awslambda.LambdaService.start"><code class="docutils literal notranslate"><span class="pre">LambdaService.start()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.awslambda.LambdaService.stop"><code class="docutils literal notranslate"><span class="pre">LambdaService.stop()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.awslambda.LambdaService.wait_ready"><code class="docutils literal notranslate"><span class="pre">LambdaService.wait_ready()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.awslambda.LambdaService.status"><code class="docutils literal notranslate"><span class="pre">LambdaService.status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.awslambda.LambdaService.get_client"><code class="docutils literal notranslate"><span class="pre">LambdaService.get_client()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.opensearch.OpenSearchService"><code class="docutils literal notranslate"><span class="pre">OpenSearchService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.opensearch.OpenSearchService.url"><code class="docutils literal notranslate"><span class="pre">OpenSearchService.url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.opensearch.OpenSearchService.create_knn_index"><code class="docutils literal notranslate"><span class="pre">OpenSearchService.create_knn_index()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.cloudformation.CloudFormationService"><code class="docutils literal notranslate"><span class="pre">CloudFormationService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.cloudformation.CloudFormationService.endpoint_url"><code class="docutils literal notranslate"><span class="pre">CloudFormationService.endpoint_url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.cloudformation.CloudFormationService.start_server"><code class="docutils literal notranslate"><span class="pre">CloudFormationService.start_server()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.cloudformation.CloudFormationService.get_client"><code class="docutils literal notranslate"><span class="pre">CloudFormationService.get_client()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.cloudformation.CloudFormationService.is_running"><code class="docutils literal notranslate"><span class="pre">CloudFormationService.is_running()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.iam.IamService"><code class="docutils literal notranslate"><span class="pre">IamService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.iam.IamService.endpoint_url"><code class="docutils literal notranslate"><span class="pre">IamService.endpoint_url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.iam.IamService.create_user"><code class="docutils literal notranslate"><span class="pre">IamService.create_user()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.iam.IamService.create_role"><code class="docutils literal notranslate"><span class="pre">IamService.create_role()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.iam.IamService.create_policy"><code class="docutils literal notranslate"><span class="pre">IamService.create_policy()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.iam.IamService.attach_role_policy"><code class="docutils literal notranslate"><span class="pre">IamService.attach_role_policy()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.iam.IamService.attach_user_policy"><code class="docutils literal notranslate"><span class="pre">IamService.attach_user_policy()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.iam.IamService.gather_statements"><code class="docutils literal notranslate"><span class="pre">IamService.gather_statements()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.iam.IamService.authorize"><code class="docutils literal notranslate"><span class="pre">IamService.authorize()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.iam.IamService.assume_role"><code class="docutils literal notranslate"><span class="pre">IamService.assume_role()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.iam.IamService.get_client"><code class="docutils literal notranslate"><span class="pre">IamService.get_client()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service"><code class="docutils literal notranslate"><span class="pre">Ec2Service</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service.endpoint_url"><code class="docutils literal notranslate"><span class="pre">Ec2Service.endpoint_url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service.run_instance"><code class="docutils literal notranslate"><span class="pre">Ec2Service.run_instance()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service.stop_instance"><code class="docutils literal notranslate"><span class="pre">Ec2Service.stop_instance()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service.start_instance"><code class="docutils literal notranslate"><span class="pre">Ec2Service.start_instance()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service.terminate_instance"><code class="docutils literal notranslate"><span class="pre">Ec2Service.terminate_instance()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service.instance_container"><code class="docutils literal notranslate"><span class="pre">Ec2Service.instance_container()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service.list_instance_containers"><code class="docutils literal notranslate"><span class="pre">Ec2Service.list_instance_containers()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service.start"><code class="docutils literal notranslate"><span class="pre">Ec2Service.start()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service.stop"><code class="docutils literal notranslate"><span class="pre">Ec2Service.stop()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service.wait_ready"><code class="docutils literal notranslate"><span class="pre">Ec2Service.wait_ready()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service.status"><code class="docutils literal notranslate"><span class="pre">Ec2Service.status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.ec2.Ec2Service.get_client"><code class="docutils literal notranslate"><span class="pre">Ec2Service.get_client()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.appconfig.AppConfigService"><code class="docutils literal notranslate"><span class="pre">AppConfigService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.appconfig.AppConfigService.endpoint_url"><code class="docutils literal notranslate"><span class="pre">AppConfigService.endpoint_url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.appconfig.AppConfigService.start_server"><code class="docutils literal notranslate"><span class="pre">AppConfigService.start_server()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.appconfig.AppConfigService.get_client"><code class="docutils literal notranslate"><span class="pre">AppConfigService.get_client()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.appconfig.AppConfigService.get_data_client"><code class="docutils literal notranslate"><span class="pre">AppConfigService.get_data_client()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.appconfig.AppConfigService.get_agent"><code class="docutils literal notranslate"><span class="pre">AppConfigService.get_agent()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api.html#container-backends">Container backends</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend"><code class="docutils literal notranslate"><span class="pre">ContainerBackend</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.ensure_image"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.ensure_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.build_image"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.build_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.run"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.run()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.status"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.remove"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.remove()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.stop"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.stop()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.logs"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.logs()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend"><code class="docutils literal notranslate"><span class="pre">DockerBackend</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.client"><code class="docutils literal notranslate"><span class="pre">DockerBackend.client</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.ensure_image"><code class="docutils literal notranslate"><span class="pre">DockerBackend.ensure_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.build_image"><code class="docutils literal notranslate"><span class="pre">DockerBackend.build_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.run"><code class="docutils literal notranslate"><span class="pre">DockerBackend.run()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.status"><code class="docutils literal notranslate"><span class="pre">DockerBackend.status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.remove"><code class="docutils literal notranslate"><span class="pre">DockerBackend.remove()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.stop"><code class="docutils literal notranslate"><span class="pre">DockerBackend.stop()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.logs"><code class="docutils literal notranslate"><span class="pre">DockerBackend.logs()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend.ensure_image"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend.ensure_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend.run"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend.run()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend.status"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend.status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend.remove"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend.remove()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend.stop"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend.stop()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend.logs"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend.logs()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.ensure_image"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.ensure_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.build_image"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.build_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.run"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.run()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.status"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.remove"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.remove()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.stop"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.stop()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.logs"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.logs()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">oblako</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">oblako.services.dynamodb</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for oblako.services.dynamodb</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;DynamoDB Local service: official AWS Docker image.&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">oblako</span><span class="w"> </span><span class="kn">import</span> <span class="n">ports</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">Service</span><span class="p">,</span> <span class="n">PortMapping</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">.boto</span><span class="w"> </span><span class="kn">import</span> <span class="n">BotoService</span><span class="p">,</span> <span class="n">resource</span>
+
+
+<div class="viewcode-block" id="DynamoDBService">
+<a class="viewcode-back" href="../../../api.html#oblako.services.dynamodb.DynamoDBService">[docs]</a>
+<span class="nd">@BotoService</span><span class="p">(</span><span class="s2">&quot;dynamodb&quot;</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">DynamoDBService</span><span class="p">(</span><span class="n">Service</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;DynamoDB Local service backed by the official Amazon Docker image.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">host_port</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">ports</span><span class="o">.</span><span class="n">DYNAMODB</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the DynamoDB Local service on the given host port.&quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
+            <span class="n">name</span><span class="o">=</span><span class="s2">&quot;dynamodb&quot;</span><span class="p">,</span>
+            <span class="n">image</span><span class="o">=</span><span class="s2">&quot;amazon/dynamodb-local:latest&quot;</span><span class="p">,</span>
+            <span class="n">ports</span><span class="o">=</span><span class="p">[</span><span class="n">PortMapping</span><span class="p">(</span><span class="n">container_port</span><span class="o">=</span><span class="mi">8000</span><span class="p">,</span> <span class="n">host_port</span><span class="o">=</span><span class="n">host_port</span><span class="p">)],</span>
+            <span class="c1"># Persist to the mounted volume: dynamodb-local only writes to disk</span>
+            <span class="c1"># with -sharedDb -dbPath (else it runs per-credentials, in-memory-ish).</span>
+            <span class="n">command</span><span class="o">=</span><span class="s2">&quot;-jar DynamoDBLocal.jar -sharedDb -dbPath ./data&quot;</span><span class="p">,</span>
+            <span class="n">working_dir</span><span class="o">=</span><span class="s2">&quot;/home/dynamodblocal&quot;</span><span class="p">,</span>
+            <span class="n">volumes</span><span class="o">=</span><span class="p">{</span>
+                <span class="s2">&quot;oblako-dynamodb-data&quot;</span><span class="p">:</span> <span class="p">{</span>
+                    <span class="s2">&quot;bind&quot;</span><span class="p">:</span> <span class="s2">&quot;/home/dynamodblocal/data&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;mode&quot;</span><span class="p">:</span> <span class="s2">&quot;rw&quot;</span><span class="p">,</span>
+                <span class="p">}</span>
+            <span class="p">},</span>
+            <span class="c1"># The named volume is root-owned; run as root so the non-root default</span>
+            <span class="c1"># user can write shared-local-instance.db (else: &quot;unable to open database file&quot;).</span>
+            <span class="n">container_user</span><span class="o">=</span><span class="s2">&quot;root&quot;</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">host_port</span> <span class="o">=</span> <span class="n">host_port</span>
+
+    <span class="nd">@property</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">endpoint_url</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return the DynamoDB Local endpoint URL.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;http://localhost:</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">host_port</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<div class="viewcode-block" id="DynamoDBService.get_resource">
+<a class="viewcode-back" href="../../../api.html#oblako.services.dynamodb.DynamoDBService.get_resource">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_resource</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a boto3 DynamoDB resource for higher-level API.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">resource</span><span class="p">(</span><span class="s2">&quot;dynamodb&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">endpoint_url</span><span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_health_check</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">client</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_client</span><span class="p">()</span>
+            <span class="n">client</span><span class="o">.</span><span class="n">list_tables</span><span class="p">()</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright almostly.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

@@ -35,6 +35,9 @@ jobs:
           context: oblako/images/redshift
           platforms: linux/amd64,linux/arm64
           push: true
+          # no SBOM/provenance attestation manifests (the "unknown · 0 MB" rows)
+          provenance: false
+          sbom: false
           tags: |
             deburky/redshift-local:16
             deburky/redshift-local:latest

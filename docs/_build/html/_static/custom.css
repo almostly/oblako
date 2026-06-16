@@ -1,0 +1,44 @@
+/* oblako docs — soften the default ReadTheDocs theme to match the logo's
+   pastel/iridescent palette, and scale the sidebar logo down. */
+
+/* logo: the RTD sidebar renders it full-width; bring it down to a tidy size */
+.wy-side-nav-search > a img.logo,
+.wy-side-nav-search .wy-dropdown > a img.logo {
+  max-width: 110px;
+  width: 110px;
+  margin: 0.4rem auto 0.6rem;
+}
+
+/* search header: soft lavender instead of the hard #2980b9 blue */
+.wy-side-nav-search {
+  background-color: #9d89d4;
+}
+.wy-side-nav-search input[type="text"] {
+  border-color: #b7a8e0;
+}
+
+/* sidebar: muted lavender-grey rather than flat dark grey */
+.wy-nav-side {
+  background: #3a3550;
+}
+.wy-menu-vertical a:hover {
+  background-color: #4a4566;
+}
+.wy-menu-vertical li.current {
+  background: #efeaf9;
+}
+.wy-menu-vertical li.current > a {
+  color: #463f63;
+}
+.wy-menu-vertical li.toctree-l1.current > a {
+  border-color: #9d89d4;
+}
+
+/* content links + accents: soft periwinkle instead of blue */
+.wy-nav-content a,
+.wy-nav-content a:visited {
+  color: #7c66bf;
+}
+.wy-nav-content a:hover {
+  color: #6450a3;
+}

@@ -1,0 +1,330 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>oblako.services.redshift &mdash; oblako</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            oblako
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Documentation</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../architecture.html">Architecture</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#every-service-maps-1-1-to-boto3">Every service maps 1:1 to boto3</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#real-engines-not-mocks">Real engines, not mocks</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#caddy-ties-the-topology-together">Caddy ties the topology together</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../architecture.html#what-this-buys-you">What this buys you</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../services.html">Services</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../services.html#redshift">Redshift</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../services.html#s3">S3</a></li>
+<li class="toctree-l2"><a class="reference internal" href="../../../services.html#sagemaker">SageMaker</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api.html">Python API</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="../../../api.html#platform">Platform</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.platform.Oblako"><code class="docutils literal notranslate"><span class="pre">Oblako</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.platform.Oblako.up"><code class="docutils literal notranslate"><span class="pre">Oblako.up()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.platform.Oblako.down"><code class="docutils literal notranslate"><span class="pre">Oblako.down()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.platform.Oblako.status"><code class="docutils literal notranslate"><span class="pre">Oblako.status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.platform.Oblako.wait_ready"><code class="docutils literal notranslate"><span class="pre">Oblako.wait_ready()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api.html#redshift">Redshift</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.redshift.RedshiftService"><code class="docutils literal notranslate"><span class="pre">RedshiftService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.redshift.RedshiftService.connect"><code class="docutils literal notranslate"><span class="pre">RedshiftService.connect()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.redshift.RedshiftService.get_client"><code class="docutils literal notranslate"><span class="pre">RedshiftService.get_client()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.redshift.RedshiftService.start_data_server"><code class="docutils literal notranslate"><span class="pre">RedshiftService.start_data_server()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.redshift.RedshiftService.get_data_client"><code class="docutils literal notranslate"><span class="pre">RedshiftService.get_data_client()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api.html#s3">S3</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.s3proxy.S3ProxyService"><code class="docutils literal notranslate"><span class="pre">S3ProxyService</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.s3proxy.S3ProxyService.endpoint_url"><code class="docutils literal notranslate"><span class="pre">S3ProxyService.endpoint_url</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.s3proxy.S3ProxyService.get_client"><code class="docutils literal notranslate"><span class="pre">S3ProxyService.get_client()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="../../../api.html#module-oblako.services.backends">Container backends</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend"><code class="docutils literal notranslate"><span class="pre">ContainerBackend</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.ensure_image"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.ensure_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.build_image"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.build_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.run"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.run()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.status"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.remove"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.remove()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.stop"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.stop()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.ContainerBackend.logs"><code class="docutils literal notranslate"><span class="pre">ContainerBackend.logs()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend"><code class="docutils literal notranslate"><span class="pre">DockerBackend</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.client"><code class="docutils literal notranslate"><span class="pre">DockerBackend.client</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.ensure_image"><code class="docutils literal notranslate"><span class="pre">DockerBackend.ensure_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.build_image"><code class="docutils literal notranslate"><span class="pre">DockerBackend.build_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.run"><code class="docutils literal notranslate"><span class="pre">DockerBackend.run()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.status"><code class="docutils literal notranslate"><span class="pre">DockerBackend.status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.remove"><code class="docutils literal notranslate"><span class="pre">DockerBackend.remove()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.stop"><code class="docutils literal notranslate"><span class="pre">DockerBackend.stop()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.DockerBackend.logs"><code class="docutils literal notranslate"><span class="pre">DockerBackend.logs()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend.ensure_image"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend.ensure_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend.run"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend.run()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend.status"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend.status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend.remove"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend.remove()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend.stop"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend.stop()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.KubernetesBackend.logs"><code class="docutils literal notranslate"><span class="pre">KubernetesBackend.logs()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.ensure_image"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.ensure_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.build_image"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.build_image()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.run"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.run()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.status"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.status()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.remove"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.remove()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.stop"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.stop()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="../../../api.html#oblako.services.backends.AppleContainerBackend.logs"><code class="docutils literal notranslate"><span class="pre">AppleContainerBackend.logs()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">oblako</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">oblako.services.redshift</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for oblako.services.redshift</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Redshift service: local Amazon Redshift on oblako&#39;s own image.</span>
+
+<span class="sd">``oblako/redshift`` is a modern PostgreSQL 16 that impersonates Amazon Redshift:</span>
+<span class="sd">a small ``shared_preload`` C extension registers the Redshift-only startup</span>
+<span class="sd">parameters Amazon&#39;s ``redshift-connector`` driver sends (``client_protocol_version``</span>
+<span class="sd">…) as no-op GUCs and reports ``server_version = 8.0.2``, so the driver connects</span>
+<span class="sd">*natively* — no wire proxy. It also ships the Redshift system tables, UDFs (via</span>
+<span class="sd">plpython3u), and ``SET query_group``. Built multi-arch, so it runs on Docker and</span>
+<span class="sd">Apple ``container`` alike. See ``oblako/images/redshift``.</span>
+
+<span class="sd">Three ways in:</span>
+<span class="sd">  * ``connect()``         - psycopg2 connection straight to the engine (5439).</span>
+<span class="sd">  * ``get_client()``      - boto3 ``redshift`` control plane (clusters, nodes)</span>
+<span class="sd">                            served by the local moto container.</span>
+<span class="sd">  * ``get_data_client()`` - boto3 ``redshift-data`` client whose SQL executes</span>
+<span class="sd">                            for real against the engine (auto-starts the server).</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">psycopg2</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">oblako</span><span class="w"> </span><span class="kn">import</span> <span class="n">config</span><span class="p">,</span> <span class="n">ports</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">PortMapping</span><span class="p">,</span> <span class="n">Service</span>
+
+<span class="c1"># Published image oblako pulls; falls back to building oblako/images/redshift</span>
+<span class="c1"># locally if it isn&#39;t pullable yet (see Service.build_context).</span>
+<span class="n">REDSHIFT_IMAGE</span> <span class="o">=</span> <span class="s2">&quot;deburky/redshift-local:16&quot;</span>
+<span class="n">_BUILD_CONTEXT</span> <span class="o">=</span> <span class="nb">str</span><span class="p">((</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">parent</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;images&quot;</span> <span class="o">/</span> <span class="s2">&quot;redshift&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">())</span>
+
+
+<div class="viewcode-block" id="RedshiftService">
+<a class="viewcode-back" href="../../../api.html#oblako.services.redshift.RedshiftService">[docs]</a>
+<span class="k">class</span><span class="w"> </span><span class="nc">RedshiftService</span><span class="p">(</span><span class="n">Service</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Local Amazon Redshift, backed by the oblako/redshift image (no proxy).&quot;&quot;&quot;</span>
+
+    <span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">host_port</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">ports</span><span class="o">.</span><span class="n">REDSHIFT_PG</span><span class="p">,</span>
+        <span class="n">user</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;oblako&quot;</span><span class="p">,</span>
+        <span class="n">password</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;oblako&quot;</span><span class="p">,</span>
+        <span class="n">database</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;oblako&quot;</span><span class="p">,</span>
+        <span class="n">control_port</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">ports</span><span class="o">.</span><span class="n">MOTO</span><span class="p">,</span>
+        <span class="n">data_port</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">ports</span><span class="o">.</span><span class="n">REDSHIFT_DATA</span><span class="p">,</span>
+        <span class="n">region</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Initialize the Redshift engine container and connection settings.&quot;&quot;&quot;</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span>
+            <span class="n">name</span><span class="o">=</span><span class="s2">&quot;redshift&quot;</span><span class="p">,</span>
+            <span class="n">image</span><span class="o">=</span><span class="n">REDSHIFT_IMAGE</span><span class="p">,</span>
+            <span class="n">build_context</span><span class="o">=</span><span class="n">_BUILD_CONTEXT</span><span class="p">,</span>
+            <span class="c1"># Redshift&#39;s port (5439) on the host; the engine listens on 5432.</span>
+            <span class="n">ports</span><span class="o">=</span><span class="p">[</span><span class="n">PortMapping</span><span class="p">(</span><span class="n">container_port</span><span class="o">=</span><span class="mi">5432</span><span class="p">,</span> <span class="n">host_port</span><span class="o">=</span><span class="n">host_port</span><span class="p">)],</span>
+            <span class="n">environment</span><span class="o">=</span><span class="p">{</span>
+                <span class="s2">&quot;POSTGRES_USER&quot;</span><span class="p">:</span> <span class="n">user</span><span class="p">,</span>
+                <span class="s2">&quot;POSTGRES_PASSWORD&quot;</span><span class="p">:</span> <span class="n">password</span><span class="p">,</span>
+                <span class="s2">&quot;POSTGRES_DB&quot;</span><span class="p">:</span> <span class="n">database</span><span class="p">,</span>
+                <span class="c1"># Redshift uses md5 auth, which redshift-connector expects; the</span>
+                <span class="c1"># image stores passwords as md5 to match (see its Dockerfile).</span>
+                <span class="s2">&quot;POSTGRES_HOST_AUTH_METHOD&quot;</span><span class="p">:</span> <span class="s2">&quot;md5&quot;</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="n">volumes</span><span class="o">=</span><span class="p">{</span>
+                <span class="s2">&quot;oblako-redshift-data&quot;</span><span class="p">:</span> <span class="p">{</span>
+                    <span class="s2">&quot;bind&quot;</span><span class="p">:</span> <span class="s2">&quot;/var/lib/postgresql/data&quot;</span><span class="p">,</span>
+                    <span class="s2">&quot;mode&quot;</span><span class="p">:</span> <span class="s2">&quot;rw&quot;</span><span class="p">,</span>
+                <span class="p">}</span>
+            <span class="p">},</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">host_port</span> <span class="o">=</span> <span class="n">host_port</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">user</span> <span class="o">=</span> <span class="n">user</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">password</span> <span class="o">=</span> <span class="n">password</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">database</span> <span class="o">=</span> <span class="n">database</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">control_port</span> <span class="o">=</span> <span class="n">control_port</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">data_port</span> <span class="o">=</span> <span class="n">data_port</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">region</span> <span class="o">=</span> <span class="n">region</span> <span class="ow">or</span> <span class="n">config</span><span class="o">.</span><span class="n">region</span><span class="p">()</span>
+
+<div class="viewcode-block" id="RedshiftService.connect">
+<a class="viewcode-back" href="../../../api.html#oblako.services.redshift.RedshiftService.connect">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">connect</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Return a psycopg2 connection straight to the Redshift engine.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="n">psycopg2</span><span class="o">.</span><span class="n">connect</span><span class="p">(</span>
+            <span class="n">host</span><span class="o">=</span><span class="s2">&quot;localhost&quot;</span><span class="p">,</span>
+            <span class="n">port</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">host_port</span><span class="p">,</span>
+            <span class="n">user</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">user</span><span class="p">,</span>
+            <span class="n">password</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">password</span><span class="p">,</span>
+            <span class="n">dbname</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">database</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="RedshiftService.get_client">
+<a class="viewcode-back" href="../../../api.html#oblako.services.redshift.RedshiftService.get_client">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_client</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;boto3 ``redshift`` control-plane client (clusters/nodes via moto).&quot;&quot;&quot;</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">boto</span>
+
+        <span class="k">return</span> <span class="n">boto</span><span class="o">.</span><span class="n">client</span><span class="p">(</span>
+            <span class="s2">&quot;redshift&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;http://localhost:</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">control_port</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="n">region</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">region</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="RedshiftService.start_data_server">
+<a class="viewcode-back" href="../../../api.html#oblako.services.redshift.RedshiftService.start_data_server">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">start_data_server</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Start the redshift-data server in-process (idempotent). Returns its URL.&quot;&quot;&quot;</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">oblako.engines.redshift_data</span><span class="w"> </span><span class="kn">import</span> <span class="n">RedshiftDataExecutor</span><span class="p">,</span> <span class="n">start_in_thread</span>
+
+        <span class="n">executor</span> <span class="o">=</span> <span class="n">RedshiftDataExecutor</span><span class="p">(</span>
+            <span class="n">host</span><span class="o">=</span><span class="s2">&quot;localhost&quot;</span><span class="p">,</span>
+            <span class="n">port</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">host_port</span><span class="p">,</span>
+            <span class="n">user</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">user</span><span class="p">,</span>
+            <span class="n">password</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">password</span><span class="p">,</span>
+            <span class="n">database</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">database</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">start_in_thread</span><span class="p">(</span><span class="n">port</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">data_port</span><span class="p">,</span> <span class="n">executor</span><span class="o">=</span><span class="n">executor</span><span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="RedshiftService.get_data_client">
+<a class="viewcode-back" href="../../../api.html#oblako.services.redshift.RedshiftService.get_data_client">[docs]</a>
+    <span class="k">def</span><span class="w"> </span><span class="nf">get_data_client</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">autostart</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;boto3 ``redshift-data`` client executing real SQL against the engine.&quot;&quot;&quot;</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">oblako.engines</span><span class="w"> </span><span class="kn">import</span> <span class="n">redshift_data</span>
+
+        <span class="kn">from</span><span class="w"> </span><span class="nn">.</span><span class="w"> </span><span class="kn">import</span> <span class="n">boto</span>
+
+        <span class="k">if</span> <span class="n">autostart</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">redshift_data</span><span class="o">.</span><span class="n">is_running</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">data_port</span><span class="p">):</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">start_data_server</span><span class="p">()</span>
+        <span class="k">return</span> <span class="n">boto</span><span class="o">.</span><span class="n">client</span><span class="p">(</span>
+            <span class="s2">&quot;redshift-data&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;http://localhost:</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">data_port</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="n">region</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">region</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+    <span class="k">def</span><span class="w"> </span><span class="nf">_health_check</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
+            <span class="k">return</span> <span class="kc">True</span>
+        <span class="k">except</span> <span class="n">psycopg2</span><span class="o">.</span><span class="n">OperationalError</span><span class="p">:</span>
+            <span class="k">return</span> <span class="kc">False</span></div>
+
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright almostly.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

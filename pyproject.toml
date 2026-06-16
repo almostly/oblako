@@ -51,6 +51,13 @@ iceberg = [
     # pyiceberg + pyarrow for writing/reading parquet via the local REST catalog.
     "pyiceberg[pyarrow,s3fs]>=0.7",
 ]
+docs = [
+    # Sphinx docs site (docs/), classic ReadTheDocs theme + Markdown via MyST.
+    "sphinx>=7",
+    "sphinx-rtd-theme>=2",
+    "myst-parser>=3",
+    "linkify-it-py>=2",
+]
 
 [project.scripts]
 oblako = "oblako.cli:main"
