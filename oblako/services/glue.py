@@ -18,6 +18,15 @@ from oblako import config
 
 IMAGE_TAG = "amazon/aws-glue-libs:5"
 
+# Glue's bundled AWS SDK adds `x-amz-optional-object-attributes: RestoreStatus`
+# to listObjectsV2 (a Glacier restore-status optimization). S3Proxy 501s on it
+# ("functionality not implemented"). A tiny SDK ExecutionInterceptor strips the
+# header before signing; it's registered on every job via this S3A config.
+_INTERCEPTOR_CLASS = "io.oblako.glue.StripOptionalObjectAttributes"
+_INTERCEPTOR_CONF = (
+    f"spark.hadoop.fs.s3a.audit.execution.interceptors={_INTERCEPTOR_CLASS}"
+)
+
 
 class GlueService:
     """Per-job Glue 5 runner. Submit a PySpark script, get back logs + exit code."""
@@ -47,6 +56,44 @@ class GlueService:
             print(f"Pulling {IMAGE_TAG} (~5 GB) — this can take a few minutes...")
             self.client.images.pull(IMAGE_TAG)
 
+    def _ensure_interceptor_jar(self) -> Path:
+        """Build (once, cached) the S3A header-stripping interceptor jar.
+
+        Compiled in the Glue image itself (it ships javac 17 + the AWS SDK), so
+        no host Java toolchain is needed. Returns the host path to the jar, which
+        ``submit_job`` mounts onto the Spark classpath.
+        """
+        jar = Path(tempfile.gettempdir()) / "oblako-glue" / "oblako-glue-s3a.jar"
+        if jar.exists():
+            return jar
+        jar.parent.mkdir(parents=True, exist_ok=True)
+        self.ensure_image()
+        src_dir = Path(__file__).parent / "glue_assets"
+        build = (
+            'set -e; BUNDLE=$(find /root/.m2 -name "bundle-*.jar" | head -1); '
+            "mkdir -p /tmp/c && "
+            'javac -cp "$BUNDLE" -d /tmp/c /src/StripOptionalObjectAttributes.java && '
+            "(cd /tmp/c && jar cf /out/oblako-glue-s3a.jar io)"
+        )
+        container = self.client.containers.run(
+            IMAGE_TAG,
+            entrypoint=["bash", "-lc"],
+            command=[build],
+            detach=True,
+            volumes={
+                str(src_dir): {"bind": "/src", "mode": "ro"},
+                str(jar.parent): {"bind": "/out", "mode": "rw"},
+            },
+        )
+        try:
+            result = container.wait(timeout=180)
+            if result["StatusCode"] != 0 or not jar.exists():
+                logs = container.logs().decode("utf-8", errors="replace")
+                raise RuntimeError(f"interceptor jar build failed:\n{logs[-2000:]}")
+        finally:
+            container.remove(force=True)
+        return jar
+
     def submit_job(
         self,
         script: str,
@@ -59,9 +106,11 @@ class GlueService:
 
         The script is written to a tempdir mounted at ``/scripts/job.py``. The
         container is given creds + endpoints to reach oblako's S3Proxy and Iceberg
-        REST catalog at ``host.docker.internal``.
+        REST catalog at ``host.docker.internal``, and an S3A interceptor that
+        strips the one header S3Proxy can't handle (see ``_INTERCEPTOR_CLASS``).
         """
         self.ensure_image()
+        interceptor_jar = self._ensure_interceptor_jar()
         full_env = {
             "AWS_ACCESS_KEY_ID": "test",
             "AWS_SECRET_ACCESS_KEY": "test",
@@ -75,9 +124,22 @@ class GlueService:
             (Path(scripts_dir) / "job.py").write_text(script)
             container = self.client.containers.run(
                 IMAGE_TAG,
-                command=["spark-submit", "/scripts/job.py", *(args or [])],
+                command=[
+                    "spark-submit",
+                    "--conf",
+                    _INTERCEPTOR_CONF,
+                    "/scripts/job.py",
+                    *(args or []),
+                ],
                 detach=True,
-                volumes={scripts_dir: {"bind": "/scripts", "mode": "ro"}},
+                volumes={
+                    scripts_dir: {"bind": "/scripts", "mode": "ro"},
+                    # drop the interceptor into a classpath-glob dir so S3A loads it
+                    str(interceptor_jar): {
+                        "bind": "/opt/spark/jars/oblako-glue-s3a.jar",
+                        "mode": "ro",
+                    },
+                },
                 environment=full_env,
                 extra_hosts={"host.docker.internal": "host-gateway"},
             )
