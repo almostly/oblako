@@ -4,10 +4,11 @@
 of calling docker-py directly. Docker, Podman, and Colima all speak the Docker
 Engine API, so they share ``DockerBackend`` — the only difference is which socket
 it talks to (honoured via ``DOCKER_HOST`` or auto-detected per runtime).
-Kubernetes is a genuinely different control plane, so it gets its own backend.
+Kubernetes is a genuinely different control plane, so it gets its own backend, as
+does Apple's ``container`` (macOS 26+), which has no Docker-API socket.
 
 Select with ``OBLAKO_CONTAINER_BACKEND`` = docker (default) | podman | colima |
-kubernetes. ``DOCKER_HOST`` always wins for the Docker-API runtimes.
+kubernetes | apple. ``DOCKER_HOST`` always wins for the Docker-API runtimes.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -436,6 +438,150 @@ class KubernetesBackend(ContainerBackend):
         return result.stdout if result.returncode == 0 else ""
 
 
+class AppleContainerBackend(ContainerBackend):
+    """Apple `container` backend (macOS 26+): Linux containers in lightweight VMs.
+
+    Shells out to the `container` CLI (there is no Python SDK). Each container
+    runs in its own VM with an IP on a vmnet subnet, but `-p host:container`
+    publishes to localhost exactly like Docker — so oblako's fixed-endpoint
+    contract holds unchanged. Two adaptations vs Docker: named volumes are mapped
+    to host dirs (the CLI bind-mounts host paths), and since there is no
+    `host.docker.internal` / `--add-host`, env values referencing it are
+    rewritten to the vmnet gateway.
+    """
+
+    name = "apple"
+
+    # The vmnet gateway is the host, as seen from inside a container. There is no
+    # host.docker.internal alias and no --add-host, so we substitute this for any
+    # env value that points at it (e.g. the Redshift proxy's backend host).
+    HOST_GATEWAY = "192.168.64.1"
+
+    def __init__(self):
+        """Locate the `container` binary (PATH, then the Homebrew locations)."""
+        self._bin = shutil.which("container") or next(
+            (
+                p
+                for p in (
+                    "/opt/homebrew/bin/container",
+                    "/opt/homebrew/opt/container/bin/container",
+                )
+                if os.path.exists(p)
+            ),
+            None,
+        )
+        if not self._bin:
+            raise RuntimeError(
+                "Apple `container` CLI not found — install it with "
+                "`brew install container` (needs macOS 26+)."
+            )
+
+    def _cli(self, *args, check=True):
+        return subprocess.run(
+            [self._bin, *args], check=check, text=True, capture_output=True
+        )
+
+    @staticmethod
+    def _qualify(image: str) -> str:
+        """Fully-qualify a Docker Hub short name (the CLI needs an explicit ref)."""
+        first = image.split("/")[0]
+        if "/" not in image:  # e.g. python:3.12-slim -> docker.io/library/...
+            return f"docker.io/library/{image}"
+        if (
+            "." not in first and first != "localhost"
+        ):  # andrewgaul/s3proxy -> docker.io/...
+            return f"docker.io/{image}"
+        return image
+
+    @staticmethod
+    def _volume_source(src: str) -> str:
+        """Bind path as-is; map a named volume to a stable host dir."""
+        if os.path.isabs(src):
+            return src
+        path = os.path.expanduser(f"~/.oblako/apple-volumes/{src}")
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def ensure_image(self, image: str) -> None:
+        """Pre-pull the image (best effort; `container run` also auto-pulls)."""
+        self._cli("image", "pull", self._qualify(image), check=False)
+
+    def run(
+        self,
+        *,
+        name,
+        image,
+        ports,
+        environment,
+        volumes,
+        extra_hosts,
+        command,
+        working_dir,
+        user,
+    ) -> None:
+        """Create and start a detached container via `container run`."""
+        args = ["run", "--detach", "--name", name]
+        for spec, host_port in (ports or {}).items():
+            container_port, _, proto = spec.partition("/")
+            mapping = f"{host_port}:{container_port}"
+            args += ["-p", mapping + (f"/{proto}" if proto and proto != "tcp" else "")]
+        for key, value in (environment or {}).items():
+            if isinstance(value, str):
+                value = value.replace("host.docker.internal", self.HOST_GATEWAY)
+            args += ["-e", f"{key}={value}"]
+        for src, opt in (volumes or {}).items():
+            suffix = ":ro" if opt.get("mode") == "ro" else ""
+            args += ["-v", f"{self._volume_source(src)}:{opt['bind']}{suffix}"]
+        if working_dir:
+            args += ["-w", working_dir]
+        if user:
+            args += ["-u", str(user)]
+        args.append(self._qualify(image))
+        if command:
+            args += command if isinstance(command, list) else shlex.split(command)
+
+        try:
+            self._cli(*args)
+        except subprocess.CalledProcessError as e:
+            err = (e.stderr or "") + (e.stdout or "")
+            if "in use" in err.lower() or "already allocated" in err.lower():
+                raise PortInUseError(
+                    f"Can't start '{name}': a host port it needs is already in use.\n{err}"
+                ) from e
+            raise RuntimeError(f"`container run` failed for '{name}':\n{err}") from e
+
+    def _items(self):
+        result = self._cli("ls", "--all", "--format", "json", check=False)
+        if result.returncode != 0 or not result.stdout.strip():
+            return []
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError:
+            return []
+
+    def status(self, name: str) -> str:
+        """Return RUNNING/STOPPED/ABSENT from `container ls --format json`."""
+        for item in self._items():
+            if item.get("id") == name:
+                state = (item.get("status") or {}).get("state", "")
+                return RUNNING if state == "running" else STOPPED
+        return ABSENT
+
+    def remove(self, name: str) -> None:
+        """Force-remove the container if present."""
+        self._cli("rm", "-f", name, check=False)
+
+    def stop(self, name: str) -> None:
+        """Stop and remove the container (no-op if absent)."""
+        self._cli("stop", name, check=False)
+        self.remove(name)  # force-remove; a plain `rm` can race the stop
+
+    def logs(self, name: str, tail: int = 50) -> str:
+        """Return recent container logs, or empty string if unavailable."""
+        result = self._cli("logs", "-n", str(tail), name, check=False)
+        return result.stdout if result.returncode == 0 else ""
+
+
 def _socket_for(runtime: str) -> str | None:
     """Return the Docker-API socket URL for a runtime (podman/colima), or None."""
     if os.environ.get("DOCKER_HOST"):
@@ -474,6 +620,8 @@ def get_backend() -> ContainerBackend:
     choice = (os.environ.get("OBLAKO_CONTAINER_BACKEND") or "docker").lower()
     if choice in ("kubernetes", "k8s"):
         return KubernetesBackend()
+    if choice in ("apple", "container"):
+        return AppleContainerBackend()
     if choice in ("podman", "colima"):
         return _docker_backend_for(choice)
     return DockerBackend()
