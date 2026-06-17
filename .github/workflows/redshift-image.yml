@@ -1,11 +1,15 @@
 name: redshift-image
 
-# Build + publish the oblako Redshift image (deburky/redshift-local on Docker Hub)
-# whenever its source changes, so `oblako up` / docker-compose can just pull it.
+# Build + publish the oblako Redshift image whenever its source changes, so
+# `oblako up` / docker-compose can just pull it. Published to two registries:
+#   - Docker Hub:  deburky/redshift-local                  (discoverable, human-facing)
+#   - ECR Public:  public.ecr.aws/u5s2h9v9/redshift-local  (no pull rate limits)
 #
-# Needs two repo secrets:
-#   DOCKERHUB_USERNAME = deburky
-#   DOCKERHUB_TOKEN    = a Docker Hub access token (PAT) with Read/Write
+# Needs repo secrets:
+#   DOCKERHUB_USERNAME      = deburky
+#   DOCKERHUB_TOKEN         = a Docker Hub access token (PAT) with Read/Write
+#   AWS_ECR_PUBLIC_ROLE_ARN = arn of the oblako-ecr-public-publish OIDC role
+#                             (kept in a secret so the account id isn't in source)
 on:
   push:
     branches: [main]
@@ -13,6 +17,13 @@ on:
   schedule:
     - cron: "0 6 1 * *" # monthly (1st, 06:00 UTC): pick up postgres:16 base-image CVE fixes
   workflow_dispatch:
+
+permissions:
+  id-token: write # for GitHub OIDC -> the ECR Public publish role
+  contents: read
+
+env:
+  ECR_PUBLIC_REGISTRY: public.ecr.aws/u5s2h9v9 # swap to public.ecr.aws/oblako once the custom alias is approved
 
 jobs:
   publish:
@@ -29,7 +40,18 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push (multi-arch)
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ECR_PUBLIC_ROLE_ARN }}
+          aws-region: us-east-1 # ECR Public's control plane is us-east-1 only
+
+      - name: Log in to ECR Public
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: Build and push (multi-arch, both registries)
         uses: docker/build-push-action@v6
         with:
           context: oblako/images/redshift
@@ -41,3 +63,5 @@ jobs:
           tags: |
             deburky/redshift-local:16
             deburky/redshift-local:latest
+            ${{ env.ECR_PUBLIC_REGISTRY }}/redshift-local:16
+            ${{ env.ECR_PUBLIC_REGISTRY }}/redshift-local:latest
