@@ -2,7 +2,7 @@
 
 oblako isn't hard-wired to Docker. Every service runs through a pluggable
 `ContainerBackend`, chosen with the `OBLAKO_CONTAINER_BACKEND` environment
-variable — so the same `oblako up` works on Docker, Podman, Colima, a Kubernetes
+variable, so the same `oblako up` works on Docker, Podman, Colima, a Kubernetes
 cluster, or Apple's `container`.
 
 | `OBLAKO_CONTAINER_BACKEND` | Runtime | How it's reached |
@@ -25,7 +25,7 @@ oblako up
 
 ## Podman / Colima
 
-Both speak the Docker Engine API, so they share the Docker backend — oblako
+Both speak the Docker Engine API, so they share the Docker backend, oblako
 auto-detects their socket (or honour `DOCKER_HOST`):
 
 ```bash
@@ -36,7 +36,7 @@ oblako up
 ## Kubernetes
 
 Each service becomes a Deployment + Service in a namespace, and a
-`kubectl port-forward` makes `localhost:PORT` reach the in-cluster Service — so
+`kubectl port-forward` makes `localhost:PORT` reach the in-cluster Service, so
 your boto3 code is unchanged. Needs `kubectl` and a cluster (minikube, kind,
 EKS, …).
 
@@ -52,7 +52,7 @@ Docker daemon; under Kubernetes they fall back to the ambient Docker context.
 ## Apple `container` (macOS 26+)
 
 Runs Linux containers in lightweight VMs. `container run -p` publishes to
-`localhost` just like Docker, so oblako's fixed-endpoint contract holds — boto3
+`localhost` just like Docker, so oblako's fixed-endpoint contract holds, boto3
 still hits `localhost:9000`, etc.
 
 ```bash
@@ -62,10 +62,10 @@ oblako up
 
 **Limitations**
 
-- No Docker socket, so the services that spawn containers — **Lambda**
-  (moto-managed), **SageMaker local**, and **Glue** — aren't available on this
+- No Docker socket, so the services that spawn containers, **Lambda**
+  (moto-managed), **SageMaker local**, and **Glue**, aren't available on this
   backend.
-- Apple `container` doesn't emulate amd64, so **amd64-only images won't run** —
+- Apple `container` doesn't emulate amd64, so **amd64-only images won't run**:
   oblako's own images (e.g. Redshift) are multi-arch; third-party amd64-only
   images need a Docker backend.
 - `host.docker.internal` isn't provided; oblako substitutes the vmnet gateway

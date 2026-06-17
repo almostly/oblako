@@ -11,9 +11,9 @@ This page lists what each one provides and where it diverges from AWS.
 | **Bedrock (control plane)** | `bedrock`: foundation-model catalog + batch model-invocation jobs. | Catalog is curated, not the full AWS list. |
 | **Bedrock embeddings** | Ollama + `nomic-embed-text` for RAG vectors. | Embedding dims/model differ from Titan/Cohere. |
 | **Bedrock Agents** | Agent loop with local tool calls (Ollama + SAM local). | No managed orchestration; tool-calling quality is model-dependent. |
-| **Bedrock AgentCore (Runtime)** | Local agent on the `/invocations` + `/ping` contract via the `bedrock-agentcore` SDK. | Runtime only — Gateway/Memory/Identity are managed-only. |
+| **Bedrock AgentCore (Runtime)** | Local agent on the `/invocations` + `/ping` contract via the `bedrock-agentcore` SDK. | Runtime only, Gateway/Memory/Identity are managed-only. |
 | **Bedrock Knowledge Bases** | Vector search with k-NN over **OpenSearch**. | Retrieval only; no managed ingestion pipeline. |
-| **SageMaker** | SDK **local mode** — real Docker training containers (`instance_type="local"`). | Needs `oblako[sagemaker]` (v2 SDK) + Docker; local mode only. |
+| **SageMaker** | SDK **local mode**: real Docker training containers (`instance_type="local"`). | Needs `oblako[sagemaker]` (v2 SDK) + Docker; local mode only. |
 | **SageMaker MLflow** | Managed MLflow tracking-server container (SigV4 auth, boto3-style creds). | Needs `oblako[mlflow]`. |
 
 ## Storage & databases
@@ -25,7 +25,7 @@ This page lists what each one provides and where it diverges from AWS.
 | **DynamoDB** | Amazon's DynamoDB Local. | Single local instance; no Streams→Lambda wiring. |
 | **Kinesis** | Kinesis Data Streams via kinesalite (`saidsef/aws-kinesis-local`). | Streams only; no Firehose / Managed Flink. |
 | **Redshift** | PostgreSQL 16 image impersonating Redshift; `redshift-connector`/dbt-redshift connect natively (no proxy). | Physical DDL (`DISTKEY`/`SORTKEY`/`ENCODE`, late-binding views, `SUPER`) runs on PostgreSQL semantics; Python UDFs are Python 3. |
-| **Redshift (control plane)** | `redshift` clusters/nodes/endpoints/snapshots via moto. | Metadata only — the cluster endpoint isn't the queryable engine. |
+| **Redshift (control plane)** | `redshift` clusters/nodes/endpoints/snapshots via moto. | Metadata only, the cluster endpoint isn't the queryable engine. |
 | **Redshift Data API** | `redshift-data`; SQL executes for real against the engine. | Statement results buffered in memory. |
 | **Redshift ML** | `CREATE MODEL` trains in a SageMaker local container; predict UDF runs in-DB. | Needs `oblako[sagemaker]` + Docker; pure-Python predict UDF. |
 | **RDS / Aurora** | moto control plane + a real PostgreSQL engine. | Engine is PostgreSQL regardless of the requested engine type. |
@@ -45,7 +45,7 @@ This page lists what each one provides and where it diverges from AWS.
 |---|---|---|
 | **Step Functions** | Amazon's `aws-stepfunctions-local`. | Lambda-backed states need a running SAM CLI. |
 | **Lambda** | Control plane + **real Docker-based invocation**. | x86_64 + python3.12 runtime image; SAM CLI for the dev-loop. |
-| **API Gateway** | External — AWS SAM CLI (`sam local start-api`) routing HTTP to your functions. | oblako doesn't manage it; bring your own SAM CLI. |
+| **API Gateway** | External, AWS SAM CLI (`sam local start-api`) routing HTTP to your functions. | oblako doesn't manage it; bring your own SAM CLI. |
 
 ## Management & control planes
 
@@ -66,7 +66,7 @@ The deep dives below cover the services with the most local-specific behavior.
 A PostgreSQL 16 image (`deburky/redshift-local`) that *impersonates* Amazon
 Redshift. A small `shared_preload` extension accepts the Redshift-only startup
 parameters Amazon's `redshift-connector` driver sends and reports
-`server_version 8.0.2`, so the driver — and dbt-redshift — connect **natively,
+`server_version 8.0.2`, so the driver, and dbt-redshift, connect **natively,
 no proxy**. It ships the Redshift system tables, `SET query_group`, and the
 JSON/scalar UDFs.
 
@@ -81,10 +81,10 @@ dbt-redshift: a `type: redshift` profile pointed at `host: localhost`,
 **Limitations**
 
 - Redshift-*physical* DDL (`DISTKEY`/`SORTKEY`/`ENCODE`, late-binding views,
-  `SUPER`/`VARBYTE`) runs on PostgreSQL semantics — that syntax is rejected.
+  `SUPER`/`VARBYTE`) runs on PostgreSQL semantics, that syntax is rejected.
 - Python UDFs run as **Python 3** (real Redshift's are Python 2, which Amazon is
   sunsetting); `LANGUAGE plpythonu` is aliased to the Python 3 handler.
-- It's a PostgreSQL engine underneath — no columnar storage, distribution, or
+- It's a PostgreSQL engine underneath, no columnar storage, distribution, or
   the Redshift query planner.
 
 ## S3
@@ -99,10 +99,10 @@ S3 API backed by S3Proxy over the local filesystem.
 
 ## SageMaker
 
-Runs the SageMaker SDK's **local mode** — `instance_type="local"` launches real
+Runs the SageMaker SDK's **local mode**, `instance_type="local"` launches real
 Docker training containers.
 
 **Limitations**
 
-- Requires `pip install 'oblako[sagemaker]'` (pinned to the v2 SDK — v3 dropped
+- Requires `pip install 'oblako[sagemaker]'` (pinned to the v2 SDK, v3 dropped
   local mode) and Docker.

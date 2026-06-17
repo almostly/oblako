@@ -2,10 +2,8 @@
 
 oblako is built on one idea: **real behavior, simulated topology**. Where a mock
 returns canned API responses, oblako runs the *actual* engine an AWS service is
-built on and wires it into an AWS-shaped local topology — so your code, your SQL,
+built on and wires it into an AWS-shaped local topology, so your code, your SQL,
 and your models all run for real.
-
-> LocalStack simulates the API; oblako simulates the topology around a real engine.
 
 ## Every service maps 1:1 to boto3
 
@@ -24,7 +22,7 @@ o.redshift.connect()      # psycopg2 / redshift-connector -> the real engine
 ```
 
 In a notebook or with the endpoint env vars set, unmodified `boto3.client("s3")`
-transparently hits the local service — no `endpoint_url`, no config.
+transparently hits the local service, no `endpoint_url`, no config.
 
 ## Real engines, not mocks
 

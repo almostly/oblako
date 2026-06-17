@@ -71,7 +71,7 @@ driver (`connect()`). `Oblako` is the platform handle that owns them all.
 
 ## Container backends
 
-The lifecycle layer behind every service — Docker, Apple `container`, or
+The lifecycle layer behind every service: Docker, Apple `container`, or
 Kubernetes (selected with `OBLAKO_CONTAINER_BACKEND`).
 
 ```{eval-rst}

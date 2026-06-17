@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Docker** — oblako runs services as local containers.
+- **Docker**: oblako runs services as local containers.
 - **Python 3.10+**
 
 ## Install
@@ -30,7 +30,7 @@ oblako dashboard           # web UI at http://localhost:8000
 
 Each service is reached through its normal `boto3` client. In a notebook or with
 the endpoint env vars set, unmodified `boto3` transparently hits the local
-service — no `endpoint_url`:
+service, no `endpoint_url`:
 
 ```python
 import boto3

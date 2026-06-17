@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <b>LocalStack simulates the API; oblako simulates the topology around a real engine.</b>
+  <b>oblako simulates the topology around real local engines. Real behavior, not a mock.</b>
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 
 oblako is a local AWS platform: run Bedrock, SageMaker, Redshift, Step Functions
 and more on your laptop, no cloud required. You write the AWS code you already
-write — **every service maps 1:1 to a `boto3` client** — and oblako runs it
+write, **every service maps 1:1 to a `boto3` client**, and oblako runs it
 against **real local engines** wired into an AWS-shaped topology.
 
 ```python
@@ -30,7 +30,7 @@ ddb.list_tables()
 The difference from a mock: a bucket really stores bytes, a `redshift-connector`
 session really runs SQL, a SageMaker job really trains in a container. oblako
 fakes the *topology* (clusters, endpoints, control planes) around engines that
-are genuinely doing the work — **real behavior, simulated topology**.
+are genuinely doing the work, **real behavior, simulated topology**.
 
 ## Services
 
@@ -45,7 +45,7 @@ normal `boto3` client (or native driver):
 | Bedrock AgentCore (Runtime) | bedrock-agentcore SDK | Local agent on the `/invocations` + `/ping` contract |
 | SageMaker | SDK local mode | `instance_type="local"` trains in real Docker |
 | Step Functions | aws-stepfunctions-local | Official AWS Docker image |
-| Lambda | AWS SAM CLI (external) | `sam local invoke` — bring your own SAM CLI |
+| Lambda | AWS SAM CLI (external) | `sam local invoke`, bring your own SAM CLI |
 | S3 | S3Proxy | S3 API over the local filesystem |
 | DynamoDB | dynamodb-local | Official AWS Docker image |
 | Redshift (engine) | oblako image (PostgreSQL 16) | impersonates Redshift: redshift-connector natively, system tables, `SET query_group`, UDFs |
@@ -71,7 +71,7 @@ oblako pull qwen2.5:0.5b   # pull a model into the Bedrock (Ollama) engine
 oblako dashboard           # web UI at http://localhost:8000
 ```
 
-Your unmodified `boto3` code then hits the local services — no `endpoint_url`,
+Your unmodified `boto3` code then hits the local services, no `endpoint_url`,
 no config (the dashboard, notebook, and env helpers wire `AWS_ENDPOINT_URL_*`
 for you).
 
@@ -98,13 +98,13 @@ Service names: `bedrock`, `opensearch`, `redshift`, `rds`, `moto`, `s3`,
 
 ## Container runtimes
 
-oblako isn't hard-wired to Docker — every service runs through a pluggable
+oblako isn't hard-wired to Docker, every service runs through a pluggable
 backend, selected with `OBLAKO_CONTAINER_BACKEND`: `docker` (default), `podman`,
 `colima`, `kubernetes`, or Apple's `container` (`apple`). See the
 [runtimes guide](https://oblako-sdk.almostly.ai/runtimes.html).
 
 ## Documentation
 
-The full docs — architecture, every service with its limitations, the dashboard,
-container runtimes, and the Python API reference — live at
+The full docs (architecture, every service with its limitations, the dashboard,
+container runtimes, and the Python API reference) live at
 **[oblako-sdk.almostly.ai](https://oblako-sdk.almostly.ai/)**.
