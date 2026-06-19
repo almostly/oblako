@@ -8,6 +8,7 @@ from .caddy import CaddyService
 from .cloudformation import CloudFormationService
 from .dynamodb import DynamoDBService
 from .ec2 import Ec2Service
+from .ecs import EcsService
 from .glue import GlueService
 from .glue_catalog import GlueCatalogService
 from .iam import IamService
@@ -51,6 +52,9 @@ class Oblako:
         # EC2: moto's control plane (instances, VPCs, security groups — describe
         # fidelity). Shares the moto endpoint, like IAM/Lambda.
         self.ec2 = Ec2Service(moto=self.moto)
+        # ECS: moto control plane + real container-backed Fargate tasks (each task
+        # is a container; the ALB is Caddy). Shares the moto endpoint, like EC2.
+        self.ecs = EcsService(moto=self.moto)
         self.s3 = S3ProxyService()
         self.dynamodb = DynamoDBService(host_port=8001)
         self.kinesis = KinesisService()

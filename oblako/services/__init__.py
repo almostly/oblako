@@ -5,6 +5,7 @@ from .bedrock import BedrockService, OllamaService
 from .cloudformation import CloudFormationService
 from .dynamodb import DynamoDBService
 from .ec2 import Ec2Service
+from .ecs import EcsService
 from .moto import MotoService
 from .opensearch import OpenSearchService
 from .platform import Oblako
@@ -20,6 +21,7 @@ __all__ = [
     "CloudFormationService",
     "DynamoDBService",
     "Ec2Service",
+    "EcsService",
     "MotoService",
     "Service",
     "ServiceStatus",

@@ -1,0 +1,283 @@
+"""ECS service: AWS ECS control plane (moto) + real container-backed tasks.
+
+moto owns the control plane (clusters, task definitions, services, task metadata)
+with full describe fidelity. On top of that, oblako runs each task as a **real
+container** on the active backend: ``run_task`` launches the task definition's
+image, wires it to oblako's endpoints, publishes its container port on a host
+port, and labels it so ``describe_tasks`` reflects real RUNNING/STOPPED state.
+
+That is the "real behavior, simulated topology" move, the same one ec2.py makes
+for instances. Fargate is the natural local target: there is no EC2 capacity to
+simulate, a task is simply its container(s). So ``launchType="FARGATE"`` is the
+default and the cpu/memory fields are recorded as metadata, not enforced.
+
+The split mirrors Redshift: ``get_client()`` is the moto control plane (register
+task definitions, create clusters, describe), while ``run_task`` / ``stop_task``
+/ ``describe_tasks`` on this service are the data plane that actually runs the
+container. The CloudFormation ``AWS::ECS::*`` providers call the same methods, so
+a stack-provisioned task is just as real as a hand-launched one.
+"""
+
+from __future__ import annotations
+
+import socket
+import uuid
+
+from oblako import config, ports
+
+from .boto import BotoService
+from .moto import MotoService
+
+TASK_LABEL = "oblako.ecs.task-arn"
+CLUSTER_LABEL = "oblako.ecs.cluster"
+SERVICE_LABEL = "oblako.service"
+
+
+def _docker():
+    from .backends import docker_client
+
+    return (
+        docker_client()
+    )  # honours OBLAKO_CONTAINER_BACKEND (ECS needs a Docker socket)
+
+
+def _free_port() -> int:
+    """Grab an unused host port (tasks/ALBs are dynamic, not on the fixed map)."""
+    s = socket.socket()
+    try:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+    finally:
+        s.close()
+
+
+def _task_endpoint_env() -> dict[str, str]:
+    """AWS_ENDPOINT_URL_* pointing at oblako on the host, for code inside a task.
+
+    A task reaches oblako over ``host.docker.internal`` (the host gateway), so a
+    container that talks to S3/DynamoDB/etc. needs no endpoint config of its own,
+    the same contract the notebook kernel gets on the host.
+    """
+    host = "host.docker.internal"
+
+    def u(port: int) -> str:
+        return f"http://{host}:{port}"
+
+    return {
+        "AWS_ENDPOINT_URL_S3": u(ports.S3),
+        "AWS_ENDPOINT_URL_DYNAMODB": u(ports.DYNAMODB),
+        "AWS_ENDPOINT_URL_CLOUDFORMATION": u(ports.CLOUDFORMATION),
+        "AWS_ENDPOINT_URL_SFN": u(ports.STEPFUNCTIONS),
+        "AWS_ENDPOINT_URL_REDSHIFT_DATA": u(ports.REDSHIFT_DATA),
+        "AWS_ENDPOINT_URL_RDS_DATA": u(ports.RDS_DATA),
+        "AWS_ENDPOINT_URL_BEDROCK_RUNTIME": u(ports.BEDROCK_RUNTIME),
+        "AWS_DEFAULT_REGION": config.region(),
+        "AWS_ACCESS_KEY_ID": "test",
+        "AWS_SECRET_ACCESS_KEY": "test",
+    }
+
+
+def _env_list_to_dict(pairs) -> dict[str, str]:
+    """Map an ECS ``[{"name","value"}]`` environment list to a dict."""
+    return {p["name"]: p["value"] for p in (pairs or [])}
+
+
+def _container_name(task_id: str, container: str) -> str:
+    return f"oblako-ecs-{task_id[:12]}-{container}"
+
+
+@BotoService("ecs")
+class EcsService:
+    """AWS ECS, moto control plane + real container-backed Fargate tasks."""
+
+    name = "ecs"
+
+    def __init__(self, moto: MotoService):
+        """Wire to the shared moto endpoint (moto owns ECS metadata)."""
+        self.moto = moto
+
+    @property
+    def endpoint_url(self) -> str:
+        """Moto serves ECS at the same endpoint as every other AWS API."""
+        return self.moto.endpoint_url
+
+    # Control-plane convenience (everything else: use get_client() directly)
+    def register_task_definition(self, **kwargs) -> str:
+        """Register a task definition in moto, returning its ARN."""
+        resp = self.get_client().register_task_definition(**kwargs)
+        return resp["taskDefinition"]["taskDefinitionArn"]
+
+    # Data plane: actually run the task's container(s)
+    def run_task(
+        self,
+        task_definition: str,
+        *,
+        cluster: str = "default",
+        count: int = 1,
+        launch_type: str = "FARGATE",
+        backed: bool = True,
+    ) -> dict:
+        """Launch ``count`` real containers for ``task_definition``.
+
+        Reads the task definition from moto, runs each container on the backend
+        with oblako's endpoint env + host gateway, and publishes the first port
+        mapping of each container on a host port. Returns a RunTask-shaped dict
+        whose ``containers[].networkBindings`` carry the assigned host ports.
+        ``backed=False`` records nothing real, just the metadata shape.
+        """
+        td = self.get_client().describe_task_definition(taskDefinition=task_definition)[
+            "taskDefinition"
+        ]
+        region = config.region()
+        tasks = []
+        for _ in range(count):
+            task_id = uuid.uuid4().hex
+            task_arn = f"arn:aws:ecs:{region}:000000000000:task/{cluster}/{task_id}"
+            containers = []
+            for cdef in td.get("containerDefinitions", []):
+                bindings = (
+                    self._run_container(task_id, task_arn, cluster, cdef)
+                    if backed
+                    else []
+                )
+                containers.append(
+                    {
+                        "name": cdef["name"],
+                        "lastStatus": "RUNNING" if backed else "PENDING",
+                        "networkBindings": bindings,
+                    }
+                )
+            tasks.append(
+                {
+                    "taskArn": task_arn,
+                    "clusterArn": cluster,
+                    "taskDefinitionArn": td["taskDefinitionArn"],
+                    "lastStatus": "RUNNING" if backed else "PENDING",
+                    "desiredStatus": "RUNNING",
+                    "launchType": launch_type,
+                    "containers": containers,
+                }
+            )
+        return {"tasks": tasks, "failures": []}
+
+    def _run_container(
+        self, task_id: str, task_arn: str, cluster: str, cdef: dict
+    ) -> list[dict]:
+        """Run one container of a task; return its networkBindings."""
+        client = _docker()
+        image = cdef["image"]
+        try:
+            client.images.get(image)
+        except Exception:  # noqa: BLE001 - not present locally -> pull
+            client.images.pull(image)
+
+        env = _task_endpoint_env()
+        env.update(_env_list_to_dict(cdef.get("environment")))
+
+        port_bindings, bindings = {}, []
+        for pm in cdef.get("portMappings", []):
+            cport = pm["containerPort"]
+            proto = pm.get("protocol", "tcp")
+            hport = _free_port()
+            port_bindings[f"{cport}/{proto}"] = hport
+            bindings.append(
+                {
+                    "containerPort": cport,
+                    "hostPort": hport,
+                    "protocol": proto,
+                    "bindIP": "127.0.0.1",
+                }
+            )
+
+        command = cdef.get("command")
+        client.containers.run(
+            image,
+            command=command or None,
+            detach=True,
+            name=_container_name(task_id, cdef["name"]),
+            environment=env,
+            ports=port_bindings or None,
+            extra_hosts={"host.docker.internal": "host-gateway"},
+            labels={
+                SERVICE_LABEL: "ecs",
+                TASK_LABEL: task_arn,
+                CLUSTER_LABEL: cluster,
+            },
+        )
+        return bindings
+
+    def describe_tasks(
+        self, cluster: str = "default", tasks: list[str] | None = None
+    ) -> dict:
+        """Reflect real container state back as ECS task descriptions."""
+        wanted = set(tasks or [])
+        out = []
+        for c in self._task_containers():
+            arn = c.labels.get(TASK_LABEL)
+            if wanted and arn not in wanted:
+                continue
+            status = "RUNNING" if c.status == "running" else "STOPPED"
+            out.append(
+                {
+                    "taskArn": arn,
+                    "clusterArn": c.labels.get(CLUSTER_LABEL, cluster),
+                    "lastStatus": status,
+                    "desiredStatus": "RUNNING",
+                    "containers": [{"name": c.name, "lastStatus": status}],
+                }
+            )
+        return {"tasks": out, "failures": []}
+
+    def list_tasks(self, cluster: str = "default") -> list[str]:
+        """Task ARNs of all oblako ECS task containers in the cluster."""
+        arns = []
+        for c in self._task_containers():
+            if c.labels.get(CLUSTER_LABEL) == cluster:
+                arn = c.labels.get(TASK_LABEL)
+                if arn and arn not in arns:
+                    arns.append(arn)
+        return arns
+
+    def stop_task(self, task: str) -> None:
+        """Stop and remove every container of a task (idempotent)."""
+        for c in self._task_containers():
+            if c.labels.get(TASK_LABEL) == task:
+                c.remove(force=True)
+
+    def task_url(self, task: str) -> str | None:
+        """Reachable URL for a task's first published port, or None."""
+        import docker
+
+        for c in self._task_containers():
+            if c.labels.get(TASK_LABEL) != task:
+                continue
+            try:
+                c.reload()
+                ports_map = c.attrs["NetworkSettings"]["Ports"] or {}
+            except docker.errors.NotFound:
+                return None
+            for binding in ports_map.values():
+                if binding:
+                    return f"http://localhost:{binding[0]['HostPort']}"
+        return None
+
+    def _task_containers(self) -> list:
+        return _docker().containers.list(
+            all=True, filters={"label": f"{SERVICE_LABEL}=ecs"}
+        )
+
+    # Lifecycle (moto-backed; task containers are managed per-arn, not as one service)
+    def start(self) -> None:
+        """Bring moto up if it isn't already (no own service container)."""
+        self.moto.wait_ready(timeout=2) or self.moto.start()
+
+    def stop(self) -> None:
+        """No-op: moto owns the control plane; tasks are managed per-arn."""
+
+    def wait_ready(self, timeout: float = 5.0) -> bool:
+        """Defer readiness to moto."""
+        return self.moto.wait_ready(timeout=timeout)
+
+    def status(self):
+        """Defer status to moto."""
+        return self.moto.status()
