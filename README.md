@@ -46,6 +46,8 @@ normal `boto3` client (or native driver):
 | SageMaker | SDK local mode | `instance_type="local"` trains in real Docker |
 | Step Functions | aws-stepfunctions-local | Official AWS Docker image |
 | Lambda | AWS SAM CLI (external) | `sam local invoke`, bring your own SAM CLI |
+| ECS / Fargate | moto + container per task | `run_task`/`create_service` launch real containers; a Fargate+ALB CloudFormation stack deploys and serves locally |
+| ELBv2 (ALB) | moto + Caddy proxy per LB | real reverse proxy round-robining to tasks with the target group health check; `DNSName` → `localhost:<port>` |
 | S3 | S3Proxy | S3 API over the local filesystem |
 | DynamoDB | dynamodb-local | Official AWS Docker image |
 | Redshift (engine) | oblako image (PostgreSQL 16) | impersonates Redshift: redshift-connector natively, system tables, `SET query_group`, UDFs |

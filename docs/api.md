@@ -65,6 +65,10 @@ driver (`connect()`). `Oblako` is the platform handle that owns them all.
    :members:
 .. autoclass:: oblako.services.ec2.Ec2Service
    :members:
+.. autoclass:: oblako.services.ecs.EcsService
+   :members:
+.. autoclass:: oblako.services.elbv2.Elbv2Service
+   :members:
 .. autoclass:: oblako.services.appconfig.AppConfigService
    :members:
 ```
