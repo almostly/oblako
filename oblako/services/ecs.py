@@ -30,6 +30,7 @@ from .moto import MotoService
 
 TASK_LABEL = "oblako.ecs.task-arn"
 CLUSTER_LABEL = "oblako.ecs.cluster"
+SERVICE_NAME_LABEL = "oblako.ecs.service"
 SERVICE_LABEL = "oblako.service"
 
 
@@ -92,9 +93,14 @@ class EcsService:
 
     name = "ecs"
 
-    def __init__(self, moto: MotoService):
-        """Wire to the shared moto endpoint (moto owns ECS metadata)."""
+    def __init__(self, moto: MotoService, elbv2=None):
+        """Wire to the shared moto endpoint; optionally an ELBv2 service for services.
+
+        ``elbv2`` lets ``create_service`` register a task's published ports as ALB
+        targets, so a service behind a load balancer routes for real.
+        """
         self.moto = moto
+        self.elbv2 = elbv2
 
     @property
     def endpoint_url(self) -> str:
@@ -116,6 +122,7 @@ class EcsService:
         count: int = 1,
         launch_type: str = "FARGATE",
         backed: bool = True,
+        service_name: str | None = None,
     ) -> dict:
         """Launch ``count`` real containers for ``task_definition``.
 
@@ -124,6 +131,7 @@ class EcsService:
         mapping of each container on a host port. Returns a RunTask-shaped dict
         whose ``containers[].networkBindings`` carry the assigned host ports.
         ``backed=False`` records nothing real, just the metadata shape.
+        ``service_name`` labels the containers so a service can reconcile them.
         """
         td = self.get_client().describe_task_definition(taskDefinition=task_definition)[
             "taskDefinition"
@@ -136,7 +144,7 @@ class EcsService:
             containers = []
             for cdef in td.get("containerDefinitions", []):
                 bindings = (
-                    self._run_container(task_id, task_arn, cluster, cdef)
+                    self._run_container(task_id, task_arn, cluster, cdef, service_name)
                     if backed
                     else []
                 )
@@ -161,7 +169,12 @@ class EcsService:
         return {"tasks": tasks, "failures": []}
 
     def _run_container(
-        self, task_id: str, task_arn: str, cluster: str, cdef: dict
+        self,
+        task_id: str,
+        task_arn: str,
+        cluster: str,
+        cdef: dict,
+        service_name: str | None = None,
     ) -> list[dict]:
         """Run one container of a task; return its networkBindings."""
         client = _docker()
@@ -189,22 +202,81 @@ class EcsService:
                 }
             )
 
-        command = cdef.get("command")
+        labels = {SERVICE_LABEL: "ecs", TASK_LABEL: task_arn, CLUSTER_LABEL: cluster}
+        if service_name:
+            labels[SERVICE_NAME_LABEL] = service_name
         client.containers.run(
             image,
-            command=command or None,
+            command=cdef.get("command") or None,
             detach=True,
             name=_container_name(task_id, cdef["name"]),
             environment=env,
             ports=port_bindings or None,
             extra_hosts={"host.docker.internal": "host-gateway"},
-            labels={
-                SERVICE_LABEL: "ecs",
-                TASK_LABEL: task_arn,
-                CLUSTER_LABEL: cluster,
-            },
+            labels=labels,
         )
         return bindings
+
+    # Services: run desiredCount tasks and register them behind a load balancer
+    def create_service(
+        self,
+        *,
+        service_name: str,
+        task_definition: str,
+        cluster: str = "default",
+        desired_count: int = 1,
+        launch_type: str = "FARGATE",
+        load_balancers: list[dict] | None = None,
+    ) -> dict:
+        """Run ``desired_count`` tasks and register them as ALB targets.
+
+        ``load_balancers`` mirrors the ECS API: a list of
+        ``{"targetGroupArn", "containerName", "containerPort"}``. Each task's
+        published host port for that container is registered into the target
+        group, so the load balancer routes to the real containers.
+        """
+        try:  # record in moto for describe fidelity (best-effort)
+            self.get_client().create_service(
+                cluster=cluster,
+                serviceName=service_name,
+                taskDefinition=task_definition,
+                desiredCount=desired_count,
+                launchType=launch_type,
+            )
+        except Exception:  # noqa: BLE001 - moto strictness shouldn't block the real run
+            pass
+
+        run = self.run_task(
+            task_definition,
+            cluster=cluster,
+            count=desired_count,
+            launch_type=launch_type,
+            service_name=service_name,
+        )
+        for lb in load_balancers or []:
+            host_ports = [
+                nb["hostPort"]
+                for task in run["tasks"]
+                for cont in task["containers"]
+                if cont["name"] == lb["containerName"]
+                for nb in cont["networkBindings"]
+                if nb["containerPort"] == lb["containerPort"]
+            ]
+            if self.elbv2 and host_ports:
+                self.elbv2.register_targets(lb["targetGroupArn"], host_ports)
+        return run
+
+    def delete_service(self, service_name: str, cluster: str = "default") -> None:
+        """Stop every task container of a service (idempotent)."""
+        for c in self._task_containers():
+            if c.labels.get(SERVICE_NAME_LABEL) == service_name:
+                c.remove(force=True)
+        try:
+            self.get_client().delete_service(
+                cluster=cluster, service=service_name, force=True
+            )
+        except Exception:  # noqa: BLE001 - already gone / moto strictness
+            pass
 
     def describe_tasks(
         self, cluster: str = "default", tasks: list[str] | None = None
