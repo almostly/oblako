@@ -24,7 +24,7 @@ services:
   # Pulls the published image; `build` lets `docker compose build` produce it
   # locally too. See oblako/images/redshift.
   redshift:
-    image: deburky/redshift-local:16
+    image: public.ecr.aws/oblako/redshift-local:16
     build: ./oblako/images/redshift
     ports:
       - "5439:5432"
