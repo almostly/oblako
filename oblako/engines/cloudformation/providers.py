@@ -381,6 +381,7 @@ def _ecs_taskdef_delete(physical_id, props):
 def _ecs_service_create(logical_id, props, ctx):
     ecs, _ = _ecs_elbv2()
     name = props.get("ServiceName") or f"{ctx['stack']}-{logical_id}"
+    cluster = props.get("Cluster", "default")
     load_balancers = [
         {
             "targetGroupArn": lb["TargetGroupArn"],
@@ -392,17 +393,27 @@ def _ecs_service_create(logical_id, props, ctx):
     ecs.create_service(
         service_name=name,
         task_definition=props["TaskDefinition"],
-        cluster=props.get("Cluster", "default"),
+        cluster=cluster,
         desired_count=int(props.get("DesiredCount", 1)),
         launch_type=props.get("LaunchType", "FARGATE"),
         load_balancers=load_balancers,
+        network_configuration=props.get("NetworkConfiguration"),
     )
-    return name
+    # Ref returns the service ARN (as in real CFN); GetAtt Name/ServiceArn too.
+    try:
+        svc = ecs.get_client().describe_services(cluster=cluster, services=[name])[
+            "services"
+        ]
+        arn = svc[0]["serviceArn"] if svc else name
+    except Exception:  # noqa: BLE001
+        arn = name
+    return {"PhysicalId": arn, "Attributes": {"Name": name, "ServiceArn": arn}}
 
 
 def _ecs_service_delete(physical_id, props):
     ecs, _ = _ecs_elbv2()
-    ecs.delete_service(physical_id, cluster=props.get("Cluster", "default"))
+    name = physical_id.rsplit("/", 1)[-1]  # physical id may be the service ARN
+    ecs.delete_service(name, cluster=props.get("Cluster", "default"))
 
 
 # AWS::ElasticLoadBalancingV2::LoadBalancer -> a real Caddy reverse proxy
@@ -417,9 +428,16 @@ def _elb_lb_create(logical_id, props, ctx):
         Scheme=props.get("Scheme", "internet-facing"),
     )
     arn = lb["LoadBalancerArn"]
+    full_name = arn.split(":loadbalancer/", 1)[-1]  # e.g. app/<name>/<id>
     return {
         "PhysicalId": arn,
-        "Attributes": {"DNSName": elbv2.dns_name(arn), "LoadBalancerArn": arn},
+        "Attributes": {
+            "DNSName": elbv2.dns_name(arn),
+            "LoadBalancerArn": arn,
+            "LoadBalancerName": name,
+            "LoadBalancerFullName": full_name,
+            "CanonicalHostedZoneID": "Z00000000OBLAKO",  # local placeholder
+        },
     }
 
 
@@ -441,7 +459,14 @@ def _elb_tg_create(logical_id, props, ctx):
     if "HealthCheckPath" in props:
         kwargs["HealthCheckPath"] = props["HealthCheckPath"]
     tg = elbv2.create_target_group(**kwargs)
-    return tg["TargetGroupArn"]  # Ref -> arn
+    arn = tg["TargetGroupArn"]
+    return {  # Ref -> arn; GetAtt TargetGroupName/TargetGroupFullName
+        "PhysicalId": arn,
+        "Attributes": {
+            "TargetGroupName": name,
+            "TargetGroupFullName": arn.split(":", 5)[-1],  # targetgroup/<name>/<id>
+        },
+    }
 
 
 def _elb_tg_delete(physical_id, props):

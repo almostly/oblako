@@ -25,7 +25,7 @@ import uuid
 
 from oblako import config, ports
 
-from .boto import BotoService
+from .boto import BotoService, client
 from .moto import MotoService
 
 TASK_LABEL = "oblako.ecs.task-arn"
@@ -101,6 +101,7 @@ class EcsService:
         """
         self.moto = moto
         self.elbv2 = elbv2
+        self._eni_by_task: dict[str, list] = {}  # awsvpc attachments per task
 
     @property
     def endpoint_url(self) -> str:
@@ -123,6 +124,7 @@ class EcsService:
         launch_type: str = "FARGATE",
         backed: bool = True,
         service_name: str | None = None,
+        network_configuration: dict | None = None,
     ) -> dict:
         """Launch ``count`` real containers for ``task_definition``.
 
@@ -132,11 +134,19 @@ class EcsService:
         whose ``containers[].networkBindings`` carry the assigned host ports.
         ``backed=False`` records nothing real, just the metadata shape.
         ``service_name`` labels the containers so a service can reconcile them.
+
+        For ``awsvpc`` task definitions oblako attaches a moto ENI (with a private
+        IP) to each task so ``describe_tasks`` shows a faithful attachment, the
+        container still runs on the bridge network. ``network_configuration`` is
+        honoured when given, else oblako auto-fills the default-VPC subnet (the
+        same lenient-local default the load balancer uses), rather than raising
+        the AWS "network configuration must be provided" error.
         """
         td = self.get_client().describe_task_definition(taskDefinition=task_definition)[
             "taskDefinition"
         ]
         region = config.region()
+        awsvpc = td.get("networkMode") == "awsvpc"
         tasks = []
         for _ in range(count):
             task_id = uuid.uuid4().hex
@@ -155,6 +165,13 @@ class EcsService:
                         "networkBindings": bindings,
                     }
                 )
+            attachments = (
+                self._awsvpc_attachment(network_configuration)
+                if backed and awsvpc
+                else []
+            )
+            if attachments:
+                self._eni_by_task[task_arn] = attachments
             tasks.append(
                 {
                     "taskArn": task_arn,
@@ -164,9 +181,67 @@ class EcsService:
                     "desiredStatus": "RUNNING",
                     "launchType": launch_type,
                     "containers": containers,
+                    "attachments": attachments,
                 }
             )
         return {"tasks": tasks, "failures": []}
+
+    # awsvpc: a metadata-only ENI for describe fidelity (the container still runs
+    # on the bridge network, the same way LocalStack and oblako's EC2 do it).
+    def _awsvpc_attachment(self, network_configuration: dict | None) -> list[dict]:
+        # Try the configured subnet, then a real default-VPC subnet (the template's
+        # subnet may be a placeholder param that isn't a real moto subnet).
+        ec2 = client("ec2", self.endpoint_url)
+        for subnet in (
+            self._subnet_from(network_configuration),
+            self._default_subnet(),
+        ):
+            if not subnet:
+                continue
+            try:
+                eni = ec2.create_network_interface(SubnetId=subnet)["NetworkInterface"]
+            except Exception:  # noqa: BLE001 - realism only; never block the run
+                continue
+            return [
+                {
+                    "id": uuid.uuid4().hex,
+                    "type": "ElasticNetworkInterface",
+                    "status": "ATTACHED",
+                    "details": [
+                        {"name": "subnetId", "value": subnet},
+                        {
+                            "name": "networkInterfaceId",
+                            "value": eni["NetworkInterfaceId"],
+                        },
+                        {"name": "macAddress", "value": eni.get("MacAddress", "")},
+                        {
+                            "name": "privateIPv4Address",
+                            "value": eni.get("PrivateIpAddress", ""),
+                        },
+                    ],
+                }
+            ]
+        return []
+
+    def _subnet_from(self, network_configuration: dict | None) -> str | None:
+        """First subnet from an awsvpc network configuration (either casing)."""
+        if not network_configuration:
+            return None
+        cfg = network_configuration.get("awsvpcConfiguration") or (
+            network_configuration.get("AwsvpcConfiguration") or {}
+        )
+        subnets = cfg.get("subnets") or cfg.get("Subnets") or []
+        return subnets[0] if subnets else None
+
+    def _default_subnet(self) -> str | None:
+        """A default-VPC subnet from moto (so awsvpc just works locally)."""
+        ec2 = client("ec2", self.endpoint_url)
+        subs = ec2.describe_subnets(
+            Filters=[{"Name": "default-for-az", "Values": ["true"]}]
+        )["Subnets"]
+        if not subs:
+            subs = ec2.describe_subnets()["Subnets"]
+        return subs[0]["SubnetId"] if subs else None
 
     def _run_container(
         self,
@@ -227,6 +302,7 @@ class EcsService:
         desired_count: int = 1,
         launch_type: str = "FARGATE",
         load_balancers: list[dict] | None = None,
+        network_configuration: dict | None = None,
     ) -> dict:
         """Run ``desired_count`` tasks and register them as ALB targets.
 
@@ -234,6 +310,7 @@ class EcsService:
         ``{"targetGroupArn", "containerName", "containerPort"}``. Each task's
         published host port for that container is registered into the target
         group, so the load balancer routes to the real containers.
+        ``network_configuration`` is passed through to the tasks (awsvpc).
         """
         try:  # record in moto for describe fidelity (best-effort)
             self.get_client().create_service(
@@ -252,6 +329,7 @@ class EcsService:
             count=desired_count,
             launch_type=launch_type,
             service_name=service_name,
+            network_configuration=network_configuration,
         )
         for lb in load_balancers or []:
             host_ports = [
@@ -296,6 +374,7 @@ class EcsService:
                     "lastStatus": status,
                     "desiredStatus": "RUNNING",
                     "containers": [{"name": c.name, "lastStatus": status}],
+                    "attachments": self._eni_by_task.get(arn, []),
                 }
             )
         return {"tasks": out, "failures": []}
