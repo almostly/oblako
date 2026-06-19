@@ -65,7 +65,8 @@ The deep dives below cover the services with the most local-specific behavior.
 
 ## Redshift
 
-A PostgreSQL 16 image (`deburky/redshift-local`) that *impersonates* Amazon
+A PostgreSQL 16 image (`public.ecr.aws/oblako/redshift-local`, mirrored on Docker
+Hub as `deburky/redshift-local`) that *impersonates* Amazon
 Redshift. A small `shared_preload` extension accepts the Redshift-only startup
 parameters Amazon's `redshift-connector` driver sends and reports
 `server_version 8.0.2`, so the driver, and dbt-redshift, connect **natively,

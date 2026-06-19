@@ -26,7 +26,7 @@ from .base import PortMapping, Service
 
 # Published image oblako pulls; falls back to building oblako/images/redshift
 # locally if it isn't pullable yet (see Service.build_context).
-REDSHIFT_IMAGE = "deburky/redshift-local:16"
+REDSHIFT_IMAGE = "public.ecr.aws/oblako/redshift-local:16"
 _BUILD_CONTEXT = str((Path(__file__).parent.parent / "images" / "redshift").resolve())
 
 

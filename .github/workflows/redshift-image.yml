@@ -3,7 +3,7 @@ name: redshift-image
 # Build + publish the oblako Redshift image whenever its source changes, so
 # `oblako up` / docker-compose can just pull it. Published to two registries:
 #   - Docker Hub:  deburky/redshift-local                  (discoverable, human-facing)
-#   - ECR Public:  public.ecr.aws/u5s2h9v9/redshift-local  (no pull rate limits)
+#   - ECR Public:  public.ecr.aws/oblako/redshift-local      (no pull rate limits)
 #
 # Needs repo secrets:
 #   DOCKERHUB_USERNAME      = deburky
@@ -23,7 +23,7 @@ permissions:
   contents: read
 
 env:
-  ECR_PUBLIC_REGISTRY: public.ecr.aws/u5s2h9v9 # swap to public.ecr.aws/oblako once the custom alias is approved
+  ECR_PUBLIC_REGISTRY: public.ecr.aws/oblako
 
 jobs:
   publish:
