@@ -108,7 +108,14 @@ def _sub(template, ctx):
     import re
 
     def repl(m):
-        return str(_ref(m.group(1).strip(), ctx))
+        name = m.group(1).strip()
+        if "." in name:  # ${Logical.Attr} is a GetAtt inside Fn::Sub
+            logical, _, attr = name.partition(".")
+            attrs = ctx.get("attrs", {}).get(logical, {})
+            if attr in attrs:
+                return str(attrs[attr])
+            return str(ctx["physical"].get(logical, name))
+        return str(_ref(name, ctx))
 
     return re.sub(r"\$\{([^}]+)\}", repl, template)
 

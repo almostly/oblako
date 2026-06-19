@@ -177,13 +177,26 @@ class Elbv2Service:
         return f"http://{self.dns_name(lb_arn)}"
 
     def delete_load_balancer(self, lb_arn: str) -> None:
-        """Remove the proxy container and forget the LB (idempotent)."""
+        """Remove the proxy container, the moto LB, and forget it (idempotent)."""
         info = self._lbs.pop(lb_arn, None)
-        if info:
-            try:
+        # Drop the proxy container (by registry id, else by label across processes).
+        try:
+            if info:
                 _docker().containers.get(_proxy_name(info["id"])).remove(force=True)
-            except Exception:  # noqa: BLE001 - already gone
-                pass
+            else:
+                for c in _docker().containers.list(
+                    all=True, filters={"label": f"{LB_LABEL}={lb_arn}"}
+                ):
+                    c.remove(force=True)
+        except Exception:  # noqa: BLE001 - already gone
+            pass
+        self._listeners = {
+            k: v for k, v in self._listeners.items() if v["lb_arn"] != lb_arn
+        }
+        try:  # also clear the moto-side record so the name frees up
+            self.get_client().delete_load_balancer(LoadBalancerArn=lb_arn)
+        except Exception:  # noqa: BLE001
+            pass
 
     # Internals
     def _lbs_for_tg(self, tg_arn: str) -> list[str]:
