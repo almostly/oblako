@@ -17,6 +17,16 @@
   border-color: #b7a8e0;
 }
 
+/* mobile top bar (the hamburger header): lavender, not the default blue */
+.wy-nav-top {
+  background: #9d89d4;
+}
+
+/* sidebar section caption ("DOCUMENTATION"): soft lavender, not blue */
+.wy-menu-vertical .caption-text {
+  color: #c9bdee;
+}
+
 /* sidebar: muted lavender-grey rather than flat dark grey */
 .wy-nav-side {
   background: #3a3550;
