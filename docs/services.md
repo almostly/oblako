@@ -75,7 +75,10 @@ UDFs (`json_extract_path_text`, `json_array_length`, `median`, `decode`), and th
 Redshift **date/time functions** PostgreSQL lacks: `getdate`, `sysdate`,
 `dateadd`, `datediff` (boundary-crossing semantics), `add_months`, `last_day`,
 `months_between`, `trunc(timestamp)`, `convert_timezone`. The date parts must be
-quoted (`dateadd('day', 7, ts)`), as most SQL generators emit them.
+quoted (`dateadd('day', 7, ts)`), as most SQL generators emit them. It also adds
+the Redshift **catalog views** BI tools and dbt query for metadata, mapped onto
+PostgreSQL's catalogs: `pg_table_def`, `svv_tables`, `svv_columns`,
+`svv_table_info`, and (empty) `svv_external_schemas` / `svv_external_tables`.
 
 ```python
 from oblako.services import RedshiftService
