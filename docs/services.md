@@ -70,8 +70,12 @@ Hub as `deburky/redshift-local`) that *impersonates* Amazon
 Redshift. A small `shared_preload` extension accepts the Redshift-only startup
 parameters Amazon's `redshift-connector` driver sends and reports
 `server_version 8.0.2`, so the driver, and dbt-redshift, connect **natively,
-no proxy**. It ships the Redshift system tables, `SET query_group`, and the
-JSON/scalar UDFs.
+no proxy**. It ships the Redshift system tables, `SET query_group`, JSON/scalar
+UDFs (`json_extract_path_text`, `json_array_length`, `median`, `decode`), and the
+Redshift **date/time functions** PostgreSQL lacks: `getdate`, `sysdate`,
+`dateadd`, `datediff` (boundary-crossing semantics), `add_months`, `last_day`,
+`months_between`, `trunc(timestamp)`, `convert_timezone`. The date parts must be
+quoted (`dateadd('day', 7, ts)`), as most SQL generators emit them.
 
 ```python
 from oblako.services import RedshiftService
