@@ -14,8 +14,9 @@ RUN make -C /tmp/ext && make -C /tmp/ext install   # -> $pkglibdir/oblako_redshi
 FROM postgres:16
 
 # plpython3u for the Redshift UDFs / Redshift ML prediction UDFs (runtime only).
+# python3 also runs the Redshift-compat wire proxy (see entrypoint).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        postgresql-plpython3-16 \
+        postgresql-plpython3-16 python3 \
     && rm -rf /var/lib/apt/lists/*
 
 # The shared_preload extension, compiled in the build stage.
@@ -26,10 +27,20 @@ RUN echo "shared_preload_libraries = 'oblako_redshift'" \
     >> /usr/share/postgresql/postgresql.conf.sample
 
 # Redshift (and pgredshift/PG10) use md5 password auth; redshift_connector's
-# handshake expects it. PG16 defaults to scram-sha-256, so pin md5 — stored
+# handshake expects it. PG16 defaults to scram-sha-256, so pin md5; stored
 # passwords must be md5 too, so run with POSTGRES_HOST_AUTH_METHOD=md5.
 RUN echo "password_encryption = md5" \
     >> /usr/share/postgresql/postgresql.conf.sample
 
 # System tables + UDFs run on first DB init.
 COPY initdb.d/ /docker-entrypoint-initdb.d/
+
+# Redshift-compat wire proxy: PostgreSQL can't parse DISTSTYLE/DISTKEY/SORTKEY/
+# ENCODE (rejected at parse time, before any extension runs), so a thin proxy in
+# front of the engine strips them. It runs on the published port; PostgreSQL
+# moves to an internal port. Transparent for everything else (auth, COPY, ...).
+COPY proxy/redshift_proxy.py /usr/local/bin/redshift_proxy.py
+COPY entrypoint.sh /usr/local/bin/oblako-entrypoint.sh
+RUN chmod +x /usr/local/bin/oblako-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/oblako-entrypoint.sh"]
+CMD ["postgres"]
