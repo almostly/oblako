@@ -69,8 +69,10 @@ A PostgreSQL 16 image (`public.ecr.aws/oblako/redshift-local`, mirrored on Docke
 Hub as `deburky/redshift-local`) that *impersonates* Amazon
 Redshift. A small `shared_preload` extension accepts the Redshift-only startup
 parameters Amazon's `redshift-connector` driver sends and reports
-`server_version 8.0.2`, so the driver, and dbt-redshift, connect **natively,
-no proxy**. It ships the Redshift system tables, `SET query_group`, JSON/scalar
+`server_version 8.0.2`, so the driver, and dbt-redshift, connect **natively**
+(no wire shim for the handshake). A thin proxy bundled in the same container
+makes the engine tolerate Redshift physical DDL (see below). It ships the
+Redshift system tables, `SET query_group`, JSON/scalar
 UDFs (`json_extract_path_text`, `json_array_length`, `median`, `decode`), and the
 Redshift **date/time functions** PostgreSQL lacks: `getdate`, `sysdate`,
 `dateadd`, `datediff` (boundary-crossing semantics), `add_months`, `last_day`,
@@ -90,8 +92,11 @@ dbt-redshift: a `type: redshift` profile pointed at `host: localhost`,
 
 **Limitations**
 
-- Redshift-*physical* DDL (`DISTKEY`/`SORTKEY`/`ENCODE`, late-binding views,
-  `SUPER`/`VARBYTE`) runs on PostgreSQL semantics, that syntax is rejected.
+- Redshift physical DDL (`DISTSTYLE`/`DISTKEY`/`SORTKEY`/`ENCODE`) is **accepted
+  and ignored** (the bundled wire proxy strips it before the parser), so
+  awswrangler `to_sql` and dbt physical configs work; it has no storage effect on
+  the PostgreSQL engine. Late-binding views and `SUPER`/`VARBYTE` are still
+  unsupported.
 - Python UDFs run as **Python 3** (real Redshift's are Python 2, which Amazon is
   sunsetting); `LANGUAGE plpythonu` is aliased to the Python 3 handler.
 - It's a PostgreSQL engine underneath, no columnar storage, distribution, or
