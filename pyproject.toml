@@ -1,7 +1,7 @@
 [project]
 name = "oblako"
 version = "0.1.0"
-description = "Local AWS platform: Bedrock, SageMaker, Step Functions, and more — no cloud required"
+description = "Local AWS platform: Bedrock, SageMaker, Step Functions, and more, no cloud required"
 requires-python = ">=3.10"
 dependencies = [
     "httpx>=0.27",
@@ -20,6 +20,7 @@ dev = [
     "ruff>=0.4",
     "opensearch-py>=2.0",  # test_opensearch.py uses the OpenSearch client
     "redshift_connector>=2.1",  # test_redshift_proxy.py drives the redshift-connector driver
+    "commitizen>=4",  # conventional-commit messages + `cz bump` version/changelog
 ]
 agentcore = [
     "bedrock-agentcore>=0.1",
@@ -43,7 +44,7 @@ sagemaker = [
 mlflow = [
     # Local MLflow tracking server (oblako.engines.mlflow). Heavy dep tree, hence an extra.
     "mlflow>=3",
-    # SigV4 auth plugin so boto3-style credentials work — keeps user code
+    # SigV4 auth plugin so boto3-style credentials work; keeps user code
     # identical to one targeting SageMaker's managed MLflow.
     "sagemaker-mlflow>=0.1",
 ]
@@ -68,6 +69,18 @@ markers = [
     "integration: requires running oblako services (Docker)",
     "kubernetes: requires a Kubernetes cluster (minikube/kind)",
 ]
+
+[tool.commitizen]
+# Conventional Commits (feat/fix/docs/ci/...), matching how this repo already
+# writes messages. `cz bump` reads/writes the [project] version, tags v$version,
+# and updates CHANGELOG.md. `cz commit` gives an interactive prompt; the
+# commit-msg pre-commit hook validates messages (see .pre-commit-config.yaml).
+name = "cz_conventional_commits"
+version_provider = "pep621"
+version_scheme = "semver"
+tag_format = "v$version"
+major_version_zero = true
+update_changelog_on_bump = true
 
 [build-system]
 requires = ["hatchling"]
