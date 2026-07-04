@@ -27,7 +27,7 @@ services:
     image: public.ecr.aws/oblako/redshift-local:16
     build: ./oblako/images/redshift
     ports:
-      - "5439:5432"
+      - "5439:5439"
     environment:
       POSTGRES_USER: oblako
       POSTGRES_PASSWORD: oblako

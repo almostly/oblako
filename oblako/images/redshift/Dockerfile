@@ -37,10 +37,13 @@ COPY initdb.d/ /docker-entrypoint-initdb.d/
 
 # Redshift-compat wire proxy: PostgreSQL can't parse DISTSTYLE/DISTKEY/SORTKEY/
 # ENCODE (rejected at parse time, before any extension runs), so a thin proxy in
-# front of the engine strips them. It runs on the published port; PostgreSQL
-# moves to an internal port. Transparent for everything else (auth, COPY, ...).
+# front of the engine strips them. It listens on 5439 (Redshift's real port, so
+# it doesn't collide with a plain Postgres on 5432 in the same network);
+# PostgreSQL moves to an internal port. Transparent for everything else (auth,
+# COPY, ...). Override the listen port with OBLAKO_PROXY_PORT.
 COPY proxy/redshift_proxy.py /usr/local/bin/redshift_proxy.py
 COPY entrypoint.sh /usr/local/bin/oblako-entrypoint.sh
 RUN chmod +x /usr/local/bin/oblako-entrypoint.sh
+EXPOSE 5439
 ENTRYPOINT ["/usr/local/bin/oblako-entrypoint.sh"]
 CMD ["postgres"]

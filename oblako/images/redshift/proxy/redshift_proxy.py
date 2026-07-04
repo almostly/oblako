@@ -14,7 +14,7 @@ forwards to PostgreSQL on an internal port, so from the outside it's still just
 "the redshift container".
 
 Env:
-  OBLAKO_PROXY_PORT  port to listen on            (default 5432)
+  OBLAKO_PROXY_PORT  port to listen on            (default 5439, Redshift's port)
   OBLAKO_PG_HOST     upstream PostgreSQL host     (default 127.0.0.1)
   OBLAKO_PG_PORT     upstream PostgreSQL port     (default 5433)
 """
@@ -27,7 +27,7 @@ import os
 import re
 import struct
 
-LISTEN_PORT = int(os.environ.get("OBLAKO_PROXY_PORT", "5432"))
+LISTEN_PORT = int(os.environ.get("OBLAKO_PROXY_PORT", "5439"))
 PG_HOST = os.environ.get("OBLAKO_PG_HOST", "127.0.0.1")
 PG_PORT = int(os.environ.get("OBLAKO_PG_PORT", "5433"))
 
