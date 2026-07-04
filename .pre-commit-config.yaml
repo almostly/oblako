@@ -1,12 +1,18 @@
 # Run on demand: uvx pre-commit run --all-files
-# Install the git hook: uvx pre-commit install
+# Install the git hooks: uvx pre-commit install --hook-type pre-commit --hook-type commit-msg
 repos:
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.16.4
+    hooks:
+      - id: commitizen        # validate the commit message (Conventional Commits)
+        stages: [commit-msg]
+
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.14
     hooks:
       - id: ruff-check        # lint (autofix); covers oblako/, tests/, examples/, notebooks
         args: [--fix]
-      - id: ruff-format       # formatter — keeps boxed section-divider comments intact
+      - id: ruff-format       # formatter; keeps boxed section-divider comments intact
 
   - repo: https://github.com/PyCQA/pydocstyle
     rev: 6.3.0
