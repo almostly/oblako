@@ -5,8 +5,8 @@
 # outside it's still a single container listening on the usual port.
 set -e
 
-export OBLAKO_PG_PORT="${OBLAKO_PG_PORT:-5433}"      # PostgreSQL, internal only
-export OBLAKO_PROXY_PORT="${OBLAKO_PROXY_PORT:-5432}" # what clients connect to
+export OBLAKO_PG_PORT="${OBLAKO_PG_PORT:-5433}"       # PostgreSQL, internal only
+export OBLAKO_PROXY_PORT="${OBLAKO_PROXY_PORT:-5439}" # what clients connect to (Redshift's port)
 export OBLAKO_PG_HOST=127.0.0.1
 
 # Start the proxy once PostgreSQL is accepting connections on the internal port.

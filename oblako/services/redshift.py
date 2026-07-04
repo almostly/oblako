@@ -4,9 +4,11 @@
 a small ``shared_preload`` C extension registers the Redshift-only startup
 parameters Amazon's ``redshift-connector`` driver sends (``client_protocol_version``
 …) as no-op GUCs and reports ``server_version = 8.0.2``, so the driver connects
-*natively* — no wire proxy. It also ships the Redshift system tables, UDFs (via
-plpython3u), and ``SET query_group``. Built multi-arch, so it runs on Docker and
-Apple ``container`` alike. See ``oblako/images/redshift``.
+*natively* (no wire shim for the handshake; a bundled proxy on 5439 makes the
+engine tolerate Redshift physical DDL). It also ships the Redshift system tables,
+date/time functions, catalog views, UDFs (via plpython3u), and ``SET
+query_group``. Built multi-arch, so it runs on Docker and Apple ``container``
+alike. See ``oblako/images/redshift``.
 
 Three ways in:
   * ``connect()``         - psycopg2 connection straight to the engine (5439).
@@ -48,8 +50,11 @@ class RedshiftService(Service):
             name="redshift",
             image=REDSHIFT_IMAGE,
             build_context=_BUILD_CONTEXT,
-            # Redshift's port (5439) on the host; the engine listens on 5432.
-            ports=[PortMapping(container_port=5432, host_port=host_port)],
+            # Redshift's real port (5439) both on the host and inside the
+            # container (the proxy listens there; PG is internal on 5433). Using
+            # 5439, not 5432, avoids colliding with a plain Postgres co-located
+            # in the same network (e.g. a Metabase metadata DB on Fargate).
+            ports=[PortMapping(container_port=5439, host_port=host_port)],
             environment={
                 "POSTGRES_USER": user,
                 "POSTGRES_PASSWORD": password,

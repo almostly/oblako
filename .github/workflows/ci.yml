@@ -37,6 +37,13 @@ jobs:
         with:
           enable-cache: true
 
+      # Build the redshift image from source and tag it as the pull target, so
+      # integration tests run against the code under change (RedshiftService uses
+      # the local image when present, no pull). Closes the publish-lag gap where
+      # an image change lands before the registry republishes.
+      - name: Build redshift image
+        run: docker build -t public.ecr.aws/oblako/redshift-local:16 oblako/images/redshift
+
       # Start the oblako services and wait for readiness (up to 180s each, for
       # image pulls + DB/JVM init — OpenSearch is the slow one). Heavier tiers —
       # Ollama/Bedrock and SageMaker local — are still not run here (see
