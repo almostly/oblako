@@ -93,10 +93,14 @@ dbt-redshift: a `type: redshift` profile pointed at `host: localhost`,
 **Limitations**
 
 - Redshift physical DDL (`DISTSTYLE`/`DISTKEY`/`SORTKEY`/`ENCODE`) is **accepted
-  and ignored** (the bundled wire proxy strips it before the parser), so
-  awswrangler `to_sql` and dbt physical configs work; it has no storage effect on
+  and ignored** (the bundled wire proxy strips it before the parser), and
+  `varchar(max)` is rewritten to `text`, so awswrangler `to_sql`, dbt physical
+  configs, and dlt's Redshift destination all work. It has no storage effect on
   the PostgreSQL engine. Late-binding views and `SUPER`/`VARBYTE` are still
   unsupported.
+- It's a row-store PostgreSQL, not columnar: no Redshift-style column compression
+  / zone maps / sort-key ordering. Query **results** are faithful; storage and
+  performance characteristics are not.
 - Python UDFs run as **Python 3** (real Redshift's are Python 2, which Amazon is
   sunsetting); `LANGUAGE plpythonu` is aliased to the Python 3 handler.
 - It's a PostgreSQL engine underneath, no columnar storage, distribution, or
