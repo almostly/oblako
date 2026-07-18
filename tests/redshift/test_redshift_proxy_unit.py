@@ -58,3 +58,12 @@ def test_non_ddl_untouched():
     assert rewrite_sql(sql) == sql
     sql2 = "SELECT encode(data, 'base64') FROM t"
     assert rewrite_sql(sql2) == sql2
+
+
+def test_varchar_max_becomes_text():
+    # dlt's redshift destination emits varchar(max); PostgreSQL has no (max)
+    out = rewrite_sql("CREATE TABLE t (id int, bio varchar(max))").lower()
+    assert "varchar(max)" not in out and " text" in out
+    # also outside CREATE TABLE (e.g. ALTER TABLE) and the CHARACTER VARYING form
+    alt = rewrite_sql("ALTER TABLE t ADD COLUMN note CHARACTER VARYING(MAX)").lower()
+    assert "max" not in alt and "text" in alt

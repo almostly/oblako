@@ -48,12 +48,23 @@ _STRIPPERS = [
     re.compile(r"(?i)\bbackup\s+(?:yes|no)"),
 ]
 
+# Redshift VARCHAR(MAX) / CHARACTER VARYING(MAX): PostgreSQL has no (MAX) length,
+# so map it to TEXT. Applied to any statement (CREATE/ALTER TABLE, casts), since
+# the token only appears in type declarations and never in valid PG. (dlt's
+# redshift destination emits this DDL.)
+_VARCHAR_MAX = re.compile(r"(?i)\b(?:character\s+varying|varchar)\s*\(\s*max\s*\)")
+
 
 def rewrite_sql(sql: str) -> str:
-    """Strip Redshift physical-DDL clauses from a CREATE TABLE; leave the rest."""
-    if not _CREATE_TABLE.search(sql):
-        return sql
-    s = sql
+    """Rewrite Redshift-only SQL PostgreSQL can't parse.
+
+    ``VARCHAR(MAX)`` -> ``text`` (any statement); Redshift physical-DDL storage
+    clauses (DISTSTYLE/DISTKEY/SORTKEY/ENCODE/BACKUP) are stripped from CREATE
+    TABLE. Everything else is left untouched.
+    """
+    s = _VARCHAR_MAX.sub("text", sql)
+    if not _CREATE_TABLE.search(s):
+        return s
     for pat in _STRIPPERS:
         s = pat.sub(" ", s)
     # tidy the artifacts the removals leave behind (without touching literals)
