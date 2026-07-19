@@ -251,6 +251,22 @@ def cmd_test_integration(args):
     sys.exit(subprocess.call(cmd))
 
 
+def cmd_trust(args):
+    """Trust redshift-local's TLS cert in a venv's redshift-connector bundle."""
+    from oblako.services import RedshiftService
+
+    try:
+        print(RedshiftService().trust_cert(python_exe=args.python))
+    except Exception as e:  # noqa: BLE001 - surface a clear message, not a trace
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+    print(
+        "Now use sslmode=verify-ca: dbt profile `sslmode: verify-ca`, or "
+        "redshift_connector.connect(..., ssl=True, sslmode='verify-ca'). "
+        "Re-run after a redshift-connector reinstall."
+    )
+
+
 # -----------------------------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------------------------
@@ -333,6 +349,16 @@ def main():
         "-p", "--port", type=int, default=8002, help="Port (default: 8002)"
     )
     p_rsd.set_defaults(func=cmd_redshift_data)
+
+    p_trust = sub.add_parser(
+        "trust",
+        help="Trust redshift-local's TLS cert so redshift-connector/dbt can use sslmode=verify-ca",
+    )
+    p_trust.add_argument(
+        "--python",
+        help="Interpreter of the venv to patch (default: the current one)",
+    )
+    p_trust.set_defaults(func=cmd_trust)
 
     p_brt = sub.add_parser("bedrock-runtime", help="Run the Bedrock Runtime server")
     p_brt.add_argument(
