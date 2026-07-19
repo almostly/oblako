@@ -13,6 +13,17 @@ RS_CONFIG = dict(
 )
 
 
+def _ssl_available() -> bool:
+    """True if the proxy offers TLS (sslmode=require connects and is encrypted)."""
+    try:
+        c = psycopg2.connect(sslmode="require", connect_timeout=3, **RS_CONFIG)
+        used = bool(c.info.ssl_in_use)
+        c.close()
+        return used
+    except Exception:
+        return False
+
+
 def _proxy_present() -> bool:
     """True if the running engine has the DDL proxy (a DISTSTYLE create works).
 
@@ -66,3 +77,17 @@ def test_varchar_max_ddl_is_accepted():
     assert cur.fetchone()[0] == 70000
     cur.execute("DROP TABLE proxy_vmax")
     c.close()
+
+
+@pytest.mark.skipif(not _ssl_available(), reason="redshift image without the SSL proxy")
+def test_ssl_require_is_encrypted():
+    # the proxy terminates TLS, so sslmode=require connects and is encrypted
+    # (no ssl=False special-case; same config as against real Redshift)
+    c = psycopg2.connect(sslmode="require", **RS_CONFIG)
+    try:
+        assert c.info.ssl_in_use is True
+        cur = c.cursor()
+        cur.execute("SELECT 1")
+        assert cur.fetchone()[0] == 1
+    finally:
+        c.close()

@@ -14,9 +14,10 @@ RUN make -C /tmp/ext && make -C /tmp/ext install   # -> $pkglibdir/oblako_redshi
 FROM postgres:16
 
 # plpython3u for the Redshift UDFs / Redshift ML prediction UDFs (runtime only).
-# python3 also runs the Redshift-compat wire proxy (see entrypoint).
+# python3 also runs the Redshift-compat wire proxy; openssl generates the proxy's
+# self-signed TLS cert at startup (see entrypoint).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        postgresql-plpython3-16 python3 \
+        postgresql-plpython3-16 python3 openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # The shared_preload extension, compiled in the build stage.
