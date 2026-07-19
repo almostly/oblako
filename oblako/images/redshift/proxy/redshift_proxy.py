@@ -13,10 +13,19 @@ Bundled inside the redshift-local image: it listens on the published port and
 forwards to PostgreSQL on an internal port, so from the outside it's still just
 "the redshift container".
 
+TLS: the proxy terminates SSL with a self-signed cert (generated per-container by
+the entrypoint, never baked into the image) and forwards plaintext to PostgreSQL
+on the loopback. So clients connect with ``sslmode=require`` (encrypt) exactly as
+they would against real Redshift, no ``ssl=False`` local special-case. To fully
+verify, point ``sslrootcert`` at the container's cert. Disable with OBLAKO_SSL=0.
+
 Env:
   OBLAKO_PROXY_PORT  port to listen on            (default 5439, Redshift's port)
   OBLAKO_PG_HOST     upstream PostgreSQL host     (default 127.0.0.1)
   OBLAKO_PG_PORT     upstream PostgreSQL port     (default 5433)
+  OBLAKO_SSL         offer TLS (1, default) or not (0)
+  OBLAKO_SSL_CERT    server cert path             (default /etc/oblako-redshift/server.crt)
+  OBLAKO_SSL_KEY     server key path              (default /etc/oblako-redshift/server.key)
 """
 
 from __future__ import annotations
@@ -25,6 +34,7 @@ import asyncio
 import contextlib
 import os
 import re
+import ssl
 import struct
 
 LISTEN_PORT = int(os.environ.get("OBLAKO_PROXY_PORT", "5439"))
@@ -33,6 +43,22 @@ PG_PORT = int(os.environ.get("OBLAKO_PG_PORT", "5433"))
 
 SSL_REQUEST = 80877103
 GSSENC_REQUEST = 80877104
+
+
+def _load_ssl_context() -> ssl.SSLContext | None:
+    """A TLS server context from the cert/key, or None if SSL is off/absent."""
+    if os.environ.get("OBLAKO_SSL", "1") != "1":
+        return None
+    cert = os.environ.get("OBLAKO_SSL_CERT", "/etc/oblako-redshift/server.crt")
+    key = os.environ.get("OBLAKO_SSL_KEY", "/etc/oblako-redshift/server.key")
+    if not (os.path.exists(cert) and os.path.exists(key)):
+        return None
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(cert, key)
+    return ctx
+
+
+SSL_CTX = _load_ssl_context()
 
 # Redshift physical-DDL clauses PostgreSQL doesn't understand. Stripped only from
 # CREATE TABLE statements; they're storage hints with no effect on a PG engine.
@@ -105,23 +131,38 @@ async def _pipe_raw(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
             writer.close()
 
 
-async def _pipe_rewriting(
+async def _negotiate_startup(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> bytes | None:
+    """Answer the client's SSL/GSS negotiation, then return its StartupMessage.
+
+    On ``SSLRequest`` the proxy terminates TLS itself (reply 'S' + start_tls with
+    the self-signed cert), so client<->proxy is encrypted while proxy<->PG stays
+    plaintext on the loopback. If SSL is off, reply 'N'. The returned bytes are
+    the raw StartupMessage (or CancelRequest) to forward to PostgreSQL.
+    """
+    while True:
+        header = await reader.readexactly(4)
+        length = struct.unpack("!I", header)[0]
+        body = await reader.readexactly(length - 4)
+        if length == 8 and struct.unpack("!I", body)[0] in (SSL_REQUEST, GSSENC_REQUEST):
+            is_ssl = struct.unpack("!I", body)[0] == SSL_REQUEST
+            if is_ssl and SSL_CTX is not None:
+                writer.write(b"S")
+                await writer.drain()
+                await writer.start_tls(SSL_CTX)  # client<->proxy now encrypted
+            else:
+                writer.write(b"N")  # no TLS (or GSS, which we don't offer)
+                await writer.drain()
+            continue  # the real StartupMessage follows
+        return header + body
+
+
+async def _pipe_typed(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 ) -> None:
-    """Client -> server: relay startup/auth, rewrite SQL in Q/P messages."""
+    """Client -> server (post-startup): rewrite SQL in Q/P, relay the rest."""
     try:
-        # Startup phase: length-prefixed, no type byte. Pass SSL/GSS requests
-        # through (the engine answers 'N'); the StartupMessage ends this phase.
-        while True:
-            header = await reader.readexactly(4)
-            length = struct.unpack("!I", header)[0]
-            body = await reader.readexactly(length - 4)
-            writer.write(header + body)
-            await writer.drain()
-            if not (length == 8 and struct.unpack("!I", body)[0] in (SSL_REQUEST, GSSENC_REQUEST)):
-                break  # that was the StartupMessage (or CancelRequest)
-
-        # Typed phase: 1-byte type + Int32 length + body.
         while True:
             type_byte = await reader.readexactly(1)
             length_b = await reader.readexactly(4)
@@ -141,22 +182,36 @@ async def _pipe_rewriting(
             writer.close()
 
 
-
 async def _handle(client_reader, client_writer) -> None:
+    # Terminate SSL and read the StartupMessage before opening the backend, so no
+    # relay task touches the client stream during the TLS handshake.
+    try:
+        startup = await _negotiate_startup(client_reader, client_writer)
+    except (asyncio.IncompleteReadError, ConnectionError, ssl.SSLError):
+        with contextlib.suppress(Exception):
+            client_writer.close()
+        return
     try:
         server_reader, server_writer = await asyncio.open_connection(PG_HOST, PG_PORT)
     except OSError:
-        client_writer.close()
+        with contextlib.suppress(Exception):
+            client_writer.close()
         return
+    server_writer.write(startup)  # forward the StartupMessage plaintext to PG
+    await server_writer.drain()
     await asyncio.gather(
-        _pipe_rewriting(client_reader, server_writer),
+        _pipe_typed(client_reader, server_writer),
         _pipe_raw(server_reader, client_writer),
     )
 
 
 async def main() -> None:
     server = await asyncio.start_server(_handle, "0.0.0.0", LISTEN_PORT)
-    print(f"oblako redshift proxy: :{LISTEN_PORT} -> {PG_HOST}:{PG_PORT}", flush=True)
+    tls = "on" if SSL_CTX is not None else "off"
+    print(
+        f"oblako redshift proxy: :{LISTEN_PORT} -> {PG_HOST}:{PG_PORT} (tls {tls})",
+        flush=True,
+    )
     async with server:
         await server.serve_forever()
 

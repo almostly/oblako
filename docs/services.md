@@ -88,7 +88,15 @@ con = RedshiftService().connect()   # psycopg2 to the engine on 5439
 ```
 
 dbt-redshift: a `type: redshift` profile pointed at `host: localhost`,
-`port: 5439`, `sslmode: disable`.
+`port: 5439`, `sslmode: require`.
+
+**TLS.** The bundled proxy terminates SSL with a self-signed cert generated
+per-container (never baked into the image), so clients connect with
+`sslmode=require` (encrypt) exactly as they would against real Redshift, no
+`ssl=False` local special-case. That keeps your connection config identical
+between local and production. To fully verify the cert, point `sslrootcert` at
+the container's `/etc/oblako-redshift/server.crt` and use `sslmode=verify-full`.
+Set `OBLAKO_SSL=0` to turn TLS off.
 
 **Limitations**
 
