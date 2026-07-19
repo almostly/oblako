@@ -31,9 +31,50 @@ from .base import PortMapping, Service
 REDSHIFT_IMAGE = "public.ecr.aws/oblako/redshift-local:16"
 _BUILD_CONTEXT = str((Path(__file__).parent.parent / "images" / "redshift").resolve())
 
+# The proxy's self-signed TLS cert inside the container (persisted in a volume).
+SSL_CERT_PATH = "/etc/oblako-redshift/server.crt"
+
+
+def _redshift_connector_bundle(python_exe: str) -> str:
+    """Path to redshift_connector's trusted-CA bundle in the given interpreter."""
+    import subprocess
+
+    out = subprocess.check_output(
+        [
+            python_exe,
+            "-c",
+            "import os, redshift_connector as r; "
+            "print(os.path.join(os.path.dirname(r.__file__), 'files', 'redshift-ca-bundle.crt'))",
+        ],
+        text=True,
+    )
+    return out.strip()
+
+
+def append_cert_to_bundle(bundle_path: str, cert: str) -> bool:
+    """Append a PEM cert to a CA bundle if not already present.
+
+    redshift_connector has no CA-override option, but its bundle is a plain PEM
+    file and ``load_verify_locations`` accepts extra certs appended to it. Returns
+    True if the cert was added, False if it was already there (idempotent).
+    """
+    p = Path(bundle_path)
+    text = p.read_text()
+    cert = cert.strip()
+    if cert in text:
+        return False
+    p.write_text(text.rstrip() + "\n" + cert + "\n")
+    return True
+
 
 class RedshiftService(Service):
-    """Local Amazon Redshift, backed by the oblako/redshift image (no proxy)."""
+    """Local Amazon Redshift, backed by the oblako/redshift image.
+
+    A bundled wire proxy handles the Redshift-only SQL (physical DDL, varchar(max))
+    and terminates TLS. libpq clients (psycopg2, JDBC) can use ``sslmode=require``;
+    for redshift_connector (dbt, awswrangler) run ``oblako trust`` once per venv to
+    trust the proxy's cert, then use ``sslmode=verify-ca``. See ``trust_cert``.
+    """
 
     def __init__(
         self,
@@ -67,7 +108,13 @@ class RedshiftService(Service):
                 "oblako-redshift-data": {
                     "bind": "/var/lib/postgresql/data",
                     "mode": "rw",
-                }
+                },
+                # Persist the proxy's TLS keypair so the cert (and any `oblako
+                # trust` you ran) survives a container recreate.
+                "oblako-redshift-tls": {
+                    "bind": "/etc/oblako-redshift",
+                    "mode": "rw",
+                },
             },
         )
         self.host_port = host_port
@@ -86,6 +133,43 @@ class RedshiftService(Service):
             user=self.user,
             password=self.password,
             dbname=self.database,
+        )
+
+    def server_cert(self) -> str | None:
+        """Read the proxy's self-signed TLS cert (PEM) from the container."""
+        try:
+            container = self.client.containers.get(self.container_name)
+            code, out = container.exec_run(["cat", SSL_CERT_PATH])
+        except Exception:  # noqa: BLE001 - not running / no docker
+            return None
+        return out.decode() if code == 0 else None
+
+    def trust_cert(self, python_exe: str | None = None) -> str:
+        """Trust the proxy's cert in a venv's redshift_connector CA bundle.
+
+        redshift_connector (and thus dbt-redshift, awswrangler) verifies TLS
+        against a hardcoded Amazon CA bundle with no override, so it can't verify
+        a local cert out of the box. This appends the proxy's self-signed cert to
+        that bundle in ``python_exe``'s environment (default: the current one), so
+        ``sslmode=verify-ca`` then gives real, verified TLS locally, no
+        ``ssl=False``. Idempotent. Re-run after a redshift-connector reinstall
+        (which restores the pristine bundle). Note: that venv then also trusts this
+        cert when talking to real Redshift (harmless without the proxy's key).
+        """
+        import sys
+
+        cert = self.server_cert()
+        if not cert:
+            raise RuntimeError(
+                f"couldn't read the TLS cert from {self.container_name}; "
+                "is redshift running (oblako up redshift)?"
+            )
+        bundle = _redshift_connector_bundle(python_exe or sys.executable)
+        added = append_cert_to_bundle(bundle, cert)
+        return (
+            f"appended oblako's Redshift cert to {bundle}"
+            if added
+            else f"already trusted in {bundle}"
         )
 
     def get_client(self):

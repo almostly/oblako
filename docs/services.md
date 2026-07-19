@@ -24,7 +24,7 @@ This page lists what each one provides and where it diverges from AWS.
 | **S3 Tables / Iceberg** | Iceberg REST catalog with tables on S3Proxy. | Iceberg-on-S3; not the managed S3 Tables maintenance (compaction etc.). |
 | **DynamoDB** | Amazon's DynamoDB Local. | Single local instance; no Streams→Lambda wiring. |
 | **Kinesis** | Kinesis Data Streams via kinesalite (`saidsef/aws-kinesis-local`). | Streams only; no Firehose / Managed Flink. |
-| **Redshift** | PostgreSQL 16 image impersonating Redshift; `redshift-connector`/dbt-redshift connect natively (no proxy). | Physical DDL (`DISTKEY`/`SORTKEY`/`ENCODE`, late-binding views, `SUPER`) runs on PostgreSQL semantics; Python UDFs are Python 3. |
+| **Redshift** | PostgreSQL 16 impersonating Redshift; `redshift-connector`/dbt connect natively. A bundled proxy tolerates physical DDL (`DISTKEY`/`SORTKEY`/`ENCODE`, `varchar(max)`) and terminates TLS. | Row-store, not columnar; late-binding views / `SUPER` unsupported; Python UDFs are Python 3. |
 | **Redshift (control plane)** | `redshift` clusters/nodes/endpoints/snapshots via moto. | Metadata only, the cluster endpoint isn't the queryable engine. |
 | **Redshift Data API** | `redshift-data`; SQL executes for real against the engine. | Statement results buffered in memory. |
 | **Redshift ML** | `CREATE MODEL` trains in a SageMaker local container; predict UDF runs in-DB. | Needs `oblako[sagemaker]` + Docker; pure-Python predict UDF. |
@@ -88,15 +88,25 @@ con = RedshiftService().connect()   # psycopg2 to the engine on 5439
 ```
 
 dbt-redshift: a `type: redshift` profile pointed at `host: localhost`,
-`port: 5439`, `sslmode: require`.
+`port: 5439`. For verified TLS, run `oblako trust` once in the venv dbt uses, then
+set `sslmode: verify-ca` (see TLS below).
 
 **TLS.** The bundled proxy terminates SSL with a self-signed cert generated
-per-container (never baked into the image), so clients connect with
-`sslmode=require` (encrypt) exactly as they would against real Redshift, no
-`ssl=False` local special-case. That keeps your connection config identical
-between local and production. To fully verify the cert, point `sslrootcert` at
-the container's `/etc/oblako-redshift/server.crt` and use `sslmode=verify-full`.
-Set `OBLAKO_SSL=0` to turn TLS off.
+per-container (persisted in a volume, never baked into the image).
+
+- **libpq clients** (psycopg2, and JDBC tools like Metabase) work out of the box
+  with `sslmode=require` (encrypt), or `verify-full` with `sslrootcert` pointed at
+  the container's `/etc/oblako-redshift/server.crt`.
+- **redshift_connector (dbt, awswrangler)** verifies only against a hardcoded
+  Amazon CA bundle with no override, so it can't verify a local cert by default.
+  Run **`oblako trust`** once, it appends the proxy's cert to that venv's
+  redshift-connector bundle, then use `sslmode: verify-ca` for real, verified TLS
+  (no `ssl=False`). Caveats: it's per-venv (re-run after a `redshift-connector`
+  reinstall, and for each teammate / CI runner), and that venv then also trusts
+  the cert against real Redshift (harmless without the proxy's private key).
+  Without it, use `sslmode: disable` locally.
+
+`OBLAKO_SSL=0` turns TLS off entirely.
 
 **Limitations**
 
