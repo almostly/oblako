@@ -71,16 +71,60 @@ markers = [
 ]
 
 [tool.commitizen]
-# Conventional Commits (feat/fix/docs/ci/...), matching how this repo already
-# writes messages. `cz bump` reads/writes the [project] version, tags v$version,
-# and updates CHANGELOG.md. `cz commit` gives an interactive prompt; the
-# commit-msg pre-commit hook validates messages (see .pre-commit-config.yaml).
-name = "cz_conventional_commits"
+# Custom message format: `Service(<+|~|->): description`, where the symbol is what
+# the change does to that service: + added, ~ changed, - removed. Example:
+#   Redshift(+): add `oblako trust` for verified TLS
+# `cz commit` prompts for service/kind/description; the commit-msg pre-commit hook
+# validates the format; `cz bump` maps + -> minor, ~ -> patch, - -> minor.
+name = "cz_customize"
 version_provider = "pep621"
 version_scheme = "semver"
 tag_format = "v$version"
 major_version_zero = true
 update_changelog_on_bump = true
+changelog_incremental = true          # prepend to CHANGELOG.md, keep the KaC header
+
+[tool.commitizen.customize]
+message_template = "{{service}}({{change}}): {{description}}"
+example = "Redshift(+): add `oblako trust` for verified TLS"
+schema = "<Service>(<+|~|->): <description>"
+schema_pattern = "^[\\w .+/-]+\\([+~-]\\): .+"
+bump_pattern = "^[\\w .+/-]+\\(([+~-])\\):"
+# Changelog: Keep a Changelog (https://keepachangelog.com/en/1.1.0/). Parse each
+# commit and group by section; + -> Added, ~ -> Changed, - -> Removed.
+commit_parser = "^(?P<scope>[\\w .+/-]+)\\((?P<change_type>[+~-])\\): (?P<message>.+)"
+changelog_pattern = "^[\\w .+/-]+\\([+~-]\\):"
+change_type_order = ["Added", "Changed", "Removed"]
+
+[tool.commitizen.customize.change_type_map]
+"+" = "Added"
+"~" = "Changed"
+"-" = "Removed"
+
+[tool.commitizen.customize.bump_map]
+"+" = "MINOR"
+"-" = "MINOR"
+"~" = "PATCH"
+
+[[tool.commitizen.customize.questions]]
+type = "input"
+name = "service"
+message = "Service / component (e.g. Redshift, ECS, Glue, docs):"
+
+[[tool.commitizen.customize.questions]]
+type = "list"
+name = "change"
+message = "What does this do to it?"
+choices = [
+    { value = "+", name = "+ : added" },
+    { value = "~", name = "~ : changed" },
+    { value = "-", name = "- : removed" },
+]
+
+[[tool.commitizen.customize.questions]]
+type = "input"
+name = "description"
+message = "Short description of the change:"
 
 [build-system]
 requires = ["hatchling"]

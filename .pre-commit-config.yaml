@@ -4,7 +4,7 @@ repos:
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.16.4
     hooks:
-      - id: commitizen        # validate the commit message (Conventional Commits)
+      - id: commitizen        # validate the message format: Service(+|~|-): description
         stages: [commit-msg]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
