@@ -35,7 +35,6 @@ services:
       POSTGRES_HOST_AUTH_METHOD: md5
     volumes:
       - redshift_data:/var/lib/postgresql/data
-      - redshift_tls:/etc/oblako-redshift  # persist the proxy's TLS cert across recreate
 
   # RDS / Aurora data-plane engine (control plane is moto's 'rds' API).
   rds:
@@ -88,7 +87,6 @@ volumes:
   ollama_data:
   opensearch_data:
   redshift_data:
-  redshift_tls:
   rds_data:
   s3_data:
   dynamodb_data:

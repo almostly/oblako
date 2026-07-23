@@ -31,7 +31,8 @@ from .base import PortMapping, Service
 REDSHIFT_IMAGE = "public.ecr.aws/oblako/redshift-local:16"
 _BUILD_CONTEXT = str((Path(__file__).parent.parent / "images" / "redshift").resolve())
 
-# The proxy's self-signed TLS cert inside the container (persisted in a volume).
+# The proxy's TLS cert inside the container. A fixed self-signed cert is baked
+# into the image, so it's identical across containers, `down -v`, and clones.
 SSL_CERT_PATH = "/etc/oblako-redshift/server.crt"
 
 
@@ -108,13 +109,7 @@ class RedshiftService(Service):
                 "oblako-redshift-data": {
                     "bind": "/var/lib/postgresql/data",
                     "mode": "rw",
-                },
-                # Persist the proxy's TLS keypair so the cert (and any `oblako
-                # trust` you ran) survives a container recreate.
-                "oblako-redshift-tls": {
-                    "bind": "/etc/oblako-redshift",
-                    "mode": "rw",
-                },
+                }
             },
         )
         self.host_port = host_port
