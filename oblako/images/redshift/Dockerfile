@@ -45,6 +45,14 @@ COPY initdb.d/ /docker-entrypoint-initdb.d/
 COPY proxy/redshift_proxy.py /usr/local/bin/redshift_proxy.py
 COPY entrypoint.sh /usr/local/bin/oblako-entrypoint.sh
 RUN chmod +x /usr/local/bin/oblako-entrypoint.sh
+
+# Fixed self-signed TLS cert (local dev only), baked so every container presents
+# the SAME cert, stable across `down -v` and fresh clones, which keeps a pinned
+# sslrootcert or `oblako trust` valid. Not a secret (self-signed, localhost only);
+# override by mounting your own at /etc/oblako-redshift. See certs/README.md.
+COPY certs/server.crt certs/server.key /etc/oblako-redshift/
+RUN chmod 600 /etc/oblako-redshift/server.key
+
 EXPOSE 5439
 ENTRYPOINT ["/usr/local/bin/oblako-entrypoint.sh"]
 CMD ["postgres"]
