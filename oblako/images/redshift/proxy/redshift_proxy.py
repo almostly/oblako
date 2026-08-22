@@ -189,39 +189,53 @@ def rewrite_sql(sql: str) -> str:
     return s
 
 
-# Capture the table name and (if present) the Redshift distribution intent from a
-# CREATE TABLE, so the Citus variant can turn it into real distribution. Names are
-# limited to identifier characters, so the values are safe to interpolate (no
-# quotes/semicolons can appear). Only DISTKEY (-> distributed) and DISTSTYLE ALL
-# (-> reference) auto-distribute; EVEN/AUTO/none stay local on the coordinator.
+# Capture the table name and (if present) the Redshift distribution/sort intent
+# from a CREATE TABLE, so the Citus variant can turn it into real distribution.
+# Names/columns are limited to identifier characters, so the values are safe to
+# interpolate (no quotes/semicolons can appear). DISTKEY -> distributed, DISTSTYLE
+# ALL -> reference; EVEN/AUTO/none stay local. SORTKEY -> a btree index on those
+# columns (a stand-in for Redshift's sort order), but only on a distributed /
+# reference table -- a plain local table is left untouched.
 _CREATE_TABLE_NAME = re.compile(
     r"(?i)\bcreate\s+(?:(?:global|local)\s+)?(?:temp(?:orary)?\s+|unlogged\s+)?"
     r'table\s+(?:if\s+not\s+exists\s+)?"?([\w.$]+)"?'
 )
 _DISTKEY_COL = re.compile(r'(?i)\bdistkey\s*\(\s*"?([\w$]+)"?\s*\)')
 _DISTSTYLE_ALL = re.compile(r"(?i)\bdiststyle\s+all\b")
+_SORTKEY_COLS = re.compile(
+    r"(?i)\b(?:compound\s+|interleaved\s+)?sortkey\s*\(\s*([\w$, ]+?)\s*\)"
+)
 
 
-def extract_distribution(sql: str) -> str | None:
-    """The Citus command a CREATE TABLE's Redshift DDL implies, or None.
+def extract_distribution(sql: str) -> list[str]:
+    """The Citus commands a CREATE TABLE's Redshift DDL implies (may be empty).
 
     ``DISTKEY(col)`` -> ``create_distributed_table``; ``DISTSTYLE ALL`` ->
-    ``create_reference_table``. Anything else (EVEN/AUTO/no distkey) stays a plain
-    local table. Returns the SQL to run on the side connection after the CREATE
-    commits, or None.
+    ``create_reference_table``; a ``SORTKEY`` on a distributed/reference table adds
+    a btree index on those columns. Anything else (EVEN/AUTO/no distkey) stays a
+    plain local table and yields no commands. Returned in the order they must run
+    on the side connection after the CREATE commits.
     """
     if not _CREATE_TABLE.search(sql):
-        return None
+        return []
     name = _CREATE_TABLE_NAME.search(sql)
     if not name:
-        return None
+        return []
     table = name.group(1)
+    commands: list[str] = []
     distkey = _DISTKEY_COL.search(sql)
     if distkey:
-        return f"SELECT create_distributed_table('{table}', '{distkey.group(1)}')"
-    if _DISTSTYLE_ALL.search(sql):
-        return f"SELECT create_reference_table('{table}')"
-    return None
+        commands.append(
+            f"SELECT create_distributed_table('{table}', '{distkey.group(1)}')"
+        )
+    elif _DISTSTYLE_ALL.search(sql):
+        commands.append(f"SELECT create_reference_table('{table}')")
+    if commands:  # only index the sort key on a table we actually distribute
+        sortkey = _SORTKEY_COLS.search(sql)
+        if sortkey:
+            cols = " ".join(sortkey.group(1).split())  # normalize whitespace
+            commands.append(f"CREATE INDEX ON {table} ({cols})")
+    return commands
 
 
 def _rewrite_query_message(body: bytes) -> bytes:
@@ -352,9 +366,7 @@ async def _pipe_server(
             to_distribute = None
             if type_byte == b"Z" and OBLAKO_CITUS:
                 if session["queue"]:
-                    cmd = session["queue"].pop(0)
-                    if cmd:
-                        session["ready"].append(cmd)
+                    session["ready"].extend(session["queue"].pop(0))
                 if body[:1] == b"I" and session["ready"]:
                     to_distribute, session["ready"] = session["ready"], []
             if type_byte == b"S" and PROXY_SERVER_VERSION:
@@ -429,7 +441,7 @@ async def _pipe_typed(
             else:
                 if OBLAKO_CITUS and type_byte == b"S":  # Sync ends an extended stmt
                     session["queue"].append(session["staged"])
-                    session["staged"] = None
+                    session["staged"] = []
                 writer.write(type_byte + length_b + body)
             await writer.drain()
     except (asyncio.IncompleteReadError, ConnectionError, asyncio.CancelledError):
@@ -457,10 +469,10 @@ async def _handle(client_reader, client_writer) -> None:
     server_writer.write(startup)  # forward the StartupMessage plaintext to PG
     await server_writer.drain()
     # Per-connection distribution state (Citus variant only): `queue` holds one
-    # entry per client statement (a distribution command or None), `staged` is the
-    # extended-protocol statement's distribution pending its Sync, and `ready`
-    # accumulates dequeued distributions until the transaction commits.
-    session: dict = {"queue": [], "staged": None, "ready": []}
+    # entry per client statement (a list of distribution/index commands, possibly
+    # empty), `staged` is the extended-protocol statement's commands pending its
+    # Sync, and `ready` accumulates them until the transaction commits.
+    session: dict = {"queue": [], "staged": [], "ready": []}
     # server -> client: the framed path rewrites server_version and fires pending
     # distributions (Citus variant); the single-node path is a raw byte copy.
     if PROXY_SERVER_VERSION or OBLAKO_CITUS:
