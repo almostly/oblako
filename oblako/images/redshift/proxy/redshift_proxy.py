@@ -46,6 +46,14 @@ LISTEN_PORT = int(os.environ.get("OBLAKO_PROXY_PORT", "5439"))
 PG_HOST = os.environ.get("OBLAKO_PG_HOST", "127.0.0.1")
 PG_PORT = int(os.environ.get("OBLAKO_PG_PORT", "5433"))
 
+# Redshift version to present to the client in the startup ParameterStatus. Set
+# only on the Citus MPP variant, where the engine can't spoof server_version
+# itself (it breaks CREATE EXTENSION citus), so the proxy rewrites the value on
+# the wire while the engine keeps its real version. Unset on the single-node image
+# (the oblako_redshift extension spoofs it in-engine there), so server->client is
+# a transparent byte copy.
+PROXY_SERVER_VERSION = os.environ.get("OBLAKO_PROXY_SERVER_VERSION") or None
+
 SSL_REQUEST = 80877103
 GSSENC_REQUEST = 80877104
 
@@ -192,6 +200,44 @@ async def _pipe_raw(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
             writer.close()
 
 
+def _rewrite_parameter_status(body: bytes) -> bytes:
+    """Rewrite a ParameterStatus ('S') body if it reports server_version."""
+    i = body.index(b"\x00")
+    if body[:i] != b"server_version":
+        return b"S" + struct.pack("!I", len(body) + 4) + body
+    new = b"server_version\x00" + PROXY_SERVER_VERSION.encode() + b"\x00"
+    return b"S" + struct.pack("!I", len(new) + 4) + new
+
+
+async def _pipe_server_startup(
+    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+) -> None:
+    """Server -> client, rewriting the server_version ParameterStatus.
+
+    Only the startup burst (auth + ParameterStatus + BackendKeyData up to the first
+    ReadyForQuery 'Z') is framed and inspected, since server_version is sent there
+    and never changes. After that we fall back to a raw byte copy, so query results
+    take the fast path. Used only when PROXY_SERVER_VERSION is set (Citus variant).
+    """
+    try:
+        while True:
+            header = await reader.readexactly(5)  # type(1) + length(4)
+            type_byte = header[:1]
+            length = struct.unpack("!I", header[1:])[0]
+            body = await reader.readexactly(length - 4)
+            if type_byte == b"S":
+                writer.write(_rewrite_parameter_status(body))
+            else:
+                writer.write(header + body)
+            await writer.drain()
+            if type_byte == b"Z":  # ReadyForQuery: startup done, rest is raw
+                break
+        await _pipe_raw(reader, writer)
+    except (asyncio.IncompleteReadError, ConnectionError, asyncio.CancelledError):
+        with contextlib.suppress(Exception):
+            writer.close()
+
+
 async def _negotiate_startup(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter
 ) -> bytes | None:
@@ -260,9 +306,14 @@ async def _handle(client_reader, client_writer) -> None:
         return
     server_writer.write(startup)  # forward the StartupMessage plaintext to PG
     await server_writer.drain()
+    # server -> client: rewrite server_version on the wire (Citus variant) or copy
+    # raw (single-node, where the engine spoofs it and there's nothing to change).
+    server_to_client = (
+        _pipe_server_startup if PROXY_SERVER_VERSION else _pipe_raw
+    )
     await asyncio.gather(
         _pipe_typed(client_reader, server_writer),
-        _pipe_raw(server_reader, client_writer),
+        server_to_client(server_reader, client_writer),
     )
 
 
