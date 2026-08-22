@@ -42,8 +42,11 @@ RUN echo "shared_preload_libraries = 'citus,oblako_redshift'" \
 # On Citus the engine must NOT spoof server_version (it breaks CREATE EXTENSION
 # citus), so disable the in-engine spoof and have the wire proxy present Redshift's
 # version to clients instead. The engine keeps its real version for Citus.
+# OBLAKO_CITUS=1 also makes the proxy auto-distribute DISTKEY / DISTSTYLE ALL
+# tables (create_distributed_table / create_reference_table) after CREATE commits.
 ENV OBLAKO_SPOOF_SERVER_VERSION=off \
-    OBLAKO_PROXY_SERVER_VERSION=8.0.2
+    OBLAKO_PROXY_SERVER_VERSION=8.0.2 \
+    OBLAKO_CITUS=1
 
 COPY cluster-entrypoint.sh /usr/local/bin/oblako-cluster-entrypoint.sh
 RUN chmod +x /usr/local/bin/oblako-cluster-entrypoint.sh

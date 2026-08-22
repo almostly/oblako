@@ -98,3 +98,59 @@ def test_plpython_udf_over_distributed_table(conn):
     conn.execute("SELECT create_distributed_function('bump(int)')")
     conn.execute(f"SELECT count(*) FROM {TABLE} WHERE bump(user_id) > 0")
     assert conn.fetchone()[0] == 200000
+
+
+def _partmethod(conn, table: str, timeout: float = 8.0) -> str:
+    """Poll pg_dist_partition; return 'distributed' / 'reference' / 'local'.
+
+    Auto-distribution runs on a side connection just after CREATE commits, so give
+    it a moment to land.
+    """
+    import time
+
+    deadline = time.time() + timeout
+    while True:
+        conn.execute(
+            "SELECT partmethod FROM pg_dist_partition "
+            f"WHERE logicalrelid = '{table}'::regclass"
+        )
+        row = conn.fetchone()
+        method = {"h": "distributed", "n": "reference"}.get(row[0] if row else None)
+        if method or time.time() > deadline:
+            return method or "local"
+        time.sleep(0.5)
+
+
+@cluster
+def test_auto_distribute_distkey(conn):
+    # increment #2: plain Redshift DDL (no create_distributed_table) -> the proxy
+    # turns DISTKEY into a distributed table, sharded across the workers.
+    conn.execute("DROP TABLE IF EXISTS auto_ev")
+    conn.execute(
+        "CREATE TABLE auto_ev (id bigint, user_id int, amount numeric) "
+        "DISTSTYLE KEY DISTKEY(user_id) SORTKEY(id)"
+    )
+    assert _partmethod(conn, "auto_ev") == "distributed"
+    conn.execute(
+        "SELECT count(distinct nodename) FROM citus_shards "
+        "WHERE table_name = 'auto_ev'::regclass"
+    )
+    assert conn.fetchone()[0] >= 2  # shards spread across the workers
+    conn.execute("DROP TABLE auto_ev")
+
+
+@cluster
+def test_auto_distribute_diststyle_all_is_reference(conn):
+    conn.execute("DROP TABLE IF EXISTS auto_dim")
+    conn.execute("CREATE TABLE auto_dim (id int, name text) DISTSTYLE ALL")
+    assert _partmethod(conn, "auto_dim") == "reference"
+    conn.execute("DROP TABLE auto_dim")
+
+
+@cluster
+def test_no_distkey_stays_local(conn):
+    conn.execute("DROP TABLE IF EXISTS auto_loc")
+    conn.execute("CREATE TABLE auto_loc (id int, x int)")
+    # a plain table gets no auto-distribution; it stays local on the coordinator
+    assert _partmethod(conn, "auto_loc", timeout=3.0) == "local"
+    conn.execute("DROP TABLE auto_loc")
