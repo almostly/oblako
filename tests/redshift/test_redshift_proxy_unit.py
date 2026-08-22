@@ -146,39 +146,52 @@ def test_direct_svv_query_not_emptied():
     assert rewrite_sql(sql) == sql
 
 
-def test_extract_distribution_distkey():
-    # DISTKEY -> create_distributed_table (Citus variant auto-distributes)
+def test_extract_distribution_distkey_and_sortkey():
+    # DISTKEY -> create_distributed_table; SORTKEY -> a btree index, in order.
     assert extract_distribution(
         "CREATE TABLE events (id int, user_id int) DISTSTYLE KEY DISTKEY(user_id) SORTKEY(id)"
-    ) == "SELECT create_distributed_table('events', 'user_id')"
+    ) == [
+        "SELECT create_distributed_table('events', 'user_id')",
+        "CREATE INDEX ON events (id)",
+    ]
+
+
+def test_extract_distribution_compound_sortkey_multicol():
+    cmds = extract_distribution(
+        "CREATE TABLE t (id int, k int) DISTKEY(k) COMPOUND SORTKEY (k, id)"
+    )
+    assert cmds[0] == "SELECT create_distributed_table('t', 'k')"
+    assert cmds[1] == "CREATE INDEX ON t (k, id)"
 
 
 def test_extract_distribution_all_is_reference():
     assert extract_distribution(
         "CREATE TABLE dim (id int, name text) DISTSTYLE ALL"
-    ) == "SELECT create_reference_table('dim')"
+    ) == ["SELECT create_reference_table('dim')"]
 
 
 def test_extract_distribution_none_stays_local():
     # EVEN / AUTO / no distkey -> not auto-distributed (stays local on coordinator)
-    assert extract_distribution("CREATE TABLE t (a int) DISTSTYLE EVEN") is None
-    assert extract_distribution("CREATE TABLE t (a int)") is None
-    assert extract_distribution("SELECT * FROM t") is None
-    assert extract_distribution("INSERT INTO t VALUES (1)") is None
+    assert extract_distribution("CREATE TABLE t (a int) DISTSTYLE EVEN") == []
+    assert extract_distribution("CREATE TABLE t (a int)") == []
+    assert extract_distribution("SELECT * FROM t") == []
+    assert extract_distribution("INSERT INTO t VALUES (1)") == []
+    # SORTKEY alone (no distribution) leaves the local table untouched
+    assert extract_distribution("CREATE TABLE t (a int) SORTKEY(a)") == []
 
 
 def test_extract_distribution_qualified_and_temp():
     assert extract_distribution(
         "CREATE TABLE IF NOT EXISTS analytics.events (id int, k int) DISTKEY(k)"
-    ) == "SELECT create_distributed_table('analytics.events', 'k')"
+    ) == ["SELECT create_distributed_table('analytics.events', 'k')"]
     assert extract_distribution(
         "CREATE TEMP TABLE stg (id int, k int) DISTKEY (k)"
-    ) == "SELECT create_distributed_table('stg', 'k')"
+    ) == ["SELECT create_distributed_table('stg', 'k')"]
 
 
 def test_extract_distribution_is_injection_safe():
     # names are matched as identifier chars only, so no quote/semicolon can escape
-    out = extract_distribution("CREATE TABLE t (k int) DISTKEY(k)")
+    out = extract_distribution("CREATE TABLE t (k int) DISTKEY(k)")[0]
     assert "';" not in out and out.count("'") == 4  # exactly the two quoted args
 
 

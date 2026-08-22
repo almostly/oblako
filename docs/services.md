@@ -138,9 +138,12 @@ and plpython UDFs are all present, and a distributed table's aggregations run in
 parallel on the workers. **Unmodified Redshift DDL distributes automatically**:
 the proxy turns `CREATE TABLE … DISTKEY(col)` into a `create_distributed_table`
 (sharded across the workers) and `DISTSTYLE ALL` into a reference table, right
-after the CREATE commits. Tables with no distribution style (EVEN/AUTO) stay local
-on the coordinator. So a dbt model with a `dist` config, or any `DISTKEY` DDL,
-shards with no code change.
+after the CREATE commits; a `SORTKEY` becomes a btree index on those columns.
+Tables with no distribution style (EVEN/AUTO) stay local on the coordinator. It
+works whether the DDL is autocommitted or inside a transaction (dbt wraps its
+models in one) — the distribution fires on commit, so rows written in the same
+transaction are preserved. So a dbt model with a `dist`/`sort` config, or any
+`DISTKEY` DDL, shards with no code change.
 The image (`oblako/images/redshift-cluster`) builds from the single-node one and
 layers Citus underneath; because Citus can't tolerate a spoofed `server_version`,
 the engine reports its real version and the **wire proxy** presents Redshift's

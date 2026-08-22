@@ -154,3 +154,48 @@ def test_no_distkey_stays_local(conn):
     # a plain table gets no auto-distribution; it stays local on the coordinator
     assert _partmethod(conn, "auto_loc", timeout=3.0) == "local"
     conn.execute("DROP TABLE auto_loc")
+
+
+@cluster
+def test_sortkey_becomes_an_index(conn):
+    # SORTKEY on a distributed table -> a btree index on those columns
+    conn.execute("DROP TABLE IF EXISTS auto_sk")
+    conn.execute(
+        "CREATE TABLE auto_sk (id bigint, user_id int, amount numeric) "
+        "DISTSTYLE KEY DISTKEY(user_id) SORTKEY(id)"
+    )
+    assert _partmethod(conn, "auto_sk") == "distributed"
+    conn.execute("SELECT count(*) FROM pg_indexes WHERE tablename = 'auto_sk'")
+    assert conn.fetchone()[0] >= 1  # the SORTKEY index
+    conn.execute("DROP TABLE auto_sk")
+
+
+@cluster
+def test_auto_distribute_in_transaction():
+    # dbt wraps DDL in a transaction: the distribution must fire on COMMIT, and
+    # the rows written in the same transaction must survive the distribution.
+    import time
+
+    import redshift_connector
+
+    c = redshift_connector.connect(
+        host="localhost", port=5439, database="oblako",
+        user="oblako", password="oblako", ssl=False,
+    )
+    try:
+        cur = c.cursor()
+        cur.execute("DROP TABLE IF EXISTS txn_tbl")
+        c.commit()
+        cur.execute("CREATE TABLE txn_tbl (id bigint, k int, v numeric) DISTKEY(k)")
+        cur.execute("INSERT INTO txn_tbl SELECT g, g%200, g*1.0 FROM generate_series(1,50000) g")
+        c.commit()  # distribution fires here
+        time.sleep(3)
+        cur.execute("SELECT partmethod FROM pg_dist_partition WHERE logicalrelid='txn_tbl'::regclass")
+        row = cur.fetchone()
+        assert row and row[0] == "h", "not distributed after COMMIT"
+        cur.execute("SELECT count(*) FROM txn_tbl")
+        assert cur.fetchone()[0] == 50000  # rows preserved through distribution
+        cur.execute("DROP TABLE txn_tbl")
+        c.commit()
+    finally:
+        c.close()
