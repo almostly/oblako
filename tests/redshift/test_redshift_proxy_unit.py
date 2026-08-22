@@ -12,6 +12,7 @@ _spec = importlib.util.spec_from_file_location("redshift_proxy", _PATH)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 rewrite_sql = _mod.rewrite_sql
+extract_distribution = _mod.extract_distribution
 
 
 def _norm(s: str) -> str:
@@ -143,6 +144,42 @@ def test_direct_svv_query_not_emptied():
     # be dropped to nothing
     sql = "SELECT count(*) FROM svv_external_tables"
     assert rewrite_sql(sql) == sql
+
+
+def test_extract_distribution_distkey():
+    # DISTKEY -> create_distributed_table (Citus variant auto-distributes)
+    assert extract_distribution(
+        "CREATE TABLE events (id int, user_id int) DISTSTYLE KEY DISTKEY(user_id) SORTKEY(id)"
+    ) == "SELECT create_distributed_table('events', 'user_id')"
+
+
+def test_extract_distribution_all_is_reference():
+    assert extract_distribution(
+        "CREATE TABLE dim (id int, name text) DISTSTYLE ALL"
+    ) == "SELECT create_reference_table('dim')"
+
+
+def test_extract_distribution_none_stays_local():
+    # EVEN / AUTO / no distkey -> not auto-distributed (stays local on coordinator)
+    assert extract_distribution("CREATE TABLE t (a int) DISTSTYLE EVEN") is None
+    assert extract_distribution("CREATE TABLE t (a int)") is None
+    assert extract_distribution("SELECT * FROM t") is None
+    assert extract_distribution("INSERT INTO t VALUES (1)") is None
+
+
+def test_extract_distribution_qualified_and_temp():
+    assert extract_distribution(
+        "CREATE TABLE IF NOT EXISTS analytics.events (id int, k int) DISTKEY(k)"
+    ) == "SELECT create_distributed_table('analytics.events', 'k')"
+    assert extract_distribution(
+        "CREATE TEMP TABLE stg (id int, k int) DISTKEY (k)"
+    ) == "SELECT create_distributed_table('stg', 'k')"
+
+
+def test_extract_distribution_is_injection_safe():
+    # names are matched as identifier chars only, so no quote/semicolon can escape
+    out = extract_distribution("CREATE TABLE t (k int) DISTKEY(k)")
+    assert "';" not in out and out.count("'") == 4  # exactly the two quoted args
 
 
 def _param_status(key: bytes, value: bytes) -> bytes:

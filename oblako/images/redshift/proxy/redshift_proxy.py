@@ -24,6 +24,12 @@ loopback. So clients connect with ``sslmode=require`` (encrypt) exactly as they
 would against real Redshift, no ``ssl=False`` local special-case. To fully verify,
 point ``sslrootcert`` at the container's cert. Disable with OBLAKO_SSL=0.
 
+On the Citus MPP variant (OBLAKO_CITUS=1) it also turns Redshift distribution DDL
+into real Citus distribution: it records what a ``CREATE TABLE`` with DISTKEY /
+DISTSTYLE ALL should become and, once that transaction commits, runs
+create_distributed_table / create_reference_table on a side connection (see
+``_distribute``). There it also presents Redshift's server_version on the wire.
+
 Env:
   OBLAKO_PROXY_PORT  port to listen on            (default 5439, Redshift's port)
   OBLAKO_PG_HOST     upstream PostgreSQL host     (default 127.0.0.1)
@@ -31,6 +37,8 @@ Env:
   OBLAKO_SSL         offer TLS (1, default) or not (0)
   OBLAKO_SSL_CERT    server cert path             (default /etc/oblako-redshift/server.crt)
   OBLAKO_SSL_KEY     server key path              (default /etc/oblako-redshift/server.key)
+  OBLAKO_CITUS       (=1) auto-distribute DISTKEY/DISTSTYLE tables via Citus
+  OBLAKO_PROXY_SERVER_VERSION  server_version to present to clients (Citus variant)
 """
 
 from __future__ import annotations
@@ -54,8 +62,19 @@ PG_PORT = int(os.environ.get("OBLAKO_PG_PORT", "5433"))
 # a transparent byte copy.
 PROXY_SERVER_VERSION = os.environ.get("OBLAKO_PROXY_SERVER_VERSION") or None
 
+# Citus MPP variant: when set, the proxy turns Redshift distribution DDL into real
+# Citus distribution. It strips DISTKEY/DISTSTYLE as usual, but also records what
+# the table should become and, once the CREATE's transaction commits, runs
+# create_distributed_table / create_reference_table on a *side* connection (a
+# separate transaction, since doing it inside the CREATE deadlocks). Unset on the
+# single-node image, where distribution DDL is simply stripped.
+OBLAKO_CITUS = os.environ.get("OBLAKO_CITUS") == "1"
+PG_USER = os.environ.get("POSTGRES_USER", "oblako")
+PG_DATABASE = os.environ.get("POSTGRES_DB", "oblako")
+
 SSL_REQUEST = 80877103
 GSSENC_REQUEST = 80877104
+STARTUP_PROTOCOL = 196608  # 3.0
 
 
 def _load_ssl_context() -> ssl.SSLContext | None:
@@ -170,6 +189,41 @@ def rewrite_sql(sql: str) -> str:
     return s
 
 
+# Capture the table name and (if present) the Redshift distribution intent from a
+# CREATE TABLE, so the Citus variant can turn it into real distribution. Names are
+# limited to identifier characters, so the values are safe to interpolate (no
+# quotes/semicolons can appear). Only DISTKEY (-> distributed) and DISTSTYLE ALL
+# (-> reference) auto-distribute; EVEN/AUTO/none stay local on the coordinator.
+_CREATE_TABLE_NAME = re.compile(
+    r"(?i)\bcreate\s+(?:(?:global|local)\s+)?(?:temp(?:orary)?\s+|unlogged\s+)?"
+    r'table\s+(?:if\s+not\s+exists\s+)?"?([\w.$]+)"?'
+)
+_DISTKEY_COL = re.compile(r'(?i)\bdistkey\s*\(\s*"?([\w$]+)"?\s*\)')
+_DISTSTYLE_ALL = re.compile(r"(?i)\bdiststyle\s+all\b")
+
+
+def extract_distribution(sql: str) -> str | None:
+    """The Citus command a CREATE TABLE's Redshift DDL implies, or None.
+
+    ``DISTKEY(col)`` -> ``create_distributed_table``; ``DISTSTYLE ALL`` ->
+    ``create_reference_table``. Anything else (EVEN/AUTO/no distkey) stays a plain
+    local table. Returns the SQL to run on the side connection after the CREATE
+    commits, or None.
+    """
+    if not _CREATE_TABLE.search(sql):
+        return None
+    name = _CREATE_TABLE_NAME.search(sql)
+    if not name:
+        return None
+    table = name.group(1)
+    distkey = _DISTKEY_COL.search(sql)
+    if distkey:
+        return f"SELECT create_distributed_table('{table}', '{distkey.group(1)}')"
+    if _DISTSTYLE_ALL.search(sql):
+        return f"SELECT create_reference_table('{table}')"
+    return None
+
+
 def _rewrite_query_message(body: bytes) -> bytes:
     """Rewrite the SQL in a simple-query ('Q') message body (SQL + NUL)."""
     sql = body[:-1].decode("utf-8", "surrogatepass")
@@ -200,6 +254,68 @@ async def _pipe_raw(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) 
             writer.close()
 
 
+async def _read_until_ready(reader: asyncio.StreamReader) -> None:
+    """Consume typed messages up to the next ReadyForQuery ('Z').
+
+    Reads *through* the ReadyForQuery even on an ErrorResponse, so the connection
+    is left clean for the next query, then raises the error text.
+    """
+    err = None
+    while True:
+        header = await reader.readexactly(5)
+        body = await reader.readexactly(struct.unpack("!I", header[1:])[0] - 4)
+        if header[:1] == b"E":
+            err = body.decode("utf-8", "replace")
+        if header[:1] == b"Z":
+            if err is not None:
+                raise RuntimeError(err)
+            return
+
+
+async def _distribute(commands: list[str]) -> None:
+    """Run the pending distribution commands on a fresh side connection to PG.
+
+    A separate connection (hence a separate transaction) is required: running
+    create_distributed_table inside the CREATE's own transaction deadlocks. This
+    fires after the client's CREATE commits, but the two happen on different
+    connections, so it may briefly race ahead of the commit being visible; a
+    "relation does not exist" is therefore retried a few times. Best effort: any
+    other failure is logged, never surfaced to the client. Assumes trust auth on
+    the loopback (the cluster's local auth), so there is no password step.
+    """
+    writer = None
+    try:
+        reader, writer = await asyncio.open_connection(PG_HOST, PG_PORT)
+        params = (
+            b"user\x00" + PG_USER.encode() + b"\x00"
+            b"database\x00" + PG_DATABASE.encode() + b"\x00\x00"
+        )
+        writer.write(struct.pack("!II", len(params) + 8, STARTUP_PROTOCOL) + params)
+        await writer.drain()
+        await _read_until_ready(reader)  # auth (trust) + params -> ReadyForQuery
+        for cmd in commands:
+            q = cmd.encode("utf-8") + b"\x00"
+            for attempt in range(8):
+                writer.write(b"Q" + struct.pack("!I", len(q) + 4) + q)
+                await writer.drain()
+                try:
+                    await _read_until_ready(reader)
+                    break
+                except RuntimeError as err:
+                    # the client's CREATE hasn't become visible yet -> back off
+                    if "does not exist" in str(err) and attempt < 7:
+                        await asyncio.sleep(0.25)
+                        continue
+                    print(f"oblako: auto-distribute failed: {cmd}: {err}", flush=True)
+                    break
+    except Exception as exc:  # noqa: BLE001 - best effort, must not affect the client
+        print(f"oblako: auto-distribute error: {exc!r}", flush=True)
+    finally:
+        if writer is not None:
+            with contextlib.suppress(Exception):
+                writer.close()
+
+
 def _rewrite_parameter_status(body: bytes) -> bytes:
     """Rewrite a ParameterStatus ('S') body if it reports server_version."""
     i = body.index(b"\x00")
@@ -209,15 +325,19 @@ def _rewrite_parameter_status(body: bytes) -> bytes:
     return b"S" + struct.pack("!I", len(new) + 4) + new
 
 
-async def _pipe_server_startup(
-    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+async def _pipe_server(
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    session: dict,
 ) -> None:
-    """Server -> client, rewriting the server_version ParameterStatus.
+    """Server -> client, framed, for the Citus variant.
 
-    Only the startup burst (auth + ParameterStatus + BackendKeyData up to the first
-    ReadyForQuery 'Z') is framed and inspected, since server_version is sent there
-    and never changes. After that we fall back to a raw byte copy, so query results
-    take the fast path. Used only when PROXY_SERVER_VERSION is set (Citus variant).
+    Rewrites the server_version ParameterStatus (so clients see Redshift's version
+    while the engine keeps its own), and watches ReadyForQuery: when one arrives
+    with status 'I' (idle, i.e. the transaction just committed) and tables are
+    pending distribution, it fires create_distributed_table on a side connection.
+    Used only when PROXY_SERVER_VERSION or OBLAKO_CITUS is set; otherwise the
+    single-node path is a raw byte copy (``_pipe_raw``).
     """
     try:
         while True:
@@ -225,14 +345,25 @@ async def _pipe_server_startup(
             type_byte = header[:1]
             length = struct.unpack("!I", header[1:])[0]
             body = await reader.readexactly(length - 4)
-            if type_byte == b"S":
+            # Each ReadyForQuery completes one client statement, in order: dequeue
+            # its distribution (if any) and hold it until the transaction commits
+            # (status 'I'). Doing this synchronously here (before the drain below
+            # yields to the other pipe) keeps the queue aligned with the RFQ stream.
+            to_distribute = None
+            if type_byte == b"Z" and OBLAKO_CITUS:
+                if session["queue"]:
+                    cmd = session["queue"].pop(0)
+                    if cmd:
+                        session["ready"].append(cmd)
+                if body[:1] == b"I" and session["ready"]:
+                    to_distribute, session["ready"] = session["ready"], []
+            if type_byte == b"S" and PROXY_SERVER_VERSION:
                 writer.write(_rewrite_parameter_status(body))
             else:
                 writer.write(header + body)
             await writer.drain()
-            if type_byte == b"Z":  # ReadyForQuery: startup done, rest is raw
-                break
-        await _pipe_raw(reader, writer)
+            if to_distribute:
+                asyncio.create_task(_distribute(to_distribute))
     except (asyncio.IncompleteReadError, ConnectionError, asyncio.CancelledError):
         with contextlib.suppress(Exception):
             writer.close()
@@ -266,20 +397,39 @@ async def _negotiate_startup(
 
 
 async def _pipe_typed(
-    reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
+    session: dict,
 ) -> None:
-    """Client -> server (post-startup): rewrite SQL in Q/P, relay the rest."""
+    """Client -> server (post-startup): rewrite SQL in Q/P, relay the rest.
+
+    On the Citus variant it also records the distribution each statement implies
+    (from the original SQL, before DISTKEY is stripped), enqueued one entry per
+    statement so it aligns 1:1 with the server's ReadyForQuery replies even when
+    the client pipelines. ``_pipe_server`` dequeues and fires them on commit.
+    """
     try:
         while True:
             type_byte = await reader.readexactly(1)
             length_b = await reader.readexactly(4)
             length = struct.unpack("!I", length_b)[0]
             body = await reader.readexactly(length - 4)
-            if type_byte == b"Q":
+            if type_byte == b"Q":  # simple query: self-contained, one ReadyForQuery
+                if OBLAKO_CITUS:
+                    sql = body[:-1].decode("utf-8", "surrogatepass")
+                    session["queue"].append(extract_distribution(sql))
                 writer.write(_rewrite_query_message(body))
-            elif type_byte == b"P":
+            elif type_byte == b"P":  # Parse: stage the distribution until its Sync
+                if OBLAKO_CITUS:
+                    i = body.index(b"\x00")
+                    j = body.index(b"\x00", i + 1)
+                    sql = body[i + 1 : j].decode("utf-8", "surrogatepass")
+                    session["staged"] = extract_distribution(sql)
                 writer.write(_rewrite_parse_message(body))
             else:
+                if OBLAKO_CITUS and type_byte == b"S":  # Sync ends an extended stmt
+                    session["queue"].append(session["staged"])
+                    session["staged"] = None
                 writer.write(type_byte + length_b + body)
             await writer.drain()
     except (asyncio.IncompleteReadError, ConnectionError, asyncio.CancelledError):
@@ -306,14 +456,20 @@ async def _handle(client_reader, client_writer) -> None:
         return
     server_writer.write(startup)  # forward the StartupMessage plaintext to PG
     await server_writer.drain()
-    # server -> client: rewrite server_version on the wire (Citus variant) or copy
-    # raw (single-node, where the engine spoofs it and there's nothing to change).
-    server_to_client = (
-        _pipe_server_startup if PROXY_SERVER_VERSION else _pipe_raw
-    )
+    # Per-connection distribution state (Citus variant only): `queue` holds one
+    # entry per client statement (a distribution command or None), `staged` is the
+    # extended-protocol statement's distribution pending its Sync, and `ready`
+    # accumulates dequeued distributions until the transaction commits.
+    session: dict = {"queue": [], "staged": None, "ready": []}
+    # server -> client: the framed path rewrites server_version and fires pending
+    # distributions (Citus variant); the single-node path is a raw byte copy.
+    if PROXY_SERVER_VERSION or OBLAKO_CITUS:
+        server_to_client = _pipe_server(server_reader, client_writer, session)
+    else:
+        server_to_client = _pipe_raw(server_reader, client_writer)
     await asyncio.gather(
-        _pipe_typed(client_reader, server_writer),
-        server_to_client(server_reader, client_writer),
+        _pipe_typed(client_reader, server_writer, session),
+        server_to_client,
     )
 
 
