@@ -36,6 +36,57 @@ services:
     volumes:
       - redshift_data:/var/lib/postgresql/data
 
+  # Redshift MPP cluster (opt-in `cluster` profile): the same Redshift-compatible
+  # engine on Citus, so tables shard across worker nodes for real multi-node
+  # parallelism. Start with `docker compose --profile cluster up`. The coordinator
+  # is what clients connect to (it also publishes 5439, so run it INSTEAD of the
+  # single-node `redshift` service, not alongside). amd64 only (Citus ships no
+  # arm64 image); the image builds FROM the single-node redshift image.
+  redshift-coordinator:
+    profiles: ["cluster"]
+    image: public.ecr.aws/oblako/redshift-cluster:16
+    build: ./oblako/images/redshift-cluster
+    platform: linux/amd64
+    ports:
+      - "5439:5439"
+    environment:
+      POSTGRES_USER: oblako
+      POSTGRES_PASSWORD: oblako
+      POSTGRES_DB: oblako
+      # trust across the isolated cluster network (inter-node + client); the
+      # proxy still presents Redshift's version on the wire.
+      POSTGRES_HOST_AUTH_METHOD: trust
+      OBLAKO_CITUS_ROLE: coordinator
+      OBLAKO_CITUS_COORDINATOR_HOST: redshift-coordinator
+      OBLAKO_CITUS_WORKERS: redshift-w1,redshift-w2
+    depends_on:
+      - redshift-w1
+      - redshift-w2
+
+  redshift-w1:
+    profiles: ["cluster"]
+    image: public.ecr.aws/oblako/redshift-cluster:16
+    build: ./oblako/images/redshift-cluster
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: oblako
+      POSTGRES_PASSWORD: oblako
+      POSTGRES_DB: oblako
+      POSTGRES_HOST_AUTH_METHOD: trust
+      OBLAKO_CITUS_ROLE: worker
+
+  redshift-w2:
+    profiles: ["cluster"]
+    image: public.ecr.aws/oblako/redshift-cluster:16
+    build: ./oblako/images/redshift-cluster
+    platform: linux/amd64
+    environment:
+      POSTGRES_USER: oblako
+      POSTGRES_PASSWORD: oblako
+      POSTGRES_DB: oblako
+      POSTGRES_HOST_AUTH_METHOD: trust
+      OBLAKO_CITUS_ROLE: worker
+
   # RDS / Aurora data-plane engine (control plane is moto's 'rds' API).
   rds:
     image: postgres:16

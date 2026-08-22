@@ -37,6 +37,7 @@ _INTEGRATION_FILES = {
     "tests/redshift/test_redshift_ml.py",
     "tests/redshift/test_redshift_proxy.py",
     "tests/redshift/test_redshift_sqlalchemy.py",
+    "tests/redshift/test_redshift_cluster.py",
     "tests/stepfunctions/test_stepfunctions.py",
     "tests/services/test_ec2.py",
 }

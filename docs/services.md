@@ -122,6 +122,30 @@ keypair at `/etc/oblako-redshift`, or disable TLS with `OBLAKO_SSL=0`.
 
 `OBLAKO_SSL=0` turns TLS off entirely.
 
+**MPP cluster (opt-in).** The single-node engine is enough for dev/CI, but a
+`cluster` profile runs the *same* Redshift-compatible engine on **Citus**, so
+tables shard across worker nodes for real multi-node parallelism:
+
+```bash
+# name the services so only the cluster starts (a bare `--profile cluster up`
+# would also start the single-node `redshift` service and collide on 5439)
+docker compose --profile cluster up redshift-coordinator redshift-w1 redshift-w2
+```
+
+Everything the single-node image does still works, on the cluster: clients
+connect natively (redshift_connector, dbt), the catalog views, date functions,
+and plpython UDFs are all present, and a distributed table's aggregations run in
+parallel on the workers. Redshift's distribution model maps onto Citus, e.g. the
+proxy/engine turn `DISTKEY(col)` into `create_distributed_table('t','col')` and
+`DISTSTYLE ALL` into a reference table (automatic `DISTKEY` translation is landing
+incrementally; for now distribute explicitly with `create_distributed_table`).
+The image (`oblako/images/redshift-cluster`) builds from the single-node one and
+layers Citus underneath; because Citus can't tolerate a spoofed `server_version`,
+the engine reports its real version and the **wire proxy** presents Redshift's
+version to clients instead (`OBLAKO_PROXY_SERVER_VERSION`). amd64 only (Citus
+ships no arm64 image), so on Apple Silicon it runs under emulation. This is a
+distinct product track from the single-node simulator, aimed at self-hosting.
+
 **Limitations**
 
 - Redshift physical DDL (`DISTSTYLE`/`DISTKEY`/`SORTKEY`/`ENCODE`) is **accepted

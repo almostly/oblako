@@ -2,6 +2,7 @@
 
 import importlib.util
 import pathlib
+import struct
 
 _PATH = (
     pathlib.Path(__file__).parents[2]
@@ -142,3 +143,28 @@ def test_direct_svv_query_not_emptied():
     # be dropped to nothing
     sql = "SELECT count(*) FROM svv_external_tables"
     assert rewrite_sql(sql) == sql
+
+
+def _param_status(key: bytes, value: bytes) -> bytes:
+    body = key + b"\x00" + value + b"\x00"
+    return b"S" + struct.pack("!I", len(body) + 4) + body
+
+
+def test_server_version_parameter_status_rewritten():
+    # On the Citus variant the proxy presents Redshift's version to the client on
+    # the wire (the engine keeps its real version so Citus works).
+    _mod.PROXY_SERVER_VERSION = "8.0.2"
+    try:
+        real = b"16.15 (Debian 16.15-1.pgdg12+2)"
+        out = _mod._rewrite_parameter_status(b"server_version\x00" + real + b"\x00")
+        # message frames correctly and carries the spoofed value
+        assert out[:1] == b"S"
+        assert struct.unpack("!I", out[1:5])[0] == len(out) - 1
+        assert out[5:] == b"server_version\x008.0.2\x00"
+        # a different ParameterStatus is passed through untouched
+        enc = b"server_encoding\x00UTF8\x00"
+        assert _mod._rewrite_parameter_status(enc) == b"S" + struct.pack(
+            "!I", len(enc) + 4
+        ) + enc
+    finally:
+        _mod.PROXY_SERVER_VERSION = None

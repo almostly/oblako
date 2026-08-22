@@ -63,6 +63,48 @@ jobs:
           uv run --python 3.12 --extra dev python -m pytest -v
           -m integration
 
+  redshift-cluster:
+    name: redshift MPP cluster (Citus)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # The cluster image builds FROM the single-node image (COPY --from), so
+      # build + tag that first; buildkit then resolves it from the local store.
+      - name: Build redshift image
+        run: docker build -t public.ecr.aws/oblako/redshift-local:16 oblako/images/redshift
+
+      # Coordinator + 2 workers, named explicitly so compose starts only the
+      # cluster (a bare `--profile cluster up` would also start the single-node
+      # `redshift` service, colliding on 5439). Runners are amd64: Citus native.
+      - name: Build + start the Citus cluster
+        run: >
+          docker compose --profile cluster up -d --build
+          redshift-coordinator redshift-w1 redshift-w2
+
+      - name: Wait for the workers to register
+        run: |
+          for i in $(seq 1 60); do
+            n=$(docker compose exec -T redshift-coordinator \
+                  psql -U oblako -d oblako -h 127.0.0.1 -p 5433 -tAc \
+                  "SELECT count(*) FROM pg_dist_node WHERE isactive" 2>/dev/null \
+                  | tr -d '[:space:]')
+            echo "active Citus nodes: ${n:-0}"
+            [ "${n:-0}" -ge 3 ] && exit 0
+            sleep 3
+          done
+          echo "cluster did not form"; docker compose logs redshift-coordinator | tail -40; exit 1
+
+      - name: Cluster tests
+        run: >
+          uv run --python 3.12 --extra dev python -m pytest -v
+          tests/redshift/test_redshift_cluster.py
+
   kubernetes:
     name: kubernetes backend (kind)
     runs-on: ubuntu-latest

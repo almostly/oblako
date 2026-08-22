@@ -13,6 +13,8 @@
 #include "postgres.h"
 #include "fmgr.h"
 #include "utils/guc.h"
+#include <stdlib.h>
+#include <string.h>
 
 PG_MODULE_MAGIC;
 
@@ -33,6 +35,7 @@ static const char *const redshift_gucs[] = {
 void
 _PG_init(void)
 {
+	const char *spoof;
 	int i;
 
 	for (i = 0; redshift_gucs[i] != NULL; i++)
@@ -45,6 +48,17 @@ _PG_init(void)
 								   GUC_NO_SHOW_ALL,
 								   NULL, NULL, NULL);
 
-	/* Impersonate Redshift's reported PostgreSQL version. */
-	SetConfigOption("server_version", "8.0.2", PGC_INTERNAL, PGC_S_OVERRIDE);
+	/*
+	 * Impersonate Redshift's reported PostgreSQL version so the driver parses it
+	 * cleanly. OBLAKO_SPOOF_SERVER_VERSION overrides the value; setting it to "off"
+	 * (or empty) disables the in-engine spoof. That is required on the Citus MPP
+	 * variant, where a fake server_version breaks CREATE EXTENSION citus; there the
+	 * wire proxy presents the Redshift version to the client instead, and the
+	 * engine keeps its real version for Citus.
+	 */
+	spoof = getenv("OBLAKO_SPOOF_SERVER_VERSION");
+	if (spoof == NULL)
+		spoof = "8.0.2";
+	if (spoof[0] != '\0' && strcmp(spoof, "off") != 0)
+		SetConfigOption("server_version", spoof, PGC_INTERNAL, PGC_S_OVERRIDE);
 }
