@@ -13,11 +13,16 @@ Bundled inside the redshift-local image: it listens on the published port and
 forwards to PostgreSQL on an internal port, so from the outside it's still just
 "the redshift container".
 
-TLS: the proxy terminates SSL with a self-signed cert (generated per-container by
-the entrypoint, never baked into the image) and forwards plaintext to PostgreSQL
-on the loopback. So clients connect with ``sslmode=require`` (encrypt) exactly as
-they would against real Redshift, no ``ssl=False`` local special-case. To fully
-verify, point ``sslrootcert`` at the container's cert. Disable with OBLAKO_SSL=0.
+It also answers the Redshift-only catalog columns that reflection drivers read
+(``pg_class.reldiststyle``, ``pg_attribute.attencodingtype`` …) with neutral
+literals, since PostgreSQL's system catalogs can't grow those columns; see
+``_rewrite_catalog``.
+
+TLS: the proxy terminates SSL with a fixed self-signed cert baked into the image
+(stable across ``down -v`` and clones) and forwards plaintext to PostgreSQL on the
+loopback. So clients connect with ``sslmode=require`` (encrypt) exactly as they
+would against real Redshift, no ``ssl=False`` local special-case. To fully verify,
+point ``sslrootcert`` at the container's cert. Disable with OBLAKO_SSL=0.
 
 Env:
   OBLAKO_PROXY_PORT  port to listen on            (default 5439, Redshift's port)
@@ -80,15 +85,71 @@ _STRIPPERS = [
 # redshift destination emits this DDL.)
 _VARCHAR_MAX = re.compile(r"(?i)\b(?:character\s+varying|varchar)\s*\(\s*max\s*\)")
 
+# Redshift reflection drivers (sqlalchemy-redshift, and thus Alembic) run three
+# fixed catalog queries against a forked pg_catalog. Each SELECTs local relations
+# and UNIONs in Spectrum / late-binding-view externals, using Redshift-only SQL
+# PostgreSQL rejects. oblako has no external catalog, so the proxy drops those
+# UNION branches (always empty here) and translates what remains:
+#
+#   * Redshift-only catalog columns -> neutral literals, honest for a row-store
+#     engine with no distribution / sort keys or encodings: pg_class.reldiststyle,
+#     pg_attribute.attencodingtype and .attsortkeyord -> 0, .attisdistkey ->
+#     false, and the pre-PG12 pg_attrdef.adsrc -> NULL.
+#   * output-column aliases used in WHERE (a Redshift extension) -> the real
+#     column: `schema` -> n.nspname, `table_name` -> c.relname (`relname` in the
+#     relations query is already the real pg_class column). This keeps the
+#     filter working, which is how has_table decides a table exists.
+#
+# Dropping the external branches first makes each alias unambiguous (one SELECT
+# left). format_encoding() and the svv_external_* views the same drivers may
+# query directly live in the engine (initdb.d/05_catalog_views.sql). Gated on a
+# Redshift-specific marker so ordinary catalog queries pass through untouched.
+_CATALOG_MARKER = re.compile(
+    r"(?i)\b(?:reldiststyle|attencodingtype|attisdistkey|attsortkeyord"
+    r"|svv_external_\w+|pg_get_late_binding_view_cols)\b"
+)
+_EXTERNAL_BRANCH = re.compile(r"(?i)svv_external_\w+|pg_get_late_binding_view_cols")
+_UNION = re.compile(r"(?i)\bunion\b(?!\s+all\b)")
+_CATALOG_REWRITES = [
+    (re.compile(r"(?i)\b\w+\.reldiststyle\b"), "0"),
+    (re.compile(r"(?i)\b\w+\.attencodingtype\b"), "0"),
+    (re.compile(r"(?i)\b\w+\.attisdistkey\b"), "false"),
+    (re.compile(r"(?i)\b\w+\.attsortkeyord\b"), "0"),
+    # pre-PG12 pg_attrdef.adsrc, referenced unqualified (not <alias>.adsrc).
+    (re.compile(r'(?i)(?<![."\w])adsrc\b'), "NULL::text AS adsrc"),
+    # output-column aliases used in WHERE -> the real columns they alias.
+    (re.compile(r"(?i)\band\s+schema\s*=\s*('[^']*')"), r"AND n.nspname = \1"),
+    (re.compile(r"(?i)\band\s+table_name\s*=\s*('[^']*')"), r"AND c.relname = \1"),
+]
+
+
+def _rewrite_catalog(sql: str) -> str:
+    """Make Redshift's reflection queries run on PostgreSQL (gated). See above."""
+    if not _CATALOG_MARKER.search(sql):
+        return sql
+    # Drop the always-empty Spectrum / late-binding UNION branches. The first
+    # (local-relations) branch never carries an external marker, so it survives.
+    parts = _UNION.split(sql)
+    if len(parts) > 1:
+        kept = [p for p in parts if not _EXTERNAL_BRANCH.search(p)]
+        if kept:
+            sql = " UNION ".join(kept)
+    for pat, repl in _CATALOG_REWRITES:
+        sql = pat.sub(repl, sql)
+    return sql
+
 
 def rewrite_sql(sql: str) -> str:
     """Rewrite Redshift-only SQL PostgreSQL can't parse.
 
-    ``VARCHAR(MAX)`` -> ``text`` (any statement); Redshift physical-DDL storage
-    clauses (DISTSTYLE/DISTKEY/SORTKEY/ENCODE/BACKUP) are stripped from CREATE
-    TABLE. Everything else is left untouched.
+    ``VARCHAR(MAX)`` -> ``text`` (any statement); Redshift-only pg_catalog columns
+    reflection drivers read are answered with neutral literals (see
+    ``_rewrite_catalog``); Redshift physical-DDL storage clauses (DISTSTYLE/
+    DISTKEY/SORTKEY/ENCODE/BACKUP) are stripped from CREATE TABLE. Everything else
+    is left untouched.
     """
     s = _VARCHAR_MAX.sub("text", sql)
+    s = _rewrite_catalog(s)
     if not _CREATE_TABLE.search(s):
         return s
     for pat in _STRIPPERS:

@@ -71,14 +71,17 @@ JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE c.relkind IN ('r', 'p')
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast');
 
--- SVV_EXTERNAL_SCHEMAS / SVV_EXTERNAL_TABLES: Redshift Spectrum. oblako has no
--- external catalog, so these are empty (tools probe them, then find nothing).
+-- SVV_EXTERNAL_SCHEMAS / SVV_EXTERNAL_TABLES / SVV_EXTERNAL_COLUMNS: Redshift
+-- Spectrum. oblako has no external catalog, so these are empty (tools probe
+-- them, then find nothing). esowner is present so drivers that join it against
+-- pg_user (e.g. sqlalchemy-redshift reflection) parse.
 CREATE OR REPLACE VIEW svv_external_schemas AS
 SELECT
     NULL::integer AS esoid,
     NULL::name    AS schemaname,
     NULL::name    AS databasename,
-    NULL::text    AS esoptions
+    NULL::text    AS esoptions,
+    NULL::oid     AS esowner
 WHERE false;
 
 CREATE OR REPLACE VIEW svv_external_tables AS
@@ -89,3 +92,24 @@ SELECT
     NULL::text AS input_format,
     NULL::text AS output_format
 WHERE false;
+
+CREATE OR REPLACE VIEW svv_external_columns AS
+SELECT
+    NULL::name AS schemaname,
+    NULL::name AS tablename,
+    NULL::name AS columnname,
+    NULL::text AS external_type,
+    NULL::int  AS columnnum
+WHERE false;
+
+-- FORMAT_ENCODING: Redshift maps a column's compression-encoding id to its name.
+-- oblako's engine has no column encodings, so every column reads back as 'none'.
+-- (sqlalchemy-redshift's reflection wraps att.attencodingtype in this.)
+CREATE OR REPLACE FUNCTION format_encoding(integer)
+    RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT 'none'::text $$;
+
+-- PG_GET_LATE_BINDING_VIEW_COLS: Redshift lists columns of late-binding views.
+-- oblako has none, so this is an empty set. It returns SETOF record, so callers
+-- supply the column list (as sqlalchemy-redshift's reflection does).
+CREATE OR REPLACE FUNCTION pg_get_late_binding_view_cols()
+    RETURNS SETOF record LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$;
