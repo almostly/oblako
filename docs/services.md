@@ -80,7 +80,16 @@ Redshift **date/time functions** PostgreSQL lacks: `getdate`, `sysdate`,
 quoted (`dateadd('day', 7, ts)`), as most SQL generators emit them. It also adds
 the Redshift **catalog views** BI tools and dbt query for metadata, mapped onto
 PostgreSQL's catalogs: `pg_table_def`, `svv_tables`, `svv_columns`,
-`svv_table_info`, and (empty) `svv_external_schemas` / `svv_external_tables`.
+`svv_table_info`, and (empty) `svv_external_schemas` / `svv_external_tables` /
+`svv_external_columns`.
+
+**SQLAlchemy / Alembic.** The `sqlalchemy-redshift` dialect
+(`redshift+redshift_connector://…`) reflects too: its introspection reads
+Redshift-only catalog columns (`reldiststyle`, `attencodingtype`, …) and filters
+by output-column aliases in `WHERE`, neither of which stock PostgreSQL has, so the
+proxy answers them. `get_columns`, table autoload, `has_table`, and thus **Alembic
+autogenerate** work against the engine (the driver is a client dependency, nothing
+is added to the image).
 
 ```python
 from oblako.services import RedshiftService

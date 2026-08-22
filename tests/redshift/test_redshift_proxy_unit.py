@@ -67,3 +67,78 @@ def test_varchar_max_becomes_text():
     # also outside CREATE TABLE (e.g. ALTER TABLE) and the CHARACTER VARYING form
     alt = rewrite_sql("ALTER TABLE t ADD COLUMN note CHARACTER VARYING(MAX)").lower()
     assert "max" not in alt and "text" in alt
+
+
+def test_redshift_catalog_columns_rewritten():
+    # sqlalchemy-redshift reflection reads Redshift-only pg_catalog columns that
+    # PostgreSQL lacks; the proxy answers them with neutral literals.
+    sql = (
+        "SELECT format_encoding(att.attencodingtype::integer), att.attisdistkey, "
+        "att.attsortkeyord, adsrc FROM pg_catalog.pg_attribute att"
+    )
+    out = rewrite_sql(sql)
+    assert "attencodingtype" not in out
+    assert "attisdistkey" not in out
+    assert "attsortkeyord" not in out
+    # attencodingtype -> 0 keeps the ::integer cast; distkey -> false; sortkey -> 0
+    assert "format_encoding(0::integer)" in out
+    assert "false" in out
+    # bare adsrc becomes a named NULL, not left dangling
+    assert "NULL::text AS adsrc" in out
+
+
+def test_reldiststyle_case_rewritten():
+    # the relations query wraps c.reldiststyle in a CASE; 0 keeps it valid (EVEN)
+    sql = "SELECT CASE c.reldiststyle WHEN 0 THEN 'EVEN' END FROM pg_catalog.pg_class c"
+    out = rewrite_sql(sql)
+    assert "reldiststyle" not in out
+    assert "CASE 0 WHEN 0 THEN 'EVEN' END" in out
+
+
+def test_catalog_rewrite_is_gated():
+    # no Redshift-only marker -> ordinary catalog queries pass through untouched,
+    # including the quoted "adsrc" output alias in a Spectrum UNION branch
+    sql = "SELECT n.nspname, null as \"adsrc\" FROM pg_catalog.pg_namespace n"
+    assert rewrite_sql(sql) == sql
+
+
+def test_where_alias_predicates_translated():
+    # output-column aliases used in WHERE become the real columns they alias, so
+    # has_table's existence filter keeps working (not just dropped)
+    sql = (
+        "SELECT n.nspname as \"schema\", c.relname as \"table_name\" "
+        "FROM pg_catalog.pg_class c "
+        "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE c.reldiststyle = 0 AND n.nspname !~ '^pg_' "
+        "AND schema = 'public' AND table_name = 'orders'"
+    )
+    out = rewrite_sql(sql)
+    assert "AND n.nspname = 'public'" in out
+    assert "AND c.relname = 'orders'" in out
+    assert "!~ '^pg_'" in out  # the real predicate survives
+
+
+def test_external_union_branches_dropped():
+    # oblako has no Spectrum/late-binding catalog, so those UNION branches (which
+    # carry the Redshift-only WHERE 1 / svv_* SQL) are dropped, keeping branch 1
+    sql = (
+        "SELECT c.reldiststyle, n.nspname FROM pg_catalog.pg_class c "
+        "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
+        "WHERE n.nspname !~ '^pg_' "
+        "UNION "
+        "SELECT null, s.schemaname FROM svv_external_tables t "
+        "JOIN svv_external_schemas s ON s.schemaname = t.schemaname WHERE 1 "
+        "ORDER BY 1"
+    )
+    out = rewrite_sql(sql)
+    assert "svv_external" not in out
+    assert "WHERE 1" not in out
+    assert "UNION" not in out
+    assert "n.nspname !~ '^pg_'" in out  # the local-relations branch survives
+
+
+def test_direct_svv_query_not_emptied():
+    # a standalone svv_external_* query (single branch) must survive intact, not
+    # be dropped to nothing
+    sql = "SELECT count(*) FROM svv_external_tables"
+    assert rewrite_sql(sql) == sql

@@ -20,6 +20,7 @@ dev = [
     "ruff>=0.4",
     "opensearch-py>=2.0",  # test_opensearch.py uses the OpenSearch client
     "redshift_connector>=2.1",  # test_redshift_proxy.py drives the redshift-connector driver
+    "sqlalchemy-redshift>=0.8",  # test_redshift_sqlalchemy.py drives the dialect's reflection
     "commitizen>=4",  # conventional-commit messages + `cz bump` version/changelog
 ]
 agentcore = [
