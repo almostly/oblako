@@ -74,6 +74,7 @@ class SageMakerExecutor:
         self._endpoint_configs: dict[str, dict] = {}
         self._endpoints: dict[str, dict] = {}
         self._transform_jobs: dict[str, dict] = {}
+        self._processing_jobs: dict[str, dict] = {}
         self._lock = threading.Lock()
 
     # -- training jobs -------------------------------------------------------
@@ -424,6 +425,129 @@ class SageMakerExecutor:
                     "CreationTime": j["CreationTime"],
                 }
                 for j in self._transform_jobs.values()
+            ]
+
+    # -- processing jobs (the ProcessingStep atom) ---------------------------
+    def create_processing_job(self, req: dict) -> str:
+        """Register a processing job and run it in the background; return its ARN."""
+        name = req["ProcessingJobName"]
+        arn = f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:processing-job/{name}"
+        with self._lock:
+            self._processing_jobs[name] = {
+                "ProcessingJobName": name,
+                "ProcessingJobArn": arn,
+                "ProcessingJobStatus": "InProgress",
+                "AppSpecification": req.get("AppSpecification", {}),
+                "ProcessingInputs": req.get("ProcessingInputs", []),
+                "ProcessingOutputConfig": req.get("ProcessingOutputConfig", {}),
+                "ProcessingResources": req.get("ProcessingResources", {}),
+                "RoleArn": req.get("RoleArn"),
+                "CreationTime": _now(),
+            }
+        threading.Thread(target=self._run_processing, args=(name,), daemon=True).start()
+        return arn
+
+    def _run_processing(self, name: str) -> None:
+        """Copy inputs in, run the processing container, copy outputs to S3."""
+        job = self._processing_jobs[name]
+        container = None
+        try:
+            from oblako.services import SageMakerService
+
+            app = job["AppSpecification"]
+            client = SageMakerService().client
+            container = client.containers.create(
+                app["ImageUri"],
+                entrypoint=app.get("ContainerEntrypoint"),
+                command=app.get("ContainerArguments"),
+                name=f"sagemaker-local-processing-{name}",
+                detach=True,
+            )
+            s3 = _s3_client()
+            for inp in job.get("ProcessingInputs", []):
+                s3_input = inp["S3Input"]
+                local = s3_input["LocalPath"].lstrip("/")
+                container.put_archive(
+                    "/", self._input_payload(s3, s3_input["S3Uri"], local)
+                )
+            container.start()
+            result = container.wait(timeout=1800)
+            code = result.get("StatusCode", 1)
+            if code != 0:
+                logs = container.logs().decode("utf-8", "replace")
+                raise RuntimeError(
+                    f"processing container exited {code}:\n{logs[-4000:]}"
+                )
+            for out in job.get("ProcessingOutputConfig", {}).get("Outputs", []):
+                s3_output = out["S3Output"]
+                self._upload_from_container(
+                    container, s3_output["LocalPath"], s3_output["S3Uri"], s3
+                )
+            with self._lock:
+                job["ProcessingJobStatus"] = "Completed"
+                job["ProcessingEndTime"] = _now()
+        except Exception as err:  # noqa: BLE001 - surface as a Failed job
+            with self._lock:
+                job["ProcessingJobStatus"] = "Failed"
+                job["FailureReason"] = str(err).strip()
+                job["ProcessingEndTime"] = _now()
+        finally:
+            if container is not None:
+                with contextlib.suppress(Exception):
+                    container.remove(force=True)
+
+    @staticmethod
+    def _input_payload(s3, uri: str, local_path: str) -> bytes:
+        """Tar the objects under an s3 prefix, rooted at ``local_path`` (for put_archive)."""
+        bucket, key = _split_uri(uri)
+        out = io.BytesIO()
+        with tarfile.open(fileobj=out, mode="w") as tar:
+            for obj in s3.list_objects_v2(Bucket=bucket, Prefix=key).get(
+                "Contents", []
+            ):
+                data = s3.get_object(Bucket=bucket, Key=obj["Key"])["Body"].read()
+                info = tarfile.TarInfo(f"{local_path}/{os.path.basename(obj['Key'])}")
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        return out.getvalue()
+
+    @staticmethod
+    def _upload_from_container(container, local_path: str, uri: str, s3) -> None:
+        """Copy a directory out of the container (docker cp) and upload it to S3."""
+        bucket, prefix = _split_uri(uri.rstrip("/"))
+        base = os.path.basename(local_path.rstrip("/"))
+        bits, _ = container.get_archive(local_path)
+        buf = io.BytesIO(b"".join(bits))
+        buf.seek(0)
+        with tarfile.open(fileobj=buf) as tar:
+            for member in tar.getmembers():
+                if not member.isfile():
+                    continue
+                rel = member.name
+                if rel.startswith(f"{base}/"):
+                    rel = rel[len(base) + 1 :]
+                data = tar.extractfile(member).read()
+                s3.put_object(
+                    Bucket=bucket, Key=f"{prefix}/{rel}".lstrip("/"), Body=data
+                )
+
+    def describe_processing_job(self, name: str) -> dict | None:
+        """Return the public processing-job record, or None if unknown."""
+        with self._lock:
+            job = self._processing_jobs.get(name)
+            return dict(job) if job else None
+
+    def list_processing_jobs(self) -> list[dict]:
+        """Return a summary list of all processing jobs."""
+        with self._lock:
+            return [
+                {
+                    "ProcessingJobName": j["ProcessingJobName"],
+                    "ProcessingJobArn": j["ProcessingJobArn"],
+                    "ProcessingJobStatus": j["ProcessingJobStatus"],
+                    "CreationTime": j["CreationTime"],
+                }
+                for j in self._processing_jobs.values()
             ]
 
 

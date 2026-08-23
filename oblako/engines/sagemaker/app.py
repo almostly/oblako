@@ -142,6 +142,27 @@ class SageMakerApp:
             {"TransformJobSummaries": self.executor.list_transform_jobs()}
         )
 
+    def op_CreateProcessingJob(self, req: dict) -> Response:
+        """Start a local processing job."""
+        if not req.get("ProcessingJobName"):
+            return _error("ValidationException", "ProcessingJobName is required")
+        return _json_response(
+            {"ProcessingJobArn": self.executor.create_processing_job(req)}
+        )
+
+    def op_DescribeProcessingJob(self, req: dict) -> Response:
+        """Return the current state of a processing job."""
+        job = self.executor.describe_processing_job(_require(req, "ProcessingJobName"))
+        if job is None:
+            raise _NotFound(f"Processing job {req.get('ProcessingJobName')} not found")
+        return _json_response(job)
+
+    def op_ListProcessingJobs(self, req: dict) -> Response:
+        """Return a summary list of all processing jobs."""
+        return _json_response(
+            {"ProcessingJobSummaries": self.executor.list_processing_jobs()}
+        )
+
     async def invoke(self, request: Request) -> Response:
         """sagemaker-runtime InvokeEndpoint: proxy to the serving container."""
         from starlette.concurrency import run_in_threadpool
