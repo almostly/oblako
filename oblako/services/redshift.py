@@ -104,6 +104,10 @@ class RedshiftService(Service):
                 # Redshift uses md5 auth, which redshift-connector expects; the
                 # image stores passwords as md5 to match (see its Dockerfile).
                 "POSTGRES_HOST_AUTH_METHOD": "md5",
+                # Where the in-engine COPY/UNLOAD bridge reaches the object store:
+                # S3Proxy on the host (host.docker.internal is substituted for the
+                # host gateway by the backend). Unset, it falls back to real AWS.
+                "OBLAKO_S3_ENDPOINT": f"http://host.docker.internal:{ports.S3}",
             },
             volumes={
                 "oblako-redshift-data": {
@@ -111,6 +115,10 @@ class RedshiftService(Service):
                     "mode": "rw",
                 }
             },
+            # So the in-engine COPY/UNLOAD bridge can reach S3Proxy on the host
+            # via host.docker.internal (Docker needs the explicit host-gateway
+            # alias on Linux; the Apple backend rewrites it to the vmnet gateway).
+            extra_hosts={"host.docker.internal": "host-gateway"},
         )
         self.host_port = host_port
         self.user = user
