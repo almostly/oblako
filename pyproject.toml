@@ -36,14 +36,14 @@ notebook = [
     "jupyterlab>=4",
 ]
 sagemaker = [
-    # v2 SDK has classic local mode (LocalSession, Estimator instance_type="local");
-    # v3 restructured the package and dropped it.
-    # NOTE (accepted advisory): GHSA-5r2p-pjr8-7fh7 (HIGH) is only fixed in
-    # sagemaker 3.4.0, which we can't take without losing local mode. The flaw is
-    # an eval() in JumpStart *search*, a path oblako never exercises, so we hold
-    # at <3 and accept it. Revisit if local mode returns to v3.
-    "sagemaker>=2.200,<3",
-    "pytz",  # sagemaker.workflow.pipeline imports it but doesn't always pull it in
+    # Client-side only: oblako runs training/serving containers itself (the
+    # /opt/ml contract, see SageMakerService), so its execution doesn't depend on
+    # the SageMaker SDK. This extra is for user code / examples that drive the SDK
+    # against oblako, and for the account-free local stubs. v3 keeps local mode
+    # (LocalSession moved to sagemaker.core.local; ModelTrainer/ModelBuilder add a
+    # Mode.LOCAL_CONTAINER enum). >=3.4 also clears GHSA-5r2p-pjr8-7fh7.
+    "sagemaker>=3.4,<4",
+    "botocore[crt]",  # v3 login credential provider needs the CRT extra
 ]
 mlflow = [
     # Local MLflow tracking server (oblako.engines.mlflow). Heavy dep tree, hence an extra.

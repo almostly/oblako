@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -22,11 +23,13 @@ def _domain_stack(name: str) -> str:
 
 
 class SageMakerService:
-    """Wrapper around SageMaker SDK local mode.
+    """Local SageMaker execution: oblako drives Docker directly.
 
-    SageMaker local mode uses Docker directly (no separate container needed).
-    This class provides helpers for managing training images, checking status,
-    and cleaning up local mode artifacts.
+    Rather than depending on the SageMaker SDK's local mode, oblako builds and
+    runs the training/inference containers itself against SageMaker's ``/opt/ml``
+    contract (see ``run_training``), so it's independent of the SDK version. This
+    class also manages images, container status, and cleanup, and the Studio
+    domain (composed from CloudFormation + EC2).
     """
 
     def __init__(self):
@@ -43,8 +46,13 @@ class SageMakerService:
         return self._client
 
     def get_session(self):
-        """Return a SageMaker LocalSession for local mode training/inference."""
-        from sagemaker.local import LocalSession
+        """Return a SageMaker LocalSession (client helper).
+
+        v3 relocated it from ``sagemaker.local`` to ``sagemaker.core.local``.
+        oblako's own execution no longer uses it (see ``run_training``); this
+        stays for client code that wants the SDK's local session.
+        """
+        from sagemaker.core.local import LocalSession
 
         return LocalSession()
 
@@ -55,6 +63,87 @@ class SageMakerService:
             if "stream" in chunk:
                 print(chunk["stream"], end="")
         return image.tags[0]
+
+    def run_training(
+        self,
+        image: str,
+        channels: dict[str, str],
+        hyperparameters: dict | None = None,
+        environment: dict | None = None,
+        timeout: int = 1800,
+    ) -> dict[str, bytes]:
+        """Run a SageMaker training container per the ``/opt/ml`` contract.
+
+        oblako drives Docker itself (no SageMaker SDK), so it works the same on
+        Docker Desktop and Linux and doesn't depend on the SDK's local mode.
+        Input is copied *into* the container and the model copied *out* with the
+        ``docker cp`` mechanism (``put_archive``/``get_archive``), so there are no
+        host bind-mounts to share.
+
+        ``channels`` maps a channel name to a local directory whose files are
+        placed under ``/opt/ml/input/data/<channel>/``. ``hyperparameters`` is
+        written (values stringified) to ``/opt/ml/input/config/hyperparameters.json``
+        as the container expects. Returns the collected ``/opt/ml/model`` as a
+        ``{relative_path: bytes}`` map. Raises on a non-zero exit.
+        """
+        import io
+        import json
+        import tarfile
+        import uuid
+
+        payload = io.BytesIO()
+        with tarfile.open(fileobj=payload, mode="w") as tar:
+            hp = json.dumps(
+                {k: str(v) for k, v in (hyperparameters or {}).items()}
+            ).encode()
+            info = tarfile.TarInfo("opt/ml/input/config/hyperparameters.json")
+            info.size = len(hp)
+            tar.addfile(info, io.BytesIO(hp))
+            for channel, directory in channels.items():
+                for entry in sorted(os.listdir(directory)):
+                    fpath = os.path.join(directory, entry)
+                    if not os.path.isfile(fpath):
+                        continue
+                    with open(fpath, "rb") as fh:
+                        data = fh.read()
+                    info = tarfile.TarInfo(f"opt/ml/input/data/{channel}/{entry}")
+                    info.size = len(data)
+                    tar.addfile(info, io.BytesIO(data))
+        payload.seek(0)
+
+        container = self.client.containers.create(
+            image,
+            environment=environment or {},
+            name=f"sagemaker-local-train-{uuid.uuid4().hex[:12]}",
+            detach=True,
+        )
+        try:
+            container.put_archive("/", payload.getvalue())
+            container.start()
+            result = container.wait(timeout=timeout)
+            code = result.get("StatusCode", 1)
+            if code != 0:
+                logs = container.logs().decode("utf-8", "replace")
+                raise RuntimeError(f"training container exited {code}:\n{logs[-4000:]}")
+            bits, _ = container.get_archive("/opt/ml/model")
+            model_tar = io.BytesIO(b"".join(bits))
+            model_tar.seek(0)
+            files: dict[str, bytes] = {}
+            with tarfile.open(fileobj=model_tar) as tar:
+                for member in tar.getmembers():
+                    if not member.isfile():
+                        continue
+                    # strip the leading "model/" that get_archive prepends
+                    name = (
+                        member.name.split("/", 1)[1]
+                        if "/" in member.name
+                        else member.name
+                    )
+                    files[name] = tar.extractfile(member).read()
+            return files
+        finally:
+            with contextlib.suppress(Exception):
+                container.remove(force=True)
 
     def list_training_containers(self) -> list[dict]:
         """List running SageMaker local mode containers."""
