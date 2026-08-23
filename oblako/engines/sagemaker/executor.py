@@ -73,6 +73,7 @@ class SageMakerExecutor:
         self._models: dict[str, dict] = {}
         self._endpoint_configs: dict[str, dict] = {}
         self._endpoints: dict[str, dict] = {}
+        self._transform_jobs: dict[str, dict] = {}
         self._lock = threading.Lock()
 
     # -- training jobs -------------------------------------------------------
@@ -220,34 +221,41 @@ class SageMakerExecutor:
         ).start()
         return arn
 
+    def _start_serving_container(self, model: dict, container_name: str):
+        """Start a serving container for a model, load its data, wait for /ping.
+
+        Returns the running container and the host port its :8080 is published on.
+        """
+        from oblako.services import SageMakerService
+
+        container_def = model["PrimaryContainer"]
+        client = SageMakerService().client
+        container = client.containers.create(
+            container_def["Image"],
+            environment=container_def.get("Environment", {}),
+            ports={"8080/tcp": None},  # publish to a random host port
+            name=container_name,
+            detach=True,
+        )
+        if container_def.get("ModelDataUrl"):
+            container.put_archive(
+                "/", self._model_payload(container_def["ModelDataUrl"])
+            )
+        container.start()
+        container.reload()
+        host_port = int(container.ports["8080/tcp"][0]["HostPort"])
+        self._await_ping(host_port)
+        return container, host_port
+
     def _start_endpoint(self, name: str, config_name: str) -> None:
-        """Run the serving container, load the model into it, wait for /ping."""
+        """Run the serving container and mark the endpoint InService."""
         endpoint = self._endpoints[name]
         try:
-            from oblako.services import SageMakerService
-
             config = self._endpoint_configs[config_name]
-            variant = config["ProductionVariants"][0]
-            model = self._models[variant["ModelName"]]
-            container_def = model["PrimaryContainer"]
-            image = container_def["Image"]
-            env = container_def.get("Environment", {})
-
-            client = SageMakerService().client
-            container = client.containers.create(
-                image,
-                environment=env,
-                ports={"8080/tcp": None},  # publish to a random host port
-                name=f"sagemaker-local-endpoint-{name}",
-                detach=True,
+            model = self._models[config["ProductionVariants"][0]["ModelName"]]
+            container, host_port = self._start_serving_container(
+                model, f"sagemaker-local-endpoint-{name}"
             )
-            model_url = container_def.get("ModelDataUrl")
-            if model_url:
-                container.put_archive("/", self._model_payload(model_url))
-            container.start()
-            container.reload()
-            host_port = int(container.ports["8080/tcp"][0]["HostPort"])
-            self._await_ping(host_port)
             with self._lock:
                 endpoint.update(
                     EndpointStatus="InService", _container=container.id, _port=host_port
@@ -330,6 +338,89 @@ class SageMakerExecutor:
         )
         with urllib.request.urlopen(req, timeout=60) as resp:
             return resp.read()
+
+    # -- batch transform -----------------------------------------------------
+    def create_transform_job(self, req: dict) -> str:
+        """Register a batch transform job and run it in the background; return ARN."""
+        name = req["TransformJobName"]
+        arn = f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:transform-job/{name}"
+        with self._lock:
+            self._transform_jobs[name] = {
+                "TransformJobName": name,
+                "TransformJobArn": arn,
+                "TransformJobStatus": "InProgress",
+                "ModelName": req["ModelName"],
+                "TransformInput": req.get("TransformInput", {}),
+                "TransformOutput": req.get("TransformOutput", {}),
+                "CreationTime": _now(),
+            }
+        threading.Thread(target=self._run_transform, args=(name,), daemon=True).start()
+        return arn
+
+    def _run_transform(self, name: str) -> None:
+        """Run each input object through the model's serving container to S3."""
+        job = self._transform_jobs[name]
+        container = None
+        try:
+            model = self._models[job["ModelName"]]
+            container, port = self._start_serving_container(
+                model, f"sagemaker-local-transform-{name}"
+            )
+            content_type = job["TransformInput"].get(
+                "ContentType", "application/octet-stream"
+            )
+            in_uri = job["TransformInput"]["DataSource"]["S3DataSource"]["S3Uri"]
+            out_base = job["TransformOutput"]["S3OutputPath"].rstrip("/")
+            out_bucket, out_prefix = _split_uri(out_base)
+
+            s3 = _s3_client()
+            in_bucket, in_prefix = _split_uri(in_uri)
+            for obj in s3.list_objects_v2(Bucket=in_bucket, Prefix=in_prefix).get(
+                "Contents", []
+            ):
+                body = s3.get_object(Bucket=in_bucket, Key=obj["Key"])["Body"].read()
+                request = urllib.request.Request(
+                    f"http://localhost:{port}/invocations",
+                    data=body,
+                    method="POST",
+                    headers={"Content-Type": content_type},
+                )
+                with urllib.request.urlopen(request, timeout=120) as resp:
+                    result = resp.read()
+                out_key = f"{out_prefix}/{os.path.basename(obj['Key'])}.out".lstrip("/")
+                s3.put_object(Bucket=out_bucket, Key=out_key, Body=result)
+
+            with self._lock:
+                job["TransformJobStatus"] = "Completed"
+                job["TransformEndTime"] = _now()
+        except Exception as err:  # noqa: BLE001 - surface as a Failed job
+            with self._lock:
+                job["TransformJobStatus"] = "Failed"
+                job["FailureReason"] = str(err).strip()
+                job["TransformEndTime"] = _now()
+        finally:
+            if container is not None:
+                with contextlib.suppress(Exception):
+                    container.remove(force=True)
+
+    def describe_transform_job(self, name: str) -> dict | None:
+        """Return the public transform-job record, or None if unknown."""
+        with self._lock:
+            job = self._transform_jobs.get(name)
+            return dict(job) if job else None
+
+    def list_transform_jobs(self) -> list[dict]:
+        """Return a summary list of all transform jobs."""
+        with self._lock:
+            return [
+                {
+                    "TransformJobName": j["TransformJobName"],
+                    "TransformJobArn": j["TransformJobArn"],
+                    "TransformJobStatus": j["TransformJobStatus"],
+                    "CreationTime": j["CreationTime"],
+                }
+                for j in self._transform_jobs.values()
+            ]
 
 
 def _tar_model(files: dict[str, bytes]) -> bytes:

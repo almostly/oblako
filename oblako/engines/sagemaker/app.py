@@ -121,6 +121,27 @@ class SageMakerApp:
         self.executor.delete_endpoint(_require(req, "EndpointName"))
         return _json_response({})
 
+    def op_CreateTransformJob(self, req: dict) -> Response:
+        """Start a local batch transform job."""
+        if not req.get("TransformJobName"):
+            return _error("ValidationException", "TransformJobName is required")
+        return _json_response(
+            {"TransformJobArn": self.executor.create_transform_job(req)}
+        )
+
+    def op_DescribeTransformJob(self, req: dict) -> Response:
+        """Return the current state of a batch transform job."""
+        job = self.executor.describe_transform_job(_require(req, "TransformJobName"))
+        if job is None:
+            raise _NotFound(f"Transform job {req.get('TransformJobName')} not found")
+        return _json_response(job)
+
+    def op_ListTransformJobs(self, req: dict) -> Response:
+        """Return a summary list of all transform jobs."""
+        return _json_response(
+            {"TransformJobSummaries": self.executor.list_transform_jobs()}
+        )
+
     async def invoke(self, request: Request) -> Response:
         """sagemaker-runtime InvokeEndpoint: proxy to the serving container."""
         from starlette.concurrency import run_in_threadpool
