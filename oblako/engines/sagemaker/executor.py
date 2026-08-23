@@ -92,6 +92,7 @@ class SageMakerExecutor:
             "InputDataConfig": req.get("InputDataConfig", []),
             "OutputDataConfig": req.get("OutputDataConfig", {}),
             "ResourceConfig": req.get("ResourceConfig", {}),
+            "Environment": req.get("Environment", {}),
             "RoleArn": req.get("RoleArn"),
             "ModelArtifacts": {"S3ModelArtifacts": ""},
             "CreationTime": _now(),
@@ -127,6 +128,7 @@ class SageMakerExecutor:
                 image=image,
                 channels=channels,
                 hyperparameters=job.get("HyperParameters") or {},
+                environment=job.get("Environment") or None,
                 gpus=instance_type.endswith("local_gpu"),
             )
 
