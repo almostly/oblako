@@ -193,6 +193,164 @@ class SageMakerApp:
             }
         )
 
+    def op_DescribeModel(self, req: dict) -> Response:
+        """Return a model record."""
+        model = self.executor.describe_model(_require(req, "ModelName"))
+        if model is None:
+            raise _NotFound(f"Model {req.get('ModelName')} not found")
+        return _json_response(model)
+
+    def op_ListModels(self, req: dict) -> Response:
+        """Return a summary list of all models."""
+        return _json_response({"Models": self.executor.list_models()})
+
+    def op_DeleteModel(self, req: dict) -> Response:
+        """Delete a model registration."""
+        self.executor.delete_model(_require(req, "ModelName"))
+        return _json_response({})
+
+    def op_DescribeEndpointConfig(self, req: dict) -> Response:
+        """Return an endpoint config record."""
+        config = self.executor.describe_endpoint_config(
+            _require(req, "EndpointConfigName")
+        )
+        if config is None:
+            raise _NotFound(f"EndpointConfig {req.get('EndpointConfigName')} not found")
+        return _json_response(config)
+
+    def op_ListEndpointConfigs(self, req: dict) -> Response:
+        """Return a summary list of all endpoint configs."""
+        return _json_response(
+            {"EndpointConfigs": self.executor.list_endpoint_configs()}
+        )
+
+    def op_DeleteEndpointConfig(self, req: dict) -> Response:
+        """Delete an endpoint config."""
+        self.executor.delete_endpoint_config(_require(req, "EndpointConfigName"))
+        return _json_response({})
+
+    def op_ListEndpoints(self, req: dict) -> Response:
+        """Return a summary list of all endpoints."""
+        return _json_response({"Endpoints": self.executor.list_endpoints()})
+
+    def op_AddTags(self, req: dict) -> Response:
+        """Attach tags to a resource; return the resulting tag set."""
+        tags = self.executor.add_tags(
+            _require(req, "ResourceArn"), req.get("Tags", [])
+        )
+        return _json_response({"Tags": tags})
+
+    def op_DeleteTags(self, req: dict) -> Response:
+        """Remove tag keys from a resource."""
+        self.executor.delete_tags(_require(req, "ResourceArn"), req.get("TagKeys", []))
+        return _json_response({})
+
+    def op_ListTags(self, req: dict) -> Response:
+        """Return the tags attached to a resource."""
+        return _json_response(
+            {"Tags": self.executor.list_tags(_require(req, "ResourceArn"))}
+        )
+
+    def op_StopTrainingJob(self, req: dict) -> Response:
+        """Request a training job stop."""
+        if not self.executor.stop_training_job(_require(req, "TrainingJobName")):
+            raise _NotFound(f"Training job {req.get('TrainingJobName')} not found")
+        return _json_response({})
+
+    def op_StopTransformJob(self, req: dict) -> Response:
+        """Request a batch transform job stop."""
+        if not self.executor.stop_transform_job(_require(req, "TransformJobName")):
+            raise _NotFound(f"Transform job {req.get('TransformJobName')} not found")
+        return _json_response({})
+
+    def op_StopProcessingJob(self, req: dict) -> Response:
+        """Request a processing job stop."""
+        if not self.executor.stop_processing_job(_require(req, "ProcessingJobName")):
+            raise _NotFound(f"Processing job {req.get('ProcessingJobName')} not found")
+        return _json_response({})
+
+    def op_StopHyperParameterTuningJob(self, req: dict) -> Response:
+        """Request a tuning job stop."""
+        if not self.executor.stop_hyper_parameter_tuning_job(
+            _require(req, "HyperParameterTuningJobName")
+        ):
+            raise _NotFound(
+                f"Tuning job {req.get('HyperParameterTuningJobName')} not found"
+            )
+        return _json_response({})
+
+    def op_CreateDomain(self, req: dict) -> Response:
+        """Register a SageMaker Studio domain."""
+        if not req.get("DomainName"):
+            return _error("ValidationException", "DomainName is required")
+        return _json_response(self.executor.create_domain(req))
+
+    def op_DescribeDomain(self, req: dict) -> Response:
+        """Return a Studio domain record."""
+        domain = self.executor.describe_domain(_require(req, "DomainId"))
+        if domain is None:
+            raise _NotFound(f"Domain {req.get('DomainId')} not found")
+        return _json_response(domain)
+
+    def op_UpdateDomain(self, req: dict) -> Response:
+        """Update a Studio domain's settings."""
+        result = self.executor.update_domain(req)
+        if result is None:
+            raise _NotFound(f"Domain {req.get('DomainId')} not found")
+        return _json_response(result)
+
+    def op_ListDomains(self, req: dict) -> Response:
+        """Return a summary list of all Studio domains."""
+        return _json_response({"Domains": self.executor.list_domains()})
+
+    def op_DeleteDomain(self, req: dict) -> Response:
+        """Delete a Studio domain."""
+        if not self.executor.delete_domain(_require(req, "DomainId")):
+            raise _NotFound(f"Domain {req.get('DomainId')} not found")
+        return _json_response({})
+
+    def op_CreateUserProfile(self, req: dict) -> Response:
+        """Register a Studio user profile."""
+        if not req.get("DomainId") or not req.get("UserProfileName"):
+            return _error(
+                "ValidationException", "DomainId and UserProfileName are required"
+            )
+        return _json_response(self.executor.create_user_profile(req))
+
+    def op_DescribeUserProfile(self, req: dict) -> Response:
+        """Return a Studio user-profile record."""
+        profile = self.executor.describe_user_profile(
+            _require(req, "DomainId"), _require(req, "UserProfileName")
+        )
+        if profile is None:
+            raise _NotFound(f"UserProfile {req.get('UserProfileName')} not found")
+        return _json_response(profile)
+
+    def op_UpdateUserProfile(self, req: dict) -> Response:
+        """Update a Studio user profile's settings."""
+        result = self.executor.update_user_profile(req)
+        if result is None:
+            raise _NotFound(f"UserProfile {req.get('UserProfileName')} not found")
+        return _json_response(result)
+
+    def op_DeleteUserProfile(self, req: dict) -> Response:
+        """Delete a Studio user profile."""
+        if not self.executor.delete_user_profile(
+            _require(req, "DomainId"), _require(req, "UserProfileName")
+        ):
+            raise _NotFound(f"UserProfile {req.get('UserProfileName')} not found")
+        return _json_response({})
+
+    def op_ListUserProfiles(self, req: dict) -> Response:
+        """Return a summary list of user profiles (optionally by domain)."""
+        return _json_response(
+            {
+                "UserProfiles": self.executor.list_user_profiles(
+                    req.get("DomainIdEquals")
+                )
+            }
+        )
+
     async def invoke(self, request: Request) -> Response:
         """sagemaker-runtime InvokeEndpoint: proxy to the serving container."""
         from starlette.concurrency import run_in_threadpool

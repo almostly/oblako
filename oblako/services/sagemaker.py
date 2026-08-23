@@ -114,6 +114,7 @@ class SageMakerService:
         gpus: bool = False,
         timeout: int = 1800,
         return_logs: bool = False,
+        on_container=None,
     ) -> dict[str, bytes] | tuple[dict[str, bytes], str]:
         """Run a SageMaker training container per the ``/opt/ml`` contract.
 
@@ -130,7 +131,10 @@ class SageMakerService:
         ``{relative_path: bytes}`` map. Raises on a non-zero exit. With
         ``return_logs=True`` returns ``(files, container_logs)`` instead, so a
         caller (e.g. automatic model tuning) can scrape an objective metric from
-        the container's stdout via a ``MetricDefinitions`` regex.
+        the container's stdout via a ``MetricDefinitions`` regex. ``on_container``,
+        if given, is called with the container right after it is created (before
+        it starts), so a caller can record it and later ``StopTrainingJob`` by
+        killing it.
         """
         import io
         import json
@@ -173,6 +177,8 @@ class SageMakerService:
             device_requests=device_requests,
         )
         try:
+            if on_container is not None:
+                on_container(container)
             container.put_archive("/", payload.getvalue())
             container.start()
             result = container.wait(timeout=timeout)

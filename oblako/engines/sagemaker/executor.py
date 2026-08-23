@@ -25,6 +25,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+import uuid
 
 _ACCOUNT = "000000000000"
 _REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
@@ -76,6 +77,10 @@ class SageMakerExecutor:
         self._transform_jobs: dict[str, dict] = {}
         self._processing_jobs: dict[str, dict] = {}
         self._tuning_jobs: dict[str, dict] = {}
+        self._tags: dict[str, list[dict]] = {}
+        self._domains: dict[str, dict] = {}
+        self._user_profiles: dict[tuple[str, str], dict] = {}
+        self._stopping: set[str] = set()
         self._lock = threading.Lock()
 
     # -- training jobs -------------------------------------------------------
@@ -124,6 +129,7 @@ class SageMakerExecutor:
                 hyperparameters=job.get("HyperParameters") or {},
                 environment=job.get("Environment") or None,
                 gpus=instance_type.endswith("local_gpu"),
+                on_container=lambda c: self._track_container(job, c),
             )
 
             tar_bytes = _tar_model(files)
@@ -137,12 +143,42 @@ class SageMakerExecutor:
                 job["SecondaryStatus"] = "Completed"
                 job["ModelArtifacts"] = {"S3ModelArtifacts": artifact_uri}
                 job["TrainingEndTime"] = _now()
-        except Exception as err:  # noqa: BLE001 - surface as a Failed job
+        except Exception as err:  # noqa: BLE001 - surface as a Failed/Stopped job
             with self._lock:
-                job["TrainingJobStatus"] = "Failed"
-                job["SecondaryStatus"] = "Failed"
-                job["FailureReason"] = str(err).strip()
+                stopped = name in self._stopping
+                self._stopping.discard(name)
+                job["TrainingJobStatus"] = "Stopped" if stopped else "Failed"
+                job["SecondaryStatus"] = "Stopped" if stopped else "Failed"
+                if not stopped:
+                    job["FailureReason"] = str(err).strip()
                 job["TrainingEndTime"] = _now()
+
+    def _track_container(self, record: dict, container) -> None:
+        """Record a job's running container id so ``Stop*`` can kill it."""
+        with self._lock:
+            record["_container"] = container.id
+
+    def stop_training_job(self, name: str) -> bool:
+        """Request a training job stop; kill its container if still running."""
+        return self._stop_job(self._jobs, name, "TrainingJobStatus")
+
+    def _stop_job(self, store: dict, name: str, status_key: str) -> bool:
+        """Mark a job stopping and force-kill its container (shared by Stop*)."""
+        with self._lock:
+            job = store.get(name)
+            if job is None:
+                return False
+            if job.get(status_key) not in ("InProgress", None):
+                return True  # already terminal: Stop is idempotent
+            job[status_key] = "Stopping"
+            self._stopping.add(name)
+            cid = job.get("_container")
+        if cid:
+            from oblako.services import SageMakerService
+
+            with contextlib.suppress(Exception):
+                SageMakerService().client.containers.get(cid).remove(force=True)
+        return True
 
     def _download_channels(
         self, s3, input_data_config: list[dict], work: str
@@ -173,7 +209,7 @@ class SageMakerExecutor:
         """Return the public job record, or None if unknown."""
         with self._lock:
             job = self._jobs.get(name)
-            return dict(job) if job else None
+            return _public(job) if job else None
 
     def list_training_jobs(self) -> list[dict]:
         """Return a summary list of all training jobs."""
@@ -203,6 +239,29 @@ class SageMakerExecutor:
             }
         return arn
 
+    def describe_model(self, name: str) -> dict | None:
+        """Return a model record, or None if unknown."""
+        with self._lock:
+            model = self._models.get(name)
+            return _public(model) if model else None
+
+    def list_models(self) -> list[dict]:
+        """Return a summary list of all models."""
+        with self._lock:
+            return [
+                {
+                    "ModelName": m["ModelName"],
+                    "ModelArn": m["ModelArn"],
+                    "CreationTime": m["CreationTime"],
+                }
+                for m in self._models.values()
+            ]
+
+    def delete_model(self, name: str) -> None:
+        """Remove a model registration (idempotent)."""
+        with self._lock:
+            self._models.pop(name, None)
+
     def create_endpoint_config(self, req: dict) -> str:
         """Register an endpoint config; return its ARN."""
         name = req["EndpointConfigName"]
@@ -215,6 +274,29 @@ class SageMakerExecutor:
                 "CreationTime": _now(),
             }
         return arn
+
+    def describe_endpoint_config(self, name: str) -> dict | None:
+        """Return an endpoint config record, or None if unknown."""
+        with self._lock:
+            config = self._endpoint_configs.get(name)
+            return _public(config) if config else None
+
+    def list_endpoint_configs(self) -> list[dict]:
+        """Return a summary list of all endpoint configs."""
+        with self._lock:
+            return [
+                {
+                    "EndpointConfigName": c["EndpointConfigName"],
+                    "EndpointConfigArn": c["EndpointConfigArn"],
+                    "CreationTime": c["CreationTime"],
+                }
+                for c in self._endpoint_configs.values()
+            ]
+
+    def delete_endpoint_config(self, name: str) -> None:
+        """Remove an endpoint config (idempotent)."""
+        with self._lock:
+            self._endpoint_configs.pop(name, None)
 
     def create_endpoint(self, req: dict) -> str:
         """Start a local serving container for the endpoint; return its ARN."""
@@ -321,7 +403,20 @@ class SageMakerExecutor:
             endpoint = self._endpoints.get(name)
             if endpoint is None:
                 return None
-            return {k: v for k, v in endpoint.items() if not k.startswith("_")}
+            return _public(endpoint)
+
+    def list_endpoints(self) -> list[dict]:
+        """Return a summary list of all endpoints."""
+        with self._lock:
+            return [
+                {
+                    "EndpointName": e["EndpointName"],
+                    "EndpointArn": e["EndpointArn"],
+                    "EndpointStatus": e["EndpointStatus"],
+                    "CreationTime": e["CreationTime"],
+                }
+                for e in self._endpoints.values()
+            ]
 
     def delete_endpoint(self, name: str) -> None:
         """Stop and remove the endpoint's serving container."""
@@ -381,6 +476,7 @@ class SageMakerExecutor:
             container, port = self._start_serving_container(
                 model, f"sagemaker-local-transform-{name}"
             )
+            self._track_container(job, container)
             content_type = job["TransformInput"].get(
                 "ContentType", "application/octet-stream"
             )
@@ -408,21 +504,28 @@ class SageMakerExecutor:
             with self._lock:
                 job["TransformJobStatus"] = "Completed"
                 job["TransformEndTime"] = _now()
-        except Exception as err:  # noqa: BLE001 - surface as a Failed job
+        except Exception as err:  # noqa: BLE001 - surface as a Failed/Stopped job
             with self._lock:
-                job["TransformJobStatus"] = "Failed"
-                job["FailureReason"] = str(err).strip()
+                stopped = name in self._stopping
+                self._stopping.discard(name)
+                job["TransformJobStatus"] = "Stopped" if stopped else "Failed"
+                if not stopped:
+                    job["FailureReason"] = str(err).strip()
                 job["TransformEndTime"] = _now()
         finally:
             if container is not None:
                 with contextlib.suppress(Exception):
                     container.remove(force=True)
 
+    def stop_transform_job(self, name: str) -> bool:
+        """Request a batch transform job stop; kill its container if running."""
+        return self._stop_job(self._transform_jobs, name, "TransformJobStatus")
+
     def describe_transform_job(self, name: str) -> dict | None:
         """Return the public transform-job record, or None if unknown."""
         with self._lock:
             job = self._transform_jobs.get(name)
-            return dict(job) if job else None
+            return _public(job) if job else None
 
     def list_transform_jobs(self) -> list[dict]:
         """Return a summary list of all transform jobs."""
@@ -473,6 +576,7 @@ class SageMakerExecutor:
                 name=f"sagemaker-local-processing-{name}",
                 detach=True,
             )
+            self._track_container(job, container)
             s3 = _s3_client()
             for inp in job.get("ProcessingInputs", []):
                 s3_input = inp["S3Input"]
@@ -496,15 +600,22 @@ class SageMakerExecutor:
             with self._lock:
                 job["ProcessingJobStatus"] = "Completed"
                 job["ProcessingEndTime"] = _now()
-        except Exception as err:  # noqa: BLE001 - surface as a Failed job
+        except Exception as err:  # noqa: BLE001 - surface as a Failed/Stopped job
             with self._lock:
-                job["ProcessingJobStatus"] = "Failed"
-                job["FailureReason"] = str(err).strip()
+                stopped = name in self._stopping
+                self._stopping.discard(name)
+                job["ProcessingJobStatus"] = "Stopped" if stopped else "Failed"
+                if not stopped:
+                    job["FailureReason"] = str(err).strip()
                 job["ProcessingEndTime"] = _now()
         finally:
             if container is not None:
                 with contextlib.suppress(Exception):
                     container.remove(force=True)
+
+    def stop_processing_job(self, name: str) -> bool:
+        """Request a processing job stop; kill its container if running."""
+        return self._stop_job(self._processing_jobs, name, "ProcessingJobStatus")
 
     @staticmethod
     def _input_payload(s3, uri: str, local_path: str) -> bytes:
@@ -545,7 +656,7 @@ class SageMakerExecutor:
         """Return the public processing-job record, or None if unknown."""
         with self._lock:
             job = self._processing_jobs.get(name)
-            return dict(job) if job else None
+            return _public(job) if job else None
 
     def list_processing_jobs(self) -> list[dict]:
         """Return a summary list of all processing jobs."""
@@ -637,6 +748,10 @@ class SageMakerExecutor:
 
             best_value = None
             for i in range(max_jobs):
+                with self._lock:
+                    stop = name in self._stopping
+                if stop:
+                    break  # StopHyperParameterTuningJob: launch no more trials
                 sampled = search.suggest()
                 tuned = {k: _hp_str(v) for k, v in sampled.items()}
                 trial_name = f"{name}-{i + 1:03d}"
@@ -662,6 +777,7 @@ class SageMakerExecutor:
                         channels=channels,
                         hyperparameters={**static_hp, **tuned},
                         return_logs=True,
+                        on_container=lambda c: self._track_container(job, c),
                     )
                     value = _scrape_metric(logs, regex)
                     if value is None:
@@ -709,7 +825,11 @@ class SageMakerExecutor:
                         job["ObjectiveStatusCounters"]["Failed"] += 1
 
             with self._lock:
-                job["HyperParameterTuningJobStatus"] = "Completed"
+                stopped = name in self._stopping
+                self._stopping.discard(name)
+                job["HyperParameterTuningJobStatus"] = (
+                    "Stopped" if stopped else "Completed"
+                )
                 job["HyperParameterTuningEndTime"] = _now()
         except Exception as err:  # noqa: BLE001 - surface as a Failed tuning job
             with self._lock:
@@ -717,11 +837,17 @@ class SageMakerExecutor:
                 job["FailureReason"] = str(err).strip()
                 job["HyperParameterTuningEndTime"] = _now()
 
+    def stop_hyper_parameter_tuning_job(self, name: str) -> bool:
+        """Request a tuning job stop; kill the in-flight trial and launch no more."""
+        return self._stop_job(
+            self._tuning_jobs, name, "HyperParameterTuningJobStatus"
+        )
+
     def describe_hyper_parameter_tuning_job(self, name: str) -> dict | None:
         """Return the public tuning-job record, or None if unknown."""
         with self._lock:
             job = self._tuning_jobs.get(name)
-            return dict(job) if job else None
+            return _public(job) if job else None
 
     def list_hyper_parameter_tuning_jobs(self) -> list[dict]:
         """Return a summary list of all tuning jobs."""
@@ -737,6 +863,171 @@ class SageMakerExecutor:
                 }
                 for j in self._tuning_jobs.values()
             ]
+
+    # -- tags ----------------------------------------------------------------
+    def add_tags(self, resource_arn: str, tags: list[dict]) -> list[dict]:
+        """Attach tags to a resource (new keys overwrite existing), return all."""
+        with self._lock:
+            existing = {t["Key"]: t["Value"] for t in self._tags.get(resource_arn, [])}
+            for tag in tags or []:
+                existing[tag["Key"]] = tag["Value"]
+            merged = [{"Key": k, "Value": v} for k, v in existing.items()]
+            self._tags[resource_arn] = merged
+            return list(merged)
+
+    def delete_tags(self, resource_arn: str, tag_keys: list[str]) -> None:
+        """Remove the given tag keys from a resource."""
+        with self._lock:
+            keep = [
+                t
+                for t in self._tags.get(resource_arn, [])
+                if t["Key"] not in set(tag_keys or [])
+            ]
+            self._tags[resource_arn] = keep
+
+    def list_tags(self, resource_arn: str) -> list[dict]:
+        """Return the tags attached to a resource."""
+        with self._lock:
+            return list(self._tags.get(resource_arn, []))
+
+    # -- SageMaker Studio: domains + user profiles ---------------------------
+    def create_domain(self, req: dict) -> dict:
+        """Register a Studio domain; return {DomainArn, DomainId, Url}."""
+        domain_id = f"d-{uuid.uuid4().hex[:12]}"
+        arn = f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:domain/{domain_id}"
+        url = f"https://{domain_id}.studio.{_REGION}.sagemaker.aws"
+        now = _now()
+        with self._lock:
+            self._domains[domain_id] = {
+                "DomainId": domain_id,
+                "DomainArn": arn,
+                "DomainName": req.get("DomainName"),
+                "Url": url,
+                "Status": "InService",
+                "AuthMode": req.get("AuthMode"),
+                "DefaultUserSettings": req.get("DefaultUserSettings", {}),
+                "SubnetIds": req.get("SubnetIds"),
+                "VpcId": req.get("VpcId"),
+                "AppNetworkAccessType": req.get(
+                    "AppNetworkAccessType", "PublicInternetOnly"
+                ),
+                "CreationTime": now,
+                "LastModifiedTime": now,
+            }
+        return {"DomainArn": arn, "DomainId": domain_id, "Url": url}
+
+    def describe_domain(self, domain_id: str) -> dict | None:
+        """Return a Studio domain record, or None if unknown."""
+        with self._lock:
+            domain = self._domains.get(domain_id)
+            return _public(domain) if domain else None
+
+    def update_domain(self, req: dict) -> dict | None:
+        """Update a domain's mutable settings; return {DomainArn} or None."""
+        with self._lock:
+            domain = self._domains.get(req.get("DomainId"))
+            if domain is None:
+                return None
+            for key in (
+                "DefaultUserSettings",
+                "SubnetIds",
+                "AppNetworkAccessType",
+                "DefaultSpaceSettings",
+            ):
+                if req.get(key) is not None:
+                    domain[key] = req[key]
+            if req.get("DomainSettingsForUpdate") is not None:
+                domain["DomainSettings"] = req["DomainSettingsForUpdate"]
+            domain["LastModifiedTime"] = _now()
+            return {"DomainArn": domain["DomainArn"]}
+
+    def list_domains(self) -> list[dict]:
+        """Return a summary list of all Studio domains."""
+        with self._lock:
+            return [
+                {
+                    "DomainId": d["DomainId"],
+                    "DomainArn": d["DomainArn"],
+                    "DomainName": d["DomainName"],
+                    "Status": d["Status"],
+                    "Url": d["Url"],
+                    "CreationTime": d["CreationTime"],
+                    "LastModifiedTime": d["LastModifiedTime"],
+                }
+                for d in self._domains.values()
+            ]
+
+    def delete_domain(self, domain_id: str) -> bool:
+        """Remove a Studio domain; False if it did not exist."""
+        with self._lock:
+            return self._domains.pop(domain_id, None) is not None
+
+    def create_user_profile(self, req: dict) -> dict:
+        """Register a Studio user profile; return {UserProfileArn}."""
+        domain_id = req["DomainId"]
+        name = req["UserProfileName"]
+        arn = (
+            f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}"
+            f":user-profile/{domain_id}/{name}"
+        )
+        now = _now()
+        with self._lock:
+            self._user_profiles[domain_id, name] = {
+                "DomainId": domain_id,
+                "UserProfileName": name,
+                "UserProfileArn": arn,
+                "Status": "InService",
+                "UserSettings": req.get("UserSettings", {}),
+                "SingleSignOnUserIdentifier": req.get("SingleSignOnUserIdentifier"),
+                "SingleSignOnUserValue": req.get("SingleSignOnUserValue"),
+                "CreationTime": now,
+                "LastModifiedTime": now,
+            }
+        return {"UserProfileArn": arn}
+
+    def describe_user_profile(self, domain_id: str, name: str) -> dict | None:
+        """Return a Studio user-profile record, or None if unknown."""
+        with self._lock:
+            profile = self._user_profiles.get((domain_id, name))
+            return _public(profile) if profile else None
+
+    def update_user_profile(self, req: dict) -> dict | None:
+        """Update a user profile's settings; return {UserProfileArn} or None."""
+        with self._lock:
+            profile = self._user_profiles.get(
+                (req.get("DomainId"), req.get("UserProfileName"))
+            )
+            if profile is None:
+                return None
+            if req.get("UserSettings") is not None:
+                profile["UserSettings"] = req["UserSettings"]
+            profile["LastModifiedTime"] = _now()
+            return {"UserProfileArn": profile["UserProfileArn"]}
+
+    def delete_user_profile(self, domain_id: str, name: str) -> bool:
+        """Remove a Studio user profile; False if it did not exist."""
+        with self._lock:
+            return self._user_profiles.pop((domain_id, name), None) is not None
+
+    def list_user_profiles(self, domain_id: str | None = None) -> list[dict]:
+        """Return a summary list of user profiles, optionally filtered by domain."""
+        with self._lock:
+            return [
+                {
+                    "DomainId": p["DomainId"],
+                    "UserProfileName": p["UserProfileName"],
+                    "Status": p["Status"],
+                    "CreationTime": p["CreationTime"],
+                    "LastModifiedTime": p["LastModifiedTime"],
+                }
+                for p in self._user_profiles.values()
+                if domain_id is None or p["DomainId"] == domain_id
+            ]
+
+
+def _public(record: dict) -> dict:
+    """Copy a record without internal (underscore-prefixed) bookkeeping fields."""
+    return {k: v for k, v in record.items() if not k.startswith("_")}
 
 
 def _hp_str(value) -> str:
