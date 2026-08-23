@@ -50,6 +50,31 @@ import re
 import ssl
 import struct
 
+# The COPY/UNLOAD <-> S3 bridge. Optional: if its deps (pydantic/boto3/pyarrow)
+# aren't present the proxy still runs, just without COPY/UNLOAD rewriting.
+try:
+    import copy_unload
+except Exception:  # noqa: BLE001 - any import failure disables the feature
+    copy_unload = None
+
+# SUPER (PartiQL) dot-navigation rewriting. Pure-stdlib; optional all the same.
+try:
+    import super_nav
+except Exception:  # noqa: BLE001 - any import failure disables the feature
+    super_nav = None
+
+# LISTAGG -> string_agg rewriting. Pure-stdlib; optional all the same.
+try:
+    import listagg
+except Exception:  # noqa: BLE001 - any import failure disables the feature
+    listagg = None
+
+# PIVOT/UNPIVOT -> standard SQL (needs sqlglot as a parser). Optional.
+try:
+    import pivot_unpivot
+except Exception:  # noqa: BLE001 - any import failure disables the feature
+    pivot_unpivot = None
+
 LISTEN_PORT = int(os.environ.get("OBLAKO_PROXY_PORT", "5439"))
 PG_HOST = os.environ.get("OBLAKO_PG_HOST", "127.0.0.1")
 PG_PORT = int(os.environ.get("OBLAKO_PG_PORT", "5433"))
@@ -101,7 +126,9 @@ _CREATE_TABLE = re.compile(
 _STRIPPERS = [
     re.compile(r"(?i)\bdiststyle\s+\w+"),
     re.compile(r"(?i)\bdistkey\s*(?:\([^)]*\))?"),
-    re.compile(r"(?i)\b(?:compound\s+|interleaved\s+)?sortkey\s*(?:auto\s*)?(?:\([^)]*\))?"),
+    re.compile(
+        r"(?i)\b(?:compound\s+|interleaved\s+)?sortkey\s*(?:auto\s*)?(?:\([^)]*\))?"
+    ),
     re.compile(r"(?i)\bencode\s+\w+"),
     re.compile(r"(?i)\bbackup\s+(?:yes|no)"),
 ]
@@ -172,10 +199,21 @@ def rewrite_sql(sql: str) -> str:
     ``VARCHAR(MAX)`` -> ``text`` (any statement); Redshift-only pg_catalog columns
     reflection drivers read are answered with neutral literals (see
     ``_rewrite_catalog``); Redshift physical-DDL storage clauses (DISTSTYLE/
-    DISTKEY/SORTKEY/ENCODE/BACKUP) are stripped from CREATE TABLE. Everything else
-    is left untouched.
+    DISTKEY/SORTKEY/ENCODE/BACKUP) are stripped from CREATE TABLE; ``COPY``/
+    ``UNLOAD`` to/from ``s3://`` are rewritten into oblako_* S3 bridge calls (see
+    ``copy_unload``). Everything else is left untouched.
     """
-    s = _VARCHAR_MAX.sub("text", sql)
+    s = sql
+    if pivot_unpivot is not None:
+        s = pivot_unpivot.rewrite_pivot_unpivot(s)  # PIVOT/UNPIVOT -> standard SQL
+    if copy_unload is not None and copy_unload.has_s3_copy_or_unload(s):
+        s = copy_unload.rewrite_copy_unload(s)
+    if super_nav is not None:
+        super_nav.record_super_columns(s)  # learn SUPER columns from DDL
+        s = super_nav.rewrite_super_paths(s)  # dot-navigation -> jsonb path
+    if listagg is not None:
+        s = listagg.rewrite_listagg(s)  # LISTAGG -> string_agg
+    s = _VARCHAR_MAX.sub("text", s)
     s = _rewrite_catalog(s)
     if not _CREATE_TABLE.search(s):
         return s
@@ -395,7 +433,10 @@ async def _negotiate_startup(
         header = await reader.readexactly(4)
         length = struct.unpack("!I", header)[0]
         body = await reader.readexactly(length - 4)
-        if length == 8 and struct.unpack("!I", body)[0] in (SSL_REQUEST, GSSENC_REQUEST):
+        if length == 8 and struct.unpack("!I", body)[0] in (
+            SSL_REQUEST,
+            GSSENC_REQUEST,
+        ):
             is_ssl = struct.unpack("!I", body)[0] == SSL_REQUEST
             if is_ssl and SSL_CTX is not None:
                 writer.write(b"S")

@@ -33,6 +33,10 @@ services:
       POSTGRES_PASSWORD: oblako
       POSTGRES_DB: oblako
       POSTGRES_HOST_AUTH_METHOD: md5
+      # Where the in-engine COPY/UNLOAD bridge reaches the object store. Points at
+      # the S3Proxy service on the compose network; unset (standalone `docker run`)
+      # it falls back to real AWS, so a genuine s3:// with real creds also works.
+      OBLAKO_S3_ENDPOINT: http://s3proxy:80
     volumes:
       - redshift_data:/var/lib/postgresql/data
 

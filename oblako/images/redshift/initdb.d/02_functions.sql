@@ -1,30 +1,24 @@
--- Amazon Redshift JSON / scalar UDFs, ported from hearthsim/pgredshift to
--- plpython3u (the originals targeted Python 2 plpythonu).
+-- Amazon Redshift JSON / scalar UDFs. The JSON functions are thin SQL wrappers
+-- over PostgreSQL's native (C) jsonb operators rather than plpython3u parsing the
+-- string per row, so they run at native speed (real Redshift's are native C too).
+-- Redshift returns '' for a missing path, so we COALESCE.
 
 -- NB: `json_array` can't be a parameter name on PG16 (JSON_ARRAY is now a
 -- reserved SQL/JSON keyword), so the array params are named `arr`.
 CREATE OR REPLACE FUNCTION json_extract_array_element_text(arr text, array_index int)
 RETURNS text IMMUTABLE AS $$
-import json
-return json.dumps(json.loads(arr)[array_index])
-$$ LANGUAGE plpython3u;
+    SELECT COALESCE(arr::jsonb ->> array_index, '');
+$$ LANGUAGE sql;
 
 CREATE OR REPLACE FUNCTION json_extract_path_text(json_string text, VARIADIC path_elems text[])
 RETURNS text IMMUTABLE AS $$
-import json
-result = json.loads(json_string)
-for elem in path_elems:
-    if not isinstance(result, dict) or elem not in result:
-        return ""
-    result = result[elem]
-return result if isinstance(result, str) else json.dumps(result)
-$$ LANGUAGE plpython3u;
+    SELECT COALESCE(json_string::jsonb #>> path_elems, '');
+$$ LANGUAGE sql;
 
 CREATE OR REPLACE FUNCTION json_array_length(arr text)
 RETURNS int IMMUTABLE AS $$
-import json
-return len(json.loads(arr))
-$$ LANGUAGE plpython3u;
+    SELECT jsonb_array_length(arr::jsonb);
+$$ LANGUAGE sql;
 
 -- Redshift DECODE(expr, search, result, default) — distinct from PostgreSQL's
 -- binary decode(), so this overloads on the all-integer signature.

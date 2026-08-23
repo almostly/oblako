@@ -19,6 +19,11 @@ class OpenSearchService(Service):
                 "discovery.type": "single-node",
                 "DISABLE_SECURITY_PLUGIN": "true",
                 "OPENSEARCH_INITIAL_ADMIN_PASSWORD": "admin",
+                # Local simulator: don't let disk-usage watermarks flip indices to
+                # read-only (a full CI runner otherwise triggers
+                # index_create_block_exception). No allocation decisions to gate on
+                # a single node anyway.
+                "cluster.routing.allocation.disk.threshold_enabled": "false",
             },
             volumes={
                 "oblako-opensearch-data": {

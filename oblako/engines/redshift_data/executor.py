@@ -301,31 +301,50 @@ class RedshiftDataExecutor:
         finally:
             conn.close()
 
-    def describe_table(self, table: str, database: str | None = None) -> list[dict]:
-        """Return column metadata for the named table."""
+    def describe_table(
+        self, table: str, database: str | None = None, schema: str | None = None
+    ) -> list[dict]:
+        """Return column metadata for the named table.
+
+        ``typeName`` is the internal catalog type name (``int4``, ``float4``,
+        ``timestamp``, ``varchar``, ...), exactly what real Redshift's
+        ``DescribeTable`` reports, not the ``information_schema`` spelling
+        (``integer``, ``real``, ...). Clients such as Feast key their Redshift
+        type map on the internal names, so returning ``integer`` breaks them.
+        """
         conn = self._connect(database)
         try:
             with conn.cursor() as cur:
                 cur.execute(
                     """
-                    SELECT column_name, data_type, character_maximum_length,
-                           is_nullable, column_default
-                    FROM information_schema.columns
-                    WHERE table_name = %s
-                    ORDER BY ordinal_position
+                    SELECT a.attname,
+                           t.typname,
+                           CASE WHEN a.atttypmod > 4 THEN a.atttypmod - 4 ELSE 0 END,
+                           a.attnotnull,
+                           pg_catalog.pg_get_expr(d.adbin, d.adrelid)
+                    FROM pg_catalog.pg_attribute a
+                    JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+                    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                    JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+                    LEFT JOIN pg_catalog.pg_attrdef d
+                           ON d.adrelid = a.attrelid AND d.adnum = a.attnum
+                    WHERE c.relname = %s
+                      AND a.attnum > 0 AND NOT a.attisdropped
+                      AND (%s::text IS NULL OR n.nspname = %s)
+                    ORDER BY a.attnum
                     """,
-                    (table,),
+                    (table, schema, schema),
                 )
                 return [
                     {
                         "name": name,
-                        "typeName": data_type,
+                        "typeName": typname,
                         "length": length or 0,
-                        "nullable": 1 if is_nullable == "YES" else 0,
+                        "nullable": 0 if notnull else 1,
                         "columnDefault": default,
                         "tableName": table,
                     }
-                    for name, data_type, length, is_nullable, default in cur.fetchall()
+                    for name, typname, length, notnull, default in cur.fetchall()
                 ]
         finally:
             conn.close()
