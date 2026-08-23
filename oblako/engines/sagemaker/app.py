@@ -163,6 +163,36 @@ class SageMakerApp:
             {"ProcessingJobSummaries": self.executor.list_processing_jobs()}
         )
 
+    def op_CreateHyperParameterTuningJob(self, req: dict) -> Response:
+        """Start a local hyperparameter tuning (HPO) job."""
+        if not req.get("HyperParameterTuningJobName"):
+            return _error(
+                "ValidationException", "HyperParameterTuningJobName is required"
+            )
+        arn = self.executor.create_hyper_parameter_tuning_job(req)
+        return _json_response({"HyperParameterTuningJobArn": arn})
+
+    def op_DescribeHyperParameterTuningJob(self, req: dict) -> Response:
+        """Return the current state of a tuning job (incl. BestTrainingJob)."""
+        job = self.executor.describe_hyper_parameter_tuning_job(
+            _require(req, "HyperParameterTuningJobName")
+        )
+        if job is None:
+            raise _NotFound(
+                f"Tuning job {req.get('HyperParameterTuningJobName')} not found"
+            )
+        return _json_response(job)
+
+    def op_ListHyperParameterTuningJobs(self, req: dict) -> Response:
+        """Return a summary list of all tuning jobs."""
+        return _json_response(
+            {
+                "HyperParameterTuningJobSummaries": (
+                    self.executor.list_hyper_parameter_tuning_jobs()
+                )
+            }
+        )
+
     async def invoke(self, request: Request) -> Response:
         """sagemaker-runtime InvokeEndpoint: proxy to the serving container."""
         from starlette.concurrency import run_in_threadpool

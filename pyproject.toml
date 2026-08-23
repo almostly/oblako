@@ -44,6 +44,10 @@ sagemaker = [
     # Mode.LOCAL_CONTAINER enum). >=3.4 also clears GHSA-5r2p-pjr8-7fh7.
     "sagemaker>=3.4,<4",
     "botocore[crt]",  # v3 login credential provider needs the CRT extra
+    # Automatic Model Tuning (create_hyper_parameter_tuning_job) runs Syne Tune's
+    # TPE as the internal searcher; optional, oblako falls back to random search
+    # when it's absent, so this stays in the extra rather than a core dep.
+    "syne-tune>=0.13",
 ]
 mlflow = [
     # Local MLflow tracking server (oblako.engines.mlflow). Heavy dep tree, hence an extra.

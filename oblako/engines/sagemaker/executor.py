@@ -75,6 +75,7 @@ class SageMakerExecutor:
         self._endpoints: dict[str, dict] = {}
         self._transform_jobs: dict[str, dict] = {}
         self._processing_jobs: dict[str, dict] = {}
+        self._tuning_jobs: dict[str, dict] = {}
         self._lock = threading.Lock()
 
     # -- training jobs -------------------------------------------------------
@@ -112,14 +113,7 @@ class SageMakerExecutor:
 
             image = job["AlgorithmSpecification"]["TrainingImage"]
             s3 = _s3_client()
-            channels: dict[str, str] = {}
-            for channel in job["InputDataConfig"]:
-                cname = channel["ChannelName"]
-                uri = channel["DataSource"]["S3DataSource"]["S3Uri"]
-                cdir = os.path.join(work, cname)
-                os.makedirs(cdir, exist_ok=True)
-                self._download_prefix(s3, uri, cdir)
-                channels[cname] = cdir
+            channels = self._download_channels(s3, job["InputDataConfig"], work)
 
             instance_type = str(
                 (job.get("ResourceConfig") or {}).get("InstanceType", "")
@@ -149,6 +143,20 @@ class SageMakerExecutor:
                 job["SecondaryStatus"] = "Failed"
                 job["FailureReason"] = str(err).strip()
                 job["TrainingEndTime"] = _now()
+
+    def _download_channels(
+        self, s3, input_data_config: list[dict], work: str
+    ) -> dict[str, str]:
+        """Download every input channel's S3 prefix into a per-channel local dir."""
+        channels: dict[str, str] = {}
+        for channel in input_data_config:
+            cname = channel["ChannelName"]
+            uri = channel["DataSource"]["S3DataSource"]["S3Uri"]
+            cdir = os.path.join(work, cname)
+            os.makedirs(cdir, exist_ok=True)
+            self._download_prefix(s3, uri, cdir)
+            channels[cname] = cdir
+        return channels
 
     @staticmethod
     def _download_prefix(s3, uri: str, dest: str) -> None:
@@ -551,6 +559,306 @@ class SageMakerExecutor:
                 }
                 for j in self._processing_jobs.values()
             ]
+
+    # -- automatic model tuning (HPO) ----------------------------------------
+    def create_hyper_parameter_tuning_job(self, req: dict) -> str:
+        """Register a tuning job and run the search in the background; return ARN."""
+        name = req["HyperParameterTuningJobName"]
+        arn = (
+            f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}"
+            f":hyper-parameter-tuning-job/{name}"
+        )
+        with self._lock:
+            self._tuning_jobs[name] = {
+                "HyperParameterTuningJobName": name,
+                "HyperParameterTuningJobArn": arn,
+                "HyperParameterTuningJobStatus": "InProgress",
+                "HyperParameterTuningJobConfig": req.get(
+                    "HyperParameterTuningJobConfig", {}
+                ),
+                "TrainingJobDefinition": req.get("TrainingJobDefinition", {}),
+                "TrainingJobStatusCounters": {
+                    "Completed": 0,
+                    "InProgress": 0,
+                    "RetryableError": 0,
+                    "NonRetryableError": 0,
+                    "Stopped": 0,
+                },
+                "ObjectiveStatusCounters": {
+                    "Succeeded": 0,
+                    "Pending": 0,
+                    "Failed": 0,
+                },
+                "CreationTime": _now(),
+            }
+        threading.Thread(target=self._run_tuning, args=(name,), daemon=True).start()
+        return arn
+
+    def _run_tuning(self, name: str) -> None:
+        """Run the search: each trial is a local training job, objective scraped.
+
+        A searcher (Syne Tune's TPE when installed, else a built-in random
+        sampler) proposes hyperparameters from ``ParameterRanges``; every
+        proposal runs as a real training container, and the objective metric is
+        read from the container's stdout with the ``MetricDefinitions`` regex.
+        """
+        job = self._tuning_jobs[name]
+        work = tempfile.mkdtemp(prefix="sm-hpo-")
+        try:
+            from oblako.services import SageMakerService
+
+            cfg = job["HyperParameterTuningJobConfig"]
+            tdef = job["TrainingJobDefinition"]
+            objective = cfg.get("HyperParameterTuningJobObjective", {})
+            metric_name = objective.get("MetricName")
+            do_min = objective.get("Type", "Maximize") == "Minimize"
+            ranges = cfg.get("ParameterRanges", {})
+            max_jobs = int(
+                (cfg.get("ResourceLimits") or {}).get("MaxNumberOfTrainingJobs", 1)
+            )
+            strategy = cfg.get("Strategy", "Bayesian")
+
+            algo = tdef.get("AlgorithmSpecification", {})
+            image = algo.get("TrainingImage")
+            regex = _metric_regex(algo.get("MetricDefinitions", []), metric_name)
+            if not regex:
+                raise RuntimeError(
+                    f"no MetricDefinitions regex for objective metric '{metric_name}'"
+                )
+            static_hp = tdef.get("StaticHyperParameters", {})
+            out_base = tdef["OutputDataConfig"]["S3OutputPath"].rstrip("/")
+
+            s3 = _s3_client()
+            channels = self._download_channels(
+                s3, tdef.get("InputDataConfig", []), work
+            )
+            svc = SageMakerService()
+            search = _make_search(ranges, do_min, strategy)
+
+            best_value = None
+            for i in range(max_jobs):
+                sampled = search.suggest()
+                tuned = {k: _hp_str(v) for k, v in sampled.items()}
+                trial_name = f"{name}-{i + 1:03d}"
+                trial_arn = (
+                    f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}"
+                    f":training-job/{trial_name}"
+                )
+                trial = {
+                    "TrainingJobName": trial_name,
+                    "TrainingJobArn": trial_arn,
+                    "TrainingJobStatus": "InProgress",
+                    "SecondaryStatus": "Training",
+                    "TuningJobArn": job["HyperParameterTuningJobArn"],
+                    "HyperParameters": {**static_hp, **tuned},
+                    "CreationTime": _now(),
+                    "TrainingStartTime": _now(),
+                }
+                with self._lock:
+                    self._jobs[trial_name] = trial
+                try:
+                    files, logs = svc.run_training(
+                        image=image,
+                        channels=channels,
+                        hyperparameters={**static_hp, **tuned},
+                        return_logs=True,
+                    )
+                    value = _scrape_metric(logs, regex)
+                    if value is None:
+                        raise RuntimeError(
+                            f"objective '{metric_name}' not found in training logs"
+                        )
+                    artifact_uri = f"{out_base}/{trial_name}/output/model.tar.gz"
+                    bucket, key = _split_uri(artifact_uri)
+                    s3.put_object(Bucket=bucket, Key=key, Body=_tar_model(files))
+                    final = {"MetricName": metric_name, "Value": value}
+                    with self._lock:
+                        trial.update(
+                            TrainingJobStatus="Completed",
+                            SecondaryStatus="Completed",
+                            ModelArtifacts={"S3ModelArtifacts": artifact_uri},
+                            TrainingEndTime=_now(),
+                            FinalMetricDataList=[final],
+                            TunedHyperParameters=tuned,
+                        )
+                        job["TrainingJobStatusCounters"]["Completed"] += 1
+                        job["ObjectiveStatusCounters"]["Succeeded"] += 1
+                    search.report(sampled, value)
+                    better = best_value is None or (
+                        value < best_value if do_min else value > best_value
+                    )
+                    if better:
+                        best_value = value
+                        with self._lock:
+                            job["BestTrainingJob"] = {
+                                "TrainingJobName": trial_name,
+                                "TrainingJobArn": trial_arn,
+                                "TrainingJobStatus": "Completed",
+                                "TunedHyperParameters": tuned,
+                                "FinalHyperParameterTuningJobObjectiveMetric": final,
+                            }
+                except Exception as err:  # noqa: BLE001 - record the trial as failed
+                    with self._lock:
+                        trial.update(
+                            TrainingJobStatus="Failed",
+                            SecondaryStatus="Failed",
+                            FailureReason=str(err).strip(),
+                            TrainingEndTime=_now(),
+                        )
+                        job["TrainingJobStatusCounters"]["NonRetryableError"] += 1
+                        job["ObjectiveStatusCounters"]["Failed"] += 1
+
+            with self._lock:
+                job["HyperParameterTuningJobStatus"] = "Completed"
+                job["HyperParameterTuningEndTime"] = _now()
+        except Exception as err:  # noqa: BLE001 - surface as a Failed tuning job
+            with self._lock:
+                job["HyperParameterTuningJobStatus"] = "Failed"
+                job["FailureReason"] = str(err).strip()
+                job["HyperParameterTuningEndTime"] = _now()
+
+    def describe_hyper_parameter_tuning_job(self, name: str) -> dict | None:
+        """Return the public tuning-job record, or None if unknown."""
+        with self._lock:
+            job = self._tuning_jobs.get(name)
+            return dict(job) if job else None
+
+    def list_hyper_parameter_tuning_jobs(self) -> list[dict]:
+        """Return a summary list of all tuning jobs."""
+        with self._lock:
+            return [
+                {
+                    "HyperParameterTuningJobName": j["HyperParameterTuningJobName"],
+                    "HyperParameterTuningJobArn": j["HyperParameterTuningJobArn"],
+                    "HyperParameterTuningJobStatus": j[
+                        "HyperParameterTuningJobStatus"
+                    ],
+                    "CreationTime": j["CreationTime"],
+                }
+                for j in self._tuning_jobs.values()
+            ]
+
+
+def _hp_str(value) -> str:
+    """Stringify a sampled hyperparameter the way SageMaker reports tuned values."""
+    if isinstance(value, bool):
+        return str(value).lower()
+    return str(value)
+
+
+def _metric_regex(metric_definitions: list[dict], metric_name: str) -> str | None:
+    """Find the regex whose metric Name matches the tuning objective."""
+    for md in metric_definitions or []:
+        if md.get("Name") == metric_name:
+            return md.get("Regex")
+    return None
+
+
+def _scrape_metric(logs: str, regex: str) -> float | None:
+    """Return the last value the objective regex matches in the container logs."""
+    import re
+
+    matches = re.findall(regex, logs)
+    if not matches:
+        return None
+    last = matches[-1]
+    if isinstance(last, tuple):
+        last = last[0]
+    try:
+        return float(last)
+    except (TypeError, ValueError):
+        return None
+
+
+def _make_search(ranges: dict, do_minimize: bool, strategy: str):
+    """Pick a searcher: Syne Tune TPE when available, else built-in random.
+
+    ``Strategy="Random"`` forces the random sampler; anything else prefers Syne
+    Tune's Bayesian TPE and falls back to random if Syne Tune isn't installed.
+    """
+    if str(strategy).lower().startswith("random"):
+        return _RandomSearch(ranges)
+    try:
+        return _SyneTuneSearch(ranges, do_minimize)
+    except Exception:  # noqa: BLE001 - syne-tune not installed / unusable
+        return _RandomSearch(ranges)
+
+
+class _RandomSearch:
+    """Dependency-free uniform random search over the AMT parameter ranges."""
+
+    def __init__(self, ranges: dict):
+        """Store the raw ``ParameterRanges`` to sample from."""
+        self._ranges = ranges
+
+    def suggest(self) -> dict:
+        """Sample one configuration uniformly from each parameter's range."""
+        import math
+        import random
+
+        cfg: dict = {}
+        for r in self._ranges.get("ContinuousParameterRanges", []):
+            lo, hi = float(r["MinValue"]), float(r["MaxValue"])
+            if str(r.get("ScalingType")) == "Logarithmic" and lo > 0:
+                cfg[r["Name"]] = math.exp(
+                    random.uniform(math.log(lo), math.log(hi))
+                )
+            else:
+                cfg[r["Name"]] = random.uniform(lo, hi)
+        for r in self._ranges.get("IntegerParameterRanges", []):
+            cfg[r["Name"]] = random.randint(int(r["MinValue"]), int(r["MaxValue"]))
+        for r in self._ranges.get("CategoricalParameterRanges", []):
+            cfg[r["Name"]] = random.choice(list(r["Values"]))
+        return cfg
+
+    def report(self, config: dict, value: float) -> None:
+        """No-op: random search ignores observed objectives."""
+
+
+class _SyneTuneSearch:
+    """Bayesian search backed by Syne Tune's TPE scheduler (ask/tell)."""
+
+    def __init__(self, ranges: dict, do_minimize: bool):
+        """Build the Syne Tune config space + TPE scheduler from AMT ranges."""
+        from syne_tune.config_space import choice, loguniform, randint, uniform
+        from syne_tune.optimizer.baselines import TPE
+
+        space: dict = {}
+        for r in ranges.get("ContinuousParameterRanges", []):
+            lo, hi = float(r["MinValue"]), float(r["MaxValue"])
+            log = str(r.get("ScalingType")) == "Logarithmic" and lo > 0
+            space[r["Name"]] = loguniform(lo, hi) if log else uniform(lo, hi)
+        for r in ranges.get("IntegerParameterRanges", []):
+            space[r["Name"]] = randint(int(r["MinValue"]), int(r["MaxValue"]))
+        for r in ranges.get("CategoricalParameterRanges", []):
+            space[r["Name"]] = choice(list(r["Values"]))
+        if not space:
+            raise ValueError("no tunable parameters for Syne Tune")
+        self._metric = "objective"
+        self._scheduler = TPE(
+            config_space=space,
+            metric=self._metric,
+            do_minimize=do_minimize,
+            random_seed=0,
+        )
+        self._trial_id = 0
+
+    def suggest(self) -> dict:
+        """Ask the scheduler for the next configuration to evaluate."""
+        suggestion = self._scheduler.suggest()
+        return dict(suggestion.config)
+
+    def report(self, config: dict, value: float) -> None:
+        """Tell the scheduler the objective observed for a configuration."""
+        from syne_tune.backend.trial_status import Trial
+
+        trial = Trial(
+            trial_id=self._trial_id,
+            config=config,
+            creation_time=datetime.datetime.now(),  # noqa: DTZ005 - local only
+        )
+        self._scheduler.on_trial_complete(trial, {self._metric: value})
+        self._trial_id += 1
 
 
 def _tar_model(files: dict[str, bytes]) -> bytes:

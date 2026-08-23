@@ -113,7 +113,8 @@ class SageMakerService:
         environment: dict | None = None,
         gpus: bool = False,
         timeout: int = 1800,
-    ) -> dict[str, bytes]:
+        return_logs: bool = False,
+    ) -> dict[str, bytes] | tuple[dict[str, bytes], str]:
         """Run a SageMaker training container per the ``/opt/ml`` contract.
 
         oblako drives Docker itself (no SageMaker SDK), so it works the same on
@@ -126,7 +127,10 @@ class SageMakerService:
         placed under ``/opt/ml/input/data/<channel>/``. ``hyperparameters`` is
         written (values stringified) to ``/opt/ml/input/config/hyperparameters.json``
         as the container expects. Returns the collected ``/opt/ml/model`` as a
-        ``{relative_path: bytes}`` map. Raises on a non-zero exit.
+        ``{relative_path: bytes}`` map. Raises on a non-zero exit. With
+        ``return_logs=True`` returns ``(files, container_logs)`` instead, so a
+        caller (e.g. automatic model tuning) can scrape an objective metric from
+        the container's stdout via a ``MetricDefinitions`` regex.
         """
         import io
         import json
@@ -173,8 +177,8 @@ class SageMakerService:
             container.start()
             result = container.wait(timeout=timeout)
             code = result.get("StatusCode", 1)
+            logs = container.logs().decode("utf-8", "replace")
             if code != 0:
-                logs = container.logs().decode("utf-8", "replace")
                 raise RuntimeError(f"training container exited {code}:\n{logs[-4000:]}")
             bits, _ = container.get_archive("/opt/ml/model")
             model_tar = io.BytesIO(b"".join(bits))
@@ -191,7 +195,7 @@ class SageMakerService:
                         else member.name
                     )
                     files[name] = tar.extractfile(member).read()
-            return files
+            return (files, logs) if return_logs else files
         finally:
             with contextlib.suppress(Exception):
                 container.remove(force=True)
