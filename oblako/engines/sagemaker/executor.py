@@ -119,10 +119,14 @@ class SageMakerExecutor:
                 self._download_prefix(s3, uri, cdir)
                 channels[cname] = cdir
 
+            instance_type = str(
+                (job.get("ResourceConfig") or {}).get("InstanceType", "")
+            )
             files = SageMakerService().run_training(
                 image=image,
                 channels=channels,
                 hyperparameters=job.get("HyperParameters") or {},
+                gpus=instance_type.endswith("local_gpu"),
             )
 
             tar_bytes = _tar_model(files)

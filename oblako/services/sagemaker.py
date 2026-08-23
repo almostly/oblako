@@ -111,6 +111,7 @@ class SageMakerService:
         channels: dict[str, str],
         hyperparameters: dict | None = None,
         environment: dict | None = None,
+        gpus: bool = False,
         timeout: int = 1800,
     ) -> dict[str, bytes]:
         """Run a SageMaker training container per the ``/opt/ml`` contract.
@@ -152,11 +153,20 @@ class SageMakerService:
                     tar.addfile(info, io.BytesIO(data))
         payload.seek(0)
 
+        # instance_type="local_gpu" -> request all GPUs (nvidia-docker). Real on
+        # Linux+NVIDIA; on a host without it Docker rejects it, which surfaces as a
+        # clear training error rather than a silent CPU run.
+        device_requests = (
+            [docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]])]
+            if gpus
+            else None
+        )
         container = self.client.containers.create(
             image,
             environment=environment or {},
             name=f"sagemaker-local-train-{uuid.uuid4().hex[:12]}",
             detach=True,
+            device_requests=device_requests,
         )
         try:
             container.put_archive("/", payload.getvalue())

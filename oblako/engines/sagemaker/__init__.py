@@ -18,8 +18,16 @@ import urllib.request
 
 from .app import app, create_app
 from .executor import SageMakerExecutor
+from .stubs import use_local_stubs
 
-__all__ = ["app", "create_app", "SageMakerExecutor", "start_in_thread", "is_running"]
+__all__ = [
+    "app",
+    "create_app",
+    "SageMakerExecutor",
+    "use_local_stubs",
+    "start_in_thread",
+    "is_running",
+]
 
 DEFAULT_PORT = 8005
 
