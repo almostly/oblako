@@ -1,22 +1,30 @@
-"""SageMaker control-plane executor: runs training jobs locally in Docker.
+"""SageMaker control-plane + runtime executor: runs jobs/endpoints in local Docker.
 
-Implements the boto3 ``sagemaker`` operations against oblako's own Docker
-execution (``SageMakerService.run_training``) and the local object store
-(S3Proxy), so unmodified boto3 / SageMaker code runs locally: a
-``create_training_job`` pulls its input channels from S3, trains in a real
-container per the ``/opt/ml`` contract, and writes ``model.tar.gz`` back to S3.
-Jobs run in a background thread with the real status lifecycle
-(InProgress -> Completed/Failed) so ``describe_training_job`` polling works.
+Implements the boto3 ``sagemaker`` (and ``sagemaker-runtime``) operations against
+oblako's own Docker execution and the local object store (S3Proxy), so unmodified
+boto3 / SageMaker code runs locally:
+
+- ``create_training_job`` pulls its input channels from S3, trains in a real
+  container per the ``/opt/ml`` contract, and writes ``model.tar.gz`` back to S3.
+- ``create_model`` / ``create_endpoint_config`` / ``create_endpoint`` start a
+  long-running serving container (model loaded from S3), and
+  ``invoke_endpoint`` proxies to its ``/invocations``.
+
+Work runs in background threads with the real status lifecycle (InProgress ->
+Completed/Failed, Creating -> InService/Failed) so ``describe_*`` polling works.
 """
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import io
 import os
 import tarfile
 import tempfile
 import threading
+import time
+import urllib.request
 
 _ACCOUNT = "000000000000"
 _REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
@@ -60,8 +68,11 @@ class SageMakerExecutor:
     """Runs SageMaker training jobs in local Docker and tracks their state."""
 
     def __init__(self):
-        """Initialize the in-memory job store."""
+        """Initialize the in-memory stores."""
         self._jobs: dict[str, dict] = {}
+        self._models: dict[str, dict] = {}
+        self._endpoint_configs: dict[str, dict] = {}
+        self._endpoints: dict[str, dict] = {}
         self._lock = threading.Lock()
 
     # -- training jobs -------------------------------------------------------
@@ -160,6 +171,165 @@ class SageMakerExecutor:
                 }
                 for j in self._jobs.values()
             ]
+
+    # -- models / endpoints --------------------------------------------------
+    def create_model(self, req: dict) -> str:
+        """Register a model (image + model data + env); return its ARN."""
+        name = req["ModelName"]
+        arn = f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:model/{name}"
+        with self._lock:
+            self._models[name] = {
+                "ModelName": name,
+                "ModelArn": arn,
+                "PrimaryContainer": req.get("PrimaryContainer", {}),
+                "ExecutionRoleArn": req.get("ExecutionRoleArn"),
+                "CreationTime": _now(),
+            }
+        return arn
+
+    def create_endpoint_config(self, req: dict) -> str:
+        """Register an endpoint config; return its ARN."""
+        name = req["EndpointConfigName"]
+        arn = f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:endpoint-config/{name}"
+        with self._lock:
+            self._endpoint_configs[name] = {
+                "EndpointConfigName": name,
+                "EndpointConfigArn": arn,
+                "ProductionVariants": req.get("ProductionVariants", []),
+                "CreationTime": _now(),
+            }
+        return arn
+
+    def create_endpoint(self, req: dict) -> str:
+        """Start a local serving container for the endpoint; return its ARN."""
+        name = req["EndpointName"]
+        config_name = req["EndpointConfigName"]
+        arn = f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:endpoint/{name}"
+        with self._lock:
+            self._endpoints[name] = {
+                "EndpointName": name,
+                "EndpointArn": arn,
+                "EndpointConfigName": config_name,
+                "EndpointStatus": "Creating",
+                "CreationTime": _now(),
+                "_container": None,
+                "_port": None,
+            }
+        threading.Thread(
+            target=self._start_endpoint, args=(name, config_name), daemon=True
+        ).start()
+        return arn
+
+    def _start_endpoint(self, name: str, config_name: str) -> None:
+        """Run the serving container, load the model into it, wait for /ping."""
+        endpoint = self._endpoints[name]
+        try:
+            from oblako.services import SageMakerService
+
+            config = self._endpoint_configs[config_name]
+            variant = config["ProductionVariants"][0]
+            model = self._models[variant["ModelName"]]
+            container_def = model["PrimaryContainer"]
+            image = container_def["Image"]
+            env = container_def.get("Environment", {})
+
+            client = SageMakerService().client
+            container = client.containers.create(
+                image,
+                environment=env,
+                ports={"8080/tcp": None},  # publish to a random host port
+                name=f"sagemaker-local-endpoint-{name}",
+                detach=True,
+            )
+            model_url = container_def.get("ModelDataUrl")
+            if model_url:
+                container.put_archive("/", self._model_payload(model_url))
+            container.start()
+            container.reload()
+            host_port = int(container.ports["8080/tcp"][0]["HostPort"])
+            self._await_ping(host_port)
+            with self._lock:
+                endpoint.update(
+                    EndpointStatus="InService", _container=container.id, _port=host_port
+                )
+        except Exception as err:  # noqa: BLE001 - surface as a Failed endpoint
+            with self._lock:
+                endpoint["EndpointStatus"] = "Failed"
+                endpoint["FailureReason"] = str(err).strip()
+
+    @staticmethod
+    def _model_payload(model_url: str) -> bytes:
+        """Download model.tar.gz from S3 and re-tar it rooted at /opt/ml/model."""
+        s3 = _s3_client()
+        bucket, key = _split_uri(model_url)
+        raw = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+        out = io.BytesIO()
+        with (
+            tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as src,
+            tarfile.open(fileobj=out, mode="w") as dst,
+        ):
+            for member in src.getmembers():
+                if not member.isfile():
+                    continue
+                data = src.extractfile(member).read()
+                info = tarfile.TarInfo(f"opt/ml/model/{member.name}")
+                info.size = len(data)
+                dst.addfile(info, io.BytesIO(data))
+        return out.getvalue()
+
+    @staticmethod
+    def _await_ping(host_port: int, timeout: float = 60.0) -> None:
+        """Poll GET /ping on the serving container until it is healthy."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                with urllib.request.urlopen(
+                    f"http://localhost:{host_port}/ping", timeout=2
+                ) as resp:
+                    if resp.status == 200:
+                        return
+            except Exception:
+                time.sleep(0.3)
+        raise RuntimeError("serving container did not become healthy")
+
+    def describe_endpoint(self, name: str) -> dict | None:
+        """Return the public endpoint record (without internal fields)."""
+        with self._lock:
+            endpoint = self._endpoints.get(name)
+            if endpoint is None:
+                return None
+            return {k: v for k, v in endpoint.items() if not k.startswith("_")}
+
+    def delete_endpoint(self, name: str) -> None:
+        """Stop and remove the endpoint's serving container."""
+        with self._lock:
+            endpoint = self._endpoints.pop(name, None)
+        if endpoint and endpoint.get("_container"):
+            from oblako.services import SageMakerService
+
+            with contextlib.suppress(Exception):
+                SageMakerService().client.containers.get(endpoint["_container"]).remove(
+                    force=True
+                )
+
+    def invoke_endpoint(self, name: str, body: bytes, content_type: str) -> bytes:
+        """Proxy an inference request to the endpoint's /invocations."""
+        with self._lock:
+            endpoint = self._endpoints.get(name)
+            port = endpoint.get("_port") if endpoint else None
+            status = endpoint.get("EndpointStatus") if endpoint else None
+        if endpoint is None:
+            raise KeyError(f"endpoint {name} not found")
+        if status != "InService" or port is None:
+            raise RuntimeError(f"endpoint {name} is not InService (status {status})")
+        req = urllib.request.Request(
+            f"http://localhost:{port}/invocations",
+            data=body,
+            method="POST",
+            headers={"Content-Type": content_type or "application/octet-stream"},
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return resp.read()
 
 
 def _tar_model(files: dict[str, bytes]) -> bytes:

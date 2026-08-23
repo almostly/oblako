@@ -89,6 +89,55 @@ class SageMakerApp:
             {"TrainingJobSummaries": self.executor.list_training_jobs()}
         )
 
+    def op_CreateModel(self, req: dict) -> Response:
+        """Register a model."""
+        if not req.get("ModelName"):
+            return _error("ValidationException", "ModelName is required")
+        return _json_response({"ModelArn": self.executor.create_model(req)})
+
+    def op_CreateEndpointConfig(self, req: dict) -> Response:
+        """Register an endpoint config."""
+        if not req.get("EndpointConfigName"):
+            return _error("ValidationException", "EndpointConfigName is required")
+        return _json_response(
+            {"EndpointConfigArn": self.executor.create_endpoint_config(req)}
+        )
+
+    def op_CreateEndpoint(self, req: dict) -> Response:
+        """Start a local serving container for the endpoint."""
+        if not req.get("EndpointName"):
+            return _error("ValidationException", "EndpointName is required")
+        return _json_response({"EndpointArn": self.executor.create_endpoint(req)})
+
+    def op_DescribeEndpoint(self, req: dict) -> Response:
+        """Return the current state of an endpoint."""
+        endpoint = self.executor.describe_endpoint(_require(req, "EndpointName"))
+        if endpoint is None:
+            raise _NotFound(f"Endpoint {req.get('EndpointName')} not found")
+        return _json_response(endpoint)
+
+    def op_DeleteEndpoint(self, req: dict) -> Response:
+        """Stop and remove an endpoint's serving container."""
+        self.executor.delete_endpoint(_require(req, "EndpointName"))
+        return _json_response({})
+
+    async def invoke(self, request: Request) -> Response:
+        """sagemaker-runtime InvokeEndpoint: proxy to the serving container."""
+        from starlette.concurrency import run_in_threadpool
+
+        name = request.path_params["name"]
+        body = await request.body()
+        content_type = request.headers.get("Content-Type", "application/octet-stream")
+        try:
+            result = await run_in_threadpool(
+                self.executor.invoke_endpoint, name, body, content_type
+            )
+        except KeyError as err:
+            return _error("ValidationError", str(err), status=404)
+        except Exception as err:  # noqa: BLE001
+            return _error("ModelError", str(err))
+        return Response(result, media_type=content_type)
+
 
 class _NotFound(Exception):
     pass
@@ -101,9 +150,20 @@ def _require(req: dict, key: str):
 
 
 def create_app(executor: SageMakerExecutor | None = None) -> Starlette:
-    """Create the Starlette app for the local sagemaker control-plane."""
+    """Create the Starlette app for the local sagemaker control-plane + runtime."""
     dispatcher = SageMakerApp(executor or SageMakerExecutor())
-    return Starlette(routes=[Route("/", dispatcher.handle, methods=["POST"])])
+    return Starlette(
+        routes=[
+            # sagemaker (control plane): JSON 1.1, dispatched by X-Amz-Target
+            Route("/", dispatcher.handle, methods=["POST"]),
+            # sagemaker-runtime: REST, POST /endpoints/<name>/invocations
+            Route(
+                "/endpoints/{name}/invocations",
+                dispatcher.invoke,
+                methods=["POST"],
+            ),
+        ]
+    )
 
 
 app = create_app()

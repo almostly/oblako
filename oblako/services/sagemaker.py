@@ -77,6 +77,26 @@ class SageMakerService:
             aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "test"),
         )
 
+    def get_runtime_client(self):
+        """Return a boto3 ``sagemaker-runtime`` client wired to the local server.
+
+        ``invoke_endpoint`` is proxied to the local serving container that
+        ``create_endpoint`` started.
+        """
+        import boto3
+
+        from oblako import ports
+        from oblako.engines import sagemaker as sagemaker_engine
+
+        sagemaker_engine.start_in_thread(port=ports.SAGEMAKER)
+        return boto3.client(
+            "sagemaker-runtime",
+            endpoint_url=f"http://localhost:{ports.SAGEMAKER}",
+            region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "test"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "test"),
+        )
+
     def build_image(self, path: str, tag: str) -> str:
         """Build a training/inference Docker image."""
         image, logs = self.client.images.build(path=path, tag=tag)
