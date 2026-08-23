@@ -181,7 +181,9 @@ class RedshiftDataApp:
         return _json_response(
             {
                 "TableName": table,
-                "ColumnList": self.executor.describe_table(table, req.get("Database")),
+                "ColumnList": self.executor.describe_table(
+                    table, req.get("Database"), req.get("Schema")
+                ),
             }
         )
 

@@ -9,6 +9,11 @@ export OBLAKO_PG_PORT="${OBLAKO_PG_PORT:-5433}"       # PostgreSQL, internal onl
 export OBLAKO_PROXY_PORT="${OBLAKO_PROXY_PORT:-5439}" # what clients connect to (Redshift's port)
 export OBLAKO_PG_HOST=127.0.0.1
 
+# Put the copy_unload bridge module on plpython3u's import path (the oblako_*
+# COPY/UNLOAD functions `import copy_unload`). It lives next to the proxy in
+# /usr/local/bin; PostgreSQL inherits this env, so plpython finds it too.
+export PYTHONPATH="/usr/local/bin${PYTHONPATH:+:$PYTHONPATH}"
+
 # TLS cert for the proxy. The image bakes a FIXED self-signed cert at
 # /etc/oblako-redshift (so every container presents the same cert, stable across
 # `down -v`/clones, keeping pins + `oblako trust` valid). Override by mounting

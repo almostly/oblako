@@ -17,8 +17,17 @@ FROM postgres:16
 # python3 also runs the Redshift-compat wire proxy; openssl generates the proxy's
 # self-signed TLS cert at startup (see entrypoint).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        postgresql-plpython3-16 python3 openssl \
+        postgresql-plpython3-16 python3 python3-pip openssl \
     && rm -rf /var/lib/apt/lists/*
+
+# boto3 + pyarrow + pydantic power the COPY/UNLOAD <-> S3 bridge: the proxy
+# rewrites Redshift COPY/UNLOAD into calls to plpython3u functions that read/write
+# Parquet on S3 (see initdb.d/07_copy_unload.sql, proxy/copy_unload.py). Installed
+# into the SYSTEM python so plpython3u (which links the system libpython) can
+# import them; --break-system-packages is required on Debian's PEP 668 python.
+RUN pip3 install --no-cache-dir --break-system-packages \
+        boto3 pyarrow pydantic \
+    && rm -rf /root/.cache
 
 # The shared_preload extension, compiled in the build stage.
 COPY --from=build /usr/lib/postgresql/16/lib/oblako_redshift.so /usr/lib/postgresql/16/lib/
@@ -43,6 +52,14 @@ COPY initdb.d/ /docker-entrypoint-initdb.d/
 # PostgreSQL moves to an internal port. Transparent for everything else (auth,
 # COPY, ...). Override the listen port with OBLAKO_PROXY_PORT.
 COPY proxy/redshift_proxy.py /usr/local/bin/redshift_proxy.py
+# The COPY/UNLOAD <-> S3 bridge, shared by the proxy (rewrites COPY/UNLOAD into
+# oblako_* calls) and the plpython3u functions (do the S3 work). On the proxy's
+# script dir and, via PYTHONPATH in the entrypoint, on plpython's import path.
+COPY proxy/copy_unload.py /usr/local/bin/copy_unload.py
+# SUPER (PartiQL) dot-navigation rewriting, imported by the proxy.
+COPY proxy/super_nav.py /usr/local/bin/super_nav.py
+# LISTAGG -> string_agg rewriting, imported by the proxy.
+COPY proxy/listagg.py /usr/local/bin/listagg.py
 COPY entrypoint.sh /usr/local/bin/oblako-entrypoint.sh
 RUN chmod +x /usr/local/bin/oblako-entrypoint.sh
 
