@@ -349,13 +349,26 @@ class SageMakerExecutor:
         endpoint = self._endpoints[name]
         try:
             config = self._endpoint_configs[config_name]
-            model = self._models[config["ProductionVariants"][0]["ModelName"]]
+            variants = config.get("ProductionVariants", [])
+            model = self._models[variants[0]["ModelName"]]
             container, host_port = self._start_serving_container(
                 model, f"sagemaker-local-endpoint-{name}"
             )
+            # echo the config's variants (incl. any ServerlessConfig) in describe
+            summaries = [
+                {
+                    "VariantName": v.get("VariantName"),
+                    "CurrentInstanceCount": v.get("InitialInstanceCount"),
+                    "CurrentServerlessConfig": v.get("ServerlessConfig"),
+                }
+                for v in variants
+            ]
             with self._lock:
                 endpoint.update(
-                    EndpointStatus="InService", _container=container.id, _port=host_port
+                    EndpointStatus="InService",
+                    ProductionVariants=summaries,
+                    _container=container.id,
+                    _port=host_port,
                 )
         except Exception as err:  # noqa: BLE001 - surface as a Failed endpoint
             with self._lock:
