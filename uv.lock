@@ -3190,6 +3190,7 @@ dev = [
     { name = "redshift-connector" },
     { name = "ruff" },
     { name = "sqlalchemy-redshift" },
+    { name = "sqlglot" },
 ]
 docs = [
     { name = "linkify-it-py" },
@@ -3246,6 +3247,7 @@ requires-dist = [
     { name = "sphinx", marker = "extra == 'docs'", specifier = ">=7" },
     { name = "sphinx-rtd-theme", marker = "extra == 'docs'", specifier = ">=2" },
     { name = "sqlalchemy-redshift", marker = "extra == 'dev'", specifier = ">=0.8" },
+    { name = "sqlglot", marker = "extra == 'dev'", specifier = ">=25" },
     { name = "starlette", specifier = ">=0.37" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
@@ -5482,6 +5484,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/78/0d/d5e7dd863b6f7a445cd7c929373e71e71c819f95e56ab8ea3ed4776b2f69/sqlalchemy_redshift-1.0.0.tar.gz", hash = "sha256:882964d42184604ef653ab770501e942e7f9296b537d3b138551f609d1c52860", size = 56060, upload-time = "2026-04-28T00:31:25.922Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d2/2d/1206bc07d7333624694576366bb158a66e314755b10439d634c2ceea4484/sqlalchemy_redshift-1.0.0-py3-none-any.whl", hash = "sha256:8b3a946401148b9443eb623f84a64bb30fa99ddc873c17d6a9e70cc0e5ea8dd1", size = 39103, upload-time = "2026-04-28T00:31:24.491Z" },
+]
+
+[[package]]
+name = "sqlglot"
+version = "30.17.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/56/d4/da49abcc81beebbb25f29ddf87f2980c63c949569d7f2da40c06d95fa415/sqlglot-30.17.0.tar.gz", hash = "sha256:2d6b8def93304fa300f4d20f48e3909e7f436fda56ca1fafd8975f6c561ef62c", size = 5999019, upload-time = "2026-08-12T19:36:50.587Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f3/bc/2a07cef49046e6cf5d1a8b1de553aaef8491b4170dbfe254c8687c764408/sqlglot-30.17.0-py3-none-any.whl", hash = "sha256:84435ac283a60173da31b5fd7d11a725037a1c3fd6ed1e21fb065de74ddb579f", size = 741795, upload-time = "2026-08-12T19:36:48.699Z" },
 ]
 
 [[package]]

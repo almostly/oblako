@@ -26,7 +26,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # into the SYSTEM python so plpython3u (which links the system libpython) can
 # import them; --break-system-packages is required on Debian's PEP 668 python.
 RUN pip3 install --no-cache-dir --break-system-packages \
-        boto3 pyarrow pydantic \
+        boto3 pyarrow pydantic sqlglot \
     && rm -rf /root/.cache
 
 # The shared_preload extension, compiled in the build stage.
@@ -60,6 +60,8 @@ COPY proxy/copy_unload.py /usr/local/bin/copy_unload.py
 COPY proxy/super_nav.py /usr/local/bin/super_nav.py
 # LISTAGG -> string_agg rewriting, imported by the proxy.
 COPY proxy/listagg.py /usr/local/bin/listagg.py
+# PIVOT/UNPIVOT -> standard SQL (sqlglot-parsed), imported by the proxy.
+COPY proxy/pivot_unpivot.py /usr/local/bin/pivot_unpivot.py
 COPY entrypoint.sh /usr/local/bin/oblako-entrypoint.sh
 RUN chmod +x /usr/local/bin/oblako-entrypoint.sh
 

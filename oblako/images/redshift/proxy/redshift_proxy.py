@@ -69,6 +69,12 @@ try:
 except Exception:  # noqa: BLE001 - any import failure disables the feature
     listagg = None
 
+# PIVOT/UNPIVOT -> standard SQL (needs sqlglot as a parser). Optional.
+try:
+    import pivot_unpivot
+except Exception:  # noqa: BLE001 - any import failure disables the feature
+    pivot_unpivot = None
+
 LISTEN_PORT = int(os.environ.get("OBLAKO_PROXY_PORT", "5439"))
 PG_HOST = os.environ.get("OBLAKO_PG_HOST", "127.0.0.1")
 PG_PORT = int(os.environ.get("OBLAKO_PG_PORT", "5433"))
@@ -198,6 +204,8 @@ def rewrite_sql(sql: str) -> str:
     ``copy_unload``). Everything else is left untouched.
     """
     s = sql
+    if pivot_unpivot is not None:
+        s = pivot_unpivot.rewrite_pivot_unpivot(s)  # PIVOT/UNPIVOT -> standard SQL
     if copy_unload is not None and copy_unload.has_s3_copy_or_unload(s):
         s = copy_unload.rewrite_copy_unload(s)
     if super_nav is not None:

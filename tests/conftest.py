@@ -36,6 +36,7 @@ _INTEGRATION_FILES = {
     "tests/redshift/test_redshift_copy_unload.py",
     "tests/redshift/test_redshift_super.py",
     "tests/redshift/test_redshift_listagg.py",
+    "tests/redshift/test_redshift_pivot.py",
     "tests/redshift/test_redshift_functions.py",
     "tests/redshift/test_redshift_ml.py",
     "tests/redshift/test_redshift_proxy.py",
