@@ -34,6 +34,7 @@ ENDPOINTS = {
     "AWS_ENDPOINT_URL_SFN": _local(ports.STEPFUNCTIONS),
     "AWS_ENDPOINT_URL_REDSHIFT": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_REDSHIFT_DATA": _local(ports.REDSHIFT_DATA),
+    "AWS_ENDPOINT_URL_SAGEMAKER": _local(ports.SAGEMAKER),
     "AWS_ENDPOINT_URL_RDS": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_RDS_DATA": _local(ports.RDS_DATA),
     "AWS_ENDPOINT_URL_LAMBDA": _local(ports.MOTO),

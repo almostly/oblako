@@ -56,6 +56,27 @@ class SageMakerService:
 
         return LocalSession()
 
+    def get_client(self):
+        """Return a boto3 ``sagemaker`` client wired to the local control plane.
+
+        Auto-starts the in-process server (``ports.SAGEMAKER``) that answers the
+        boto3 ``sagemaker`` API and runs training jobs locally in Docker, so
+        unmodified boto3 / SageMaker SDK code targets oblako.
+        """
+        import boto3
+
+        from oblako import ports
+        from oblako.engines import sagemaker as sagemaker_engine
+
+        sagemaker_engine.start_in_thread(port=ports.SAGEMAKER)
+        return boto3.client(
+            "sagemaker",
+            endpoint_url=f"http://localhost:{ports.SAGEMAKER}",
+            region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "test"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "test"),
+        )
+
     def build_image(self, path: str, tag: str) -> str:
         """Build a training/inference Docker image."""
         image, logs = self.client.images.build(path=path, tag=tag)
