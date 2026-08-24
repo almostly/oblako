@@ -85,7 +85,7 @@ def main():
     resp = ddb.search_vectors(
         TableName=TABLE,
         IndexName="by-embedding",
-        SearchVector=embed(adapter, model, query),
+        SearchVector=[{"N": str(v)} for v in embed(adapter, model, query)],
         TopK=2,
     )
     print(f"query: {query!r}\n")

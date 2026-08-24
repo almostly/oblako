@@ -115,19 +115,27 @@ class VectorProxy:
         return _json(data, status)
 
     async def op_UpdateTable(self, payload: dict, auth: dict) -> Response:
-        """Capture added VectorIndexes, forward the rest, annotate the response."""
-        indexes = payload.pop("VectorIndexes", None)
+        """Apply VectorIndexUpdates (Create/Delete), forward the rest, annotate."""
+        table = payload["TableName"]
+        updates = payload.pop("VectorIndexUpdates", None)
         with self._lock:
             keys = next(
-                (i["keys"] for i in self._indexes.get(payload["TableName"], {}).values()),
-                [],
+                (i["keys"] for i in self._indexes.get(table, {}).values()), []
             )
         status, data = await self._ddb("UpdateTable", payload, auth)
-        if status == 200 and indexes:
-            self._store_indexes(payload["TableName"], indexes, keys)
+        if status == 200 and updates:
+            creates = [u["Create"] for u in updates if u.get("Create")]
+            if creates:
+                self._store_indexes(table, creates, keys)
+            for update in updates:
+                if update.get("Delete"):
+                    with self._lock:
+                        self._indexes.get(table, {}).pop(
+                            update["Delete"]["IndexName"], None
+                        )
             if "TableDescription" in data:
                 data["TableDescription"]["VectorIndexes"] = self._describe_indexes(
-                    payload["TableName"]
+                    table
                 )
         return _json(data, status)
 
@@ -160,7 +168,7 @@ class VectorProxy:
                 f"no vector index {index_name!r} on table {table!r}",
             )
         try:
-            query = [float(x) for x in payload["SearchVector"]]
+            query = _query_vector(payload["SearchVector"])
         except (KeyError, TypeError, ValueError):
             return _err("ValidationException", "SearchVector must be a list of numbers")
         top_k = int(payload.get("TopK", 10))
@@ -225,6 +233,21 @@ class VectorProxy:
                 }
                 for name, idx in self._indexes.get(table, {}).items()
             ]
+
+
+def _query_vector(raw: list) -> list[float]:
+    """Read a SearchVector into floats: AttributeValue elements or raw numbers.
+
+    Real DynamoDB (and a current boto3) sends each component as an AttributeValue
+    (``{"N": "0.1"}``); oblako's older-botocore graft may send raw numbers.
+    """
+    out = []
+    for element in raw:
+        if isinstance(element, dict):
+            out.append(float(element["N"]))
+        else:
+            out.append(float(element))
+    return out
 
 
 def _extract_vector(attr_value: dict | None) -> list[float] | None:

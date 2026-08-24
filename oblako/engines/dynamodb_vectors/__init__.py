@@ -101,8 +101,11 @@ def get_client(port: int = DEFAULT_PORT, backend_url: str | None = None):
     # a fresh Session has its own loader with an empty model cache, so it loads
     # the augmented dynamodb model even if a plain client was built earlier
     session = boto3.Session()
-    with contextlib.suppress(Exception):
-        session._session.get_component("data_loader").search_paths.insert(0, data_dir)
+    if data_dir:  # None when a current botocore already ships the real model
+        with contextlib.suppress(Exception):
+            session._session.get_component("data_loader").search_paths.insert(
+                0, data_dir
+            )
     return session.client(
         "dynamodb",
         endpoint_url=f"http://localhost:{port}",

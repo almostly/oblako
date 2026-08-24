@@ -23,64 +23,100 @@ _DATA_DIR: str | None = None
 
 
 def _augment(model: dict) -> dict:
-    """Return a copy of the dynamodb model with the vector-search API grafted on."""
+    """Return a copy of the dynamodb model with the vector-search API grafted on.
+
+    Shapes match AWS's real dynamodb model (verified against a current botocore):
+    the search vector is a DynamoDB list of AttributeValues, TopK is required,
+    and UpdateTable takes VectorIndexUpdates (Create/Delete actions).
+    """
     m = copy.deepcopy(model)
     shapes = m["shapes"]
 
-    shapes["VectorAttribute"] = {
+    shapes["VectorAttributeDefinition"] = {
         "type": "structure",
+        "required": ["AttributeName"],
         "members": {"AttributeName": {"shape": "KeySchemaAttributeName"}},
     }
-    shapes["VectorDimensions"] = {"type": "integer"}
-    shapes["DistanceFunction"] = {
+    shapes["VectorDistanceFunction"] = {
         "type": "string",
         "enum": ["COSINE", "DOT_PRODUCT", "EUCLIDEAN"],
     }
     shapes["VectorIndex"] = {
         "type": "structure",
+        "required": [
+            "IndexName",
+            "VectorAttribute",
+            "Projection",
+            "Dimensions",
+            "DistanceFunction",
+        ],
         "members": {
             "IndexName": {"shape": "IndexName"},
-            "VectorAttribute": {"shape": "VectorAttribute"},
-            "Dimensions": {"shape": "VectorDimensions"},
-            "DistanceFunction": {"shape": "DistanceFunction"},
+            "VectorAttribute": {"shape": "VectorAttributeDefinition"},
             "Projection": {"shape": "Projection"},
+            "Dimensions": {"shape": "PositiveLongObject"},
+            "DistanceFunction": {"shape": "VectorDistanceFunction"},
         },
     }
     shapes["VectorIndexList"] = {"type": "list", "member": {"shape": "VectorIndex"}}
-    shapes["VectorComponent"] = {"type": "double"}
-    shapes["SearchVector"] = {"type": "list", "member": {"shape": "VectorComponent"}}
-    shapes[_TOP_K] = {"type": "integer"}
-    shapes["VectorScore"] = {"type": "double"}
+    shapes["DeleteVectorIndexAction"] = {
+        "type": "structure",
+        "required": ["IndexName"],
+        "members": {"IndexName": {"shape": "IndexName"}},
+    }
+    shapes["VectorIndexUpdate"] = {
+        "type": "structure",
+        "members": {
+            "Create": {"shape": "VectorIndex"},
+            "Delete": {"shape": "DeleteVectorIndexAction"},
+        },
+    }
+    shapes["VectorIndexUpdateList"] = {
+        "type": "list",
+        "member": {"shape": "VectorIndexUpdate"},
+    }
+    # the search vector is a DynamoDB list of Numbers (AttributeValue elements)
+    shapes["SearchVectorList"] = {
+        "type": "list",
+        "member": {"shape": "AttributeValue"},
+        "max": 4096,
+        "min": 1,
+    }
+    shapes[_TOP_K] = {"type": "integer", "box": True, "min": 1}
+    shapes["ScoreNumber"] = {"type": "double"}
     shapes["SearchVectorsInput"] = {
         "type": "structure",
-        "required": ["TableName", "IndexName", "SearchVector"],
+        "required": ["TableName", "IndexName", "SearchVector", "TopK"],
         "members": {
             "TableName": {"shape": "TableArn"},
             "IndexName": {"shape": "IndexName"},
-            "SearchVector": {"shape": "SearchVector"},
+            "SearchVector": {"shape": "SearchVectorList"},
             "TopK": {"shape": _TOP_K},
+            "ProjectionExpression": {"shape": "ProjectionExpression"},
             "ReturnConsumedCapacity": {"shape": "ReturnConsumedCapacity"},
         },
     }
-    shapes["SearchResult"] = {
+    shapes["SearchResultItem"] = {
         "type": "structure",
         "members": {
             "Item": {"shape": "AttributeMap"},
-            "Score": {"shape": "VectorScore"},
+            "Score": {"shape": "ScoreNumber"},
         },
     }
-    shapes["SearchResultList"] = {"type": "list", "member": {"shape": "SearchResult"}}
+    shapes["SearchResultList"] = {
+        "type": "list",
+        "member": {"shape": "SearchResultItem"},
+    }
     shapes["SearchVectorsOutput"] = {
         "type": "structure",
         "members": {"SearchResults": {"shape": "SearchResultList"}},
     }
 
-    # graft VectorIndexes onto create/update/describe
     shapes["CreateTableInput"]["members"]["VectorIndexes"] = {
         "shape": "VectorIndexList"
     }
-    shapes["UpdateTableInput"]["members"]["VectorIndexes"] = {
-        "shape": "VectorIndexList"
+    shapes["UpdateTableInput"]["members"]["VectorIndexUpdates"] = {
+        "shape": "VectorIndexUpdateList"
     }
     shapes["TableDescription"]["members"]["VectorIndexes"] = {
         "shape": "VectorIndexList"
@@ -106,7 +142,7 @@ def enable_dynamodb_vectors() -> str:
     creating the boto3 client that will target the oblako vector proxy.
     """
     global _APPLIED, _DATA_DIR
-    if _APPLIED and _DATA_DIR:
+    if _APPLIED:
         return _DATA_DIR
 
     import boto3
@@ -115,6 +151,9 @@ def enable_dynamodb_vectors() -> str:
     session = botocore.session.get_session()
     loader = session.get_component("data_loader")
     model = loader.load_service_model("dynamodb", "service-2")
+    if "SearchVectors" in model.get("operations", {}):
+        _APPLIED = True  # a current botocore already ships the real model
+        return None
     augmented = _augment(model)
 
     data_dir = tempfile.mkdtemp(prefix="oblako-ddb-vectors-")

@@ -56,6 +56,11 @@ def _vec(values):
     return {"L": [{"N": str(v)} for v in values]}
 
 
+def _query(values):
+    # SearchVector elements are AttributeValues (a DynamoDB list of Numbers)
+    return [{"N": str(v)} for v in values]
+
+
 def test_search_vectors_returns_nearest_first(ddb):
     table = "vec-items"
     try:
@@ -83,7 +88,7 @@ def test_search_vectors_returns_nearest_first(ddb):
         resp = ddb.search_vectors(
             TableName=table,
             IndexName="by-embedding",
-            SearchVector=[1.0, 0.0, 0.0, 0.0],
+            SearchVector=_query([1.0, 0.0, 0.0, 0.0]),
             TopK=2,
         )
         results = resp["SearchResults"]
@@ -126,7 +131,7 @@ def test_euclidean_distance_orders_by_closeness(ddb):
                 TableName=table, Item={"id": {"S": rid}, "v": _vec(vector)}
             )
         resp = ddb.search_vectors(
-            TableName=table, IndexName="euclid", SearchVector=[0.1, 0.1], TopK=2
+            TableName=table, IndexName="euclid", SearchVector=_query([0.1, 0.1]), TopK=2
         )
         ids = [r["Item"]["id"]["S"] for r in resp["SearchResults"]]
         assert ids == ["near", "far"]  # euclidean: smaller distance first
