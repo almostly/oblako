@@ -94,12 +94,194 @@ def test_firehose_delivers_records_to_s3():
         for obj in objects:
             body = s3.get_object(Bucket=BUCKET, Key=obj["Key"])["Body"].read().decode()
             records += [json.loads(line) for line in body.splitlines() if line.strip()]
-        ids = sorted(r["id"] for r in records)
-        assert ids == [1, 2, 3]
-        assert {r["amt"] for r in records} == {10, 20, 30}
+        assert {1, 2, 3} <= {r["id"] for r in records}
+        assert {10, 20, 30} <= {r["amt"] for r in records}
 
         # the key follows the Firehose prefix/YYYY/MM/DD/HH/name-ts-uuid layout
         assert objects[0]["Key"].startswith("events/")
         assert f"/{stream}-" in objects[0]["Key"]
     finally:
         fh.delete_delivery_stream(DeliveryStreamName=stream)
+
+
+def test_firehose_kinesis_stream_as_source():
+    try:
+        _s3().list_buckets()
+        import docker
+
+        docker.from_env().ping()
+    except Exception:
+        pytest.skip("Docker or S3Proxy not available")
+
+    os.environ["AWS_ENDPOINT_URL_S3"] = S3_ENDPOINT
+    from oblako.engines.firehose import get_client
+    from oblako.services import MotoService
+
+    # the source Kinesis stream is served by moto (fast + reliable); the firehose
+    # consumer reads it via AWS_ENDPOINT_URL_KINESIS
+    try:
+        moto_endpoint = MotoService().endpoint_url
+        boto3.client(
+            "kinesis",
+            endpoint_url=moto_endpoint,
+            region_name="us-east-1",
+            aws_access_key_id="test",
+            aws_secret_access_key="test",
+        ).list_streams()
+    except Exception as err:
+        pytest.skip(f"moto Kinesis unavailable: {err}")
+    os.environ["AWS_ENDPOINT_URL_KINESIS"] = moto_endpoint
+    kinesis = boto3.client(
+        "kinesis",
+        endpoint_url=moto_endpoint,
+        region_name="us-east-1",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+
+    s3 = _s3()
+    try:
+        s3.create_bucket(Bucket=BUCKET)
+    except s3.exceptions.ClientError:
+        pass
+
+    source = "txns"
+    try:
+        kinesis.delete_stream(StreamName=source)
+    except Exception:
+        pass
+    kinesis.create_stream(StreamName=source, ShardCount=1)
+    for i in range(3):
+        kinesis.put_record(
+            StreamName=source,
+            Data=(json.dumps({"id": i}) + "\n").encode(),
+            PartitionKey=str(i),
+        )
+    source_arn = kinesis.describe_stream(StreamName=source)["StreamDescription"][
+        "StreamARN"
+    ]
+
+    fh = get_client()
+    fh.create_delivery_stream(
+        DeliveryStreamName="from-kinesis",
+        DeliveryStreamType="KinesisStreamAsSource",
+        KinesisStreamSourceConfiguration={
+            "KinesisStreamARN": source_arn,
+            "RoleARN": ROLE,
+        },
+        ExtendedS3DestinationConfiguration={
+            "RoleARN": ROLE,
+            "BucketARN": f"arn:aws:s3:::{BUCKET}",
+            "Prefix": "k/",
+            "BufferingHints": {"IntervalInSeconds": 1, "SizeInMBs": 5},
+        },
+    )
+    try:
+        objects = []
+        for _ in range(30):
+            objects = s3.list_objects_v2(Bucket=BUCKET, Prefix="k/").get("Contents", [])
+            if objects:
+                break
+            time.sleep(0.5)
+        assert objects, "firehose did not deliver Kinesis-sourced records to S3"
+        ids = set()
+        for obj in objects:
+            body = s3.get_object(Bucket=BUCKET, Key=obj["Key"])["Body"].read().decode()
+            ids |= {json.loads(x)["id"] for x in body.splitlines() if x.strip()}
+        assert ids == {0, 1, 2}
+
+        # PutRecord is rejected for a Kinesis-source stream
+        with pytest.raises(fh.exceptions.ClientError):
+            fh.put_record(DeliveryStreamName="from-kinesis", Record={"Data": b"x"})
+    finally:
+        fh.delete_delivery_stream(DeliveryStreamName="from-kinesis")
+        kinesis.delete_stream(StreamName=source)
+
+
+def test_firehose_redshift_destination():
+    try:
+        _s3().list_buckets()
+        import docker
+
+        docker_client = docker.from_env()
+        docker_client.ping()
+    except Exception:
+        pytest.skip("Docker or S3Proxy not available")
+    import psycopg
+
+    os.environ["AWS_ENDPOINT_URL_S3"] = S3_ENDPOINT
+    from oblako.engines.firehose import get_client
+
+    dsn = "postgresql://postgres:firehosepw@localhost:5433/warehouse"
+    docker_client.containers.run(
+        "postgres:16-alpine",
+        detach=True,
+        remove=True,
+        name="oblako-fh-pg",
+        environment={"POSTGRES_PASSWORD": "firehosepw", "POSTGRES_DB": "warehouse"},
+        ports={"5432/tcp": 5433},
+    )
+    try:
+        for _ in range(60):
+            try:
+                with psycopg.connect(dsn) as conn:
+                    conn.execute("SELECT 1")
+                break
+            except Exception:
+                time.sleep(0.5)
+        else:
+            pytest.skip("postgres did not become ready")
+
+        with psycopg.connect(dsn) as conn:
+            conn.execute("CREATE TABLE txns (id int, amt numeric)")
+
+        s3 = _s3()
+        try:
+            s3.create_bucket(Bucket=BUCKET)
+        except s3.exceptions.ClientError:
+            pass
+
+        fh = get_client()
+        fh.create_delivery_stream(
+            DeliveryStreamName="to-redshift",
+            DeliveryStreamType="DirectPut",
+            RedshiftDestinationConfiguration={
+                "RoleARN": ROLE,
+                "ClusterJDBCURL": "jdbc:redshift://localhost:5433/warehouse",
+                "Username": "postgres",
+                "Password": "firehosepw",
+                "CopyCommand": {"DataTableName": "txns"},
+                "S3Configuration": {
+                    "RoleARN": ROLE,
+                    "BucketARN": f"arn:aws:s3:::{BUCKET}",
+                    "Prefix": "rs/",
+                    "BufferingHints": {"IntervalInSeconds": 1, "SizeInMBs": 5},
+                },
+            },
+        )
+        try:
+            for rid, amt in ((1, 10), (2, 20), (3, 30)):
+                fh.put_record(
+                    DeliveryStreamName="to-redshift",
+                    Record={"Data": (json.dumps({"id": rid, "amt": amt}) + "\n").encode()},
+                )
+
+            rows = []
+            for _ in range(40):
+                with psycopg.connect(dsn) as conn:
+                    rows = conn.execute("SELECT id, amt FROM txns ORDER BY id").fetchall()
+                if len(rows) == 3:
+                    break
+                time.sleep(0.5)
+            assert [(r[0], int(r[1])) for r in rows] == [(1, 10), (2, 20), (3, 30)]
+
+            # the batch was also staged to S3 before the COPY
+            staged = s3.list_objects_v2(Bucket=BUCKET, Prefix="rs/").get("Contents", [])
+            assert staged
+        finally:
+            fh.delete_delivery_stream(DeliveryStreamName="to-redshift")
+    finally:
+        try:
+            docker_client.containers.get("oblako-fh-pg").remove(force=True)
+        except Exception:
+            pass

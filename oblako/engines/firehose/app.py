@@ -21,6 +21,11 @@ import os
 import threading
 import uuid
 
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import Response
+from starlette.routing import Route
+
 _TARGET_PREFIX = "Firehose_20150804"
 _JSON = "application/x-amz-json-1.1"
 _REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
@@ -64,25 +69,35 @@ class FirehoseExecutor:
         self._lock = threading.Lock()
 
     def create_delivery_stream(self, req: dict) -> str:
-        """Register a delivery stream and start its S3 delivery loop; return ARN."""
+        """Register a delivery stream and start its delivery loop; return ARN.
+
+        Destination is S3 (Extended/legacy) or Redshift (S3 staging + COPY);
+        source is DirectPut or a Kinesis stream (KinesisStreamAsSource).
+        """
         name = req["DeliveryStreamName"]
         arn = f"arn:aws:firehose:{_REGION}:{_ACCOUNT}:deliverystream/{name}"
-        s3_conf = req.get("ExtendedS3DestinationConfiguration") or req.get(
-            "S3DestinationConfiguration"
+        redshift_conf = req.get("RedshiftDestinationConfiguration")
+        s3_conf = (
+            redshift_conf["S3Configuration"]
+            if redshift_conf
+            else req.get("ExtendedS3DestinationConfiguration")
+            or req.get("S3DestinationConfiguration")
         )
         if not s3_conf:
             raise ValueError(
-                "only S3 destinations are supported "
-                "(ExtendedS3DestinationConfiguration or S3DestinationConfiguration)"
+                "only S3 and Redshift destinations are supported"
             )
         buffering = s3_conf.get("BufferingHints") or {}
         stream = {
             "name": name,
             "arn": arn,
             "type": req.get("DeliveryStreamType", "DirectPut"),
+            "destination": "redshift" if redshift_conf else "s3",
             "bucket": s3_conf["BucketARN"].split(":::")[-1],
             "prefix": s3_conf.get("Prefix", ""),
             "gzip": s3_conf.get("CompressionFormat", "UNCOMPRESSED") == "GZIP",
+            "redshift": redshift_conf,
+            "source": req.get("KinesisStreamSourceConfiguration"),
             "interval": int(buffering.get("IntervalInSeconds", 60)),
             "size_bytes": int(buffering.get("SizeInMBs", 5)) * 1024 * 1024,
             "buffer": [],
@@ -93,17 +108,48 @@ class FirehoseExecutor:
         with self._lock:
             self._streams[name] = stream
         threading.Thread(target=self._deliver_loop, args=(name,), daemon=True).start()
+        if stream["source"]:
+            threading.Thread(
+                target=self._consume_kinesis, args=(name,), daemon=True
+            ).start()
         return arn
 
     def _deliver_loop(self, name: str) -> None:
-        """Flush a stream's buffer to S3 on its buffering interval until deleted."""
+        """Flush a stream's buffer on its buffering interval until deleted."""
         stream = self._streams[name]
         while not stream["stop"].wait(timeout=min(stream["interval"], 5)):
             self._flush(stream)
         self._flush(stream)  # final drain on delete
 
+    def _consume_kinesis(self, name: str) -> None:
+        """Poll the source Kinesis stream and buffer its records (KinesisStreamAsSource)."""
+        stream = self._streams[name]
+        kinesis = _kinesis_client()
+        source_name = stream["source"]["KinesisStreamARN"].split("/")[-1]
+        shards = kinesis.describe_stream(StreamName=source_name)[
+            "StreamDescription"
+        ]["Shards"]
+        iterators = {
+            s["ShardId"]: kinesis.get_shard_iterator(
+                StreamName=source_name,
+                ShardId=s["ShardId"],
+                ShardIteratorType="TRIM_HORIZON",
+            )["ShardIterator"]
+            for s in shards
+        }
+        while not stream["stop"].wait(timeout=0.5):
+            for shard_id, iterator in list(iterators.items()):
+                try:
+                    resp = kinesis.get_records(ShardIterator=iterator, Limit=500)
+                except Exception:
+                    continue
+                for record in resp.get("Records", []):
+                    with stream["lock"]:
+                        stream["buffer"].append(record["Data"])
+                iterators[shard_id] = resp.get("NextShardIterator", iterator)
+
     def _flush(self, stream: dict) -> None:
-        """Stage the buffered records as one S3 object (Firehose key layout)."""
+        """Stage the buffered records to S3, and COPY into Redshift if configured."""
         with stream["lock"]:
             if not stream["buffer"]:
                 return
@@ -116,10 +162,16 @@ class FirehoseExecutor:
         )
         body = gzip.compress(payload) if stream["gzip"] else payload
         _s3_client().put_object(Bucket=stream["bucket"], Key=key, Body=body)
+        if stream["destination"] == "redshift":
+            _load_redshift(stream["redshift"], payload)
 
     def put_record(self, name: str, data: bytes) -> str:
         """Buffer one record; return its RecordId."""
         stream = self._require(name)
+        if stream["source"]:
+            raise ValueError(
+                "PutRecord is not supported for a KinesisStreamAsSource stream"
+            )
         record_id = uuid.uuid4().hex
         with stream["lock"]:
             stream["buffer"].append(data)
@@ -151,21 +203,35 @@ class FirehoseExecutor:
                 "Destinations": [
                     {
                         "DestinationId": "destinationId-000000000001",
-                        "ExtendedS3DestinationDescription": {
-                            "BucketARN": f"arn:aws:s3:::{stream['bucket']}",
-                            "Prefix": stream["prefix"],
-                            "CompressionFormat": (
-                                "GZIP" if stream["gzip"] else "UNCOMPRESSED"
-                            ),
-                            "BufferingHints": {
-                                "IntervalInSeconds": stream["interval"],
-                                "SizeInMBs": stream["size_bytes"] // (1024 * 1024),
-                            },
-                        },
+                        **self._destination_description(stream),
                     }
                 ],
             }
         }
+
+    @staticmethod
+    def _destination_description(stream: dict) -> dict:
+        """Build the destination-specific description block for describe."""
+        s3_desc = {
+            "BucketARN": f"arn:aws:s3:::{stream['bucket']}",
+            "Prefix": stream["prefix"],
+            "CompressionFormat": "GZIP" if stream["gzip"] else "UNCOMPRESSED",
+            "BufferingHints": {
+                "IntervalInSeconds": stream["interval"],
+                "SizeInMBs": stream["size_bytes"] // (1024 * 1024),
+            },
+        }
+        if stream["destination"] == "redshift":
+            redshift = stream["redshift"]
+            return {
+                "RedshiftDestinationDescription": {
+                    "ClusterJDBCURL": redshift.get("ClusterJDBCURL"),
+                    "CopyCommand": redshift.get("CopyCommand", {}),
+                    "Username": redshift.get("Username"),
+                    "S3DestinationDescription": s3_desc,
+                }
+            }
+        return {"ExtendedS3DestinationDescription": s3_desc}
 
     def list_delivery_streams(self) -> dict:
         """Return the delivery-stream names."""
@@ -197,11 +263,73 @@ def _decode(data) -> bytes:
     return base64.b64decode(data)
 
 
-# -- ASGI app ----------------------------------------------------------------
-from starlette.applications import Starlette  # noqa: E402
-from starlette.requests import Request  # noqa: E402
-from starlette.responses import Response  # noqa: E402
-from starlette.routing import Route  # noqa: E402
+def _kinesis_client():
+    """boto3 Kinesis client for the local Kinesis Data Streams (source), host-side."""
+    import boto3
+
+    endpoint = os.environ.get("AWS_ENDPOINT_URL_KINESIS") or "http://localhost:4567"
+    kwargs = {"endpoint_url": endpoint, "region_name": _REGION}
+    if not os.environ.get("AWS_ACCESS_KEY_ID"):
+        kwargs["aws_access_key_id"] = "oblako"
+        kwargs["aws_secret_access_key"] = "oblako"
+    return boto3.client("kinesis", **kwargs)
+
+
+def _jdbc_to_dsn(jdbc_url: str, username: str, password: str) -> str:
+    """Turn Firehose's ClusterJDBCURL into a psycopg2 DSN."""
+    hostport_db = jdbc_url.removeprefix("jdbc:redshift://")
+    hostport, _, database = hostport_db.partition("/")
+    return f"postgresql://{username}:{password}@{hostport}/{database}"
+
+
+def _iter_json_records(payload: bytes):
+    """Yield the JSON objects concatenated in a staged batch (with or without newlines)."""
+    decoder = json.JSONDecoder()
+    text = payload.decode()
+    pos = 0
+    while pos < len(text):
+        while pos < len(text) and text[pos].isspace():
+            pos += 1
+        if pos >= len(text):
+            break
+        record, pos = decoder.raw_decode(text, pos)
+        yield record
+
+
+def _load_redshift(conf: dict, payload: bytes) -> None:
+    """COPY one staged batch into a Redshift (Postgres) destination table.
+
+    Real Redshift COPYs staged JSON straight off S3 (``FORMAT AS JSON 'auto'``);
+    oblako's warehouse is Postgres, whose COPY has no JSON mode, so the batch is
+    reshaped to CSV against the table's column order (the same mapping semantics)
+    and loaded over ``COPY ... FROM STDIN`` - mirroring the book's firehose-local.
+    """
+    import csv
+    import io
+
+    import psycopg
+
+    dsn = _jdbc_to_dsn(conf["ClusterJDBCURL"], conf["Username"], conf["Password"])
+    table = conf["CopyCommand"]["DataTableName"]
+    with psycopg.connect(dsn) as conn:
+        columns = [
+            row[0]
+            for row in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = %s ORDER BY ordinal_position",
+                (table,),
+            ).fetchall()
+        ]
+        if not columns:
+            raise RuntimeError(f"destination table {table} does not exist")
+        rows = io.StringIO()
+        writer = csv.DictWriter(rows, fieldnames=columns, extrasaction="ignore")
+        for record in _iter_json_records(payload):
+            writer.writerow({c: record.get(c) for c in columns})
+        with conn.cursor() as cur, cur.copy(
+            f"COPY {table} FROM STDIN WITH (FORMAT csv)"
+        ) as copy:
+            copy.write(rows.getvalue())
 
 
 def _json_response(payload: dict, status: int = 200) -> Response:
@@ -249,7 +377,7 @@ class FirehoseApp:
                 f"delivery stream {err} not found",
                 status=400,
             )
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             return _error("InvalidArgumentException", str(err))
 
     def op_CreateDeliveryStream(self, req: dict) -> Response:
