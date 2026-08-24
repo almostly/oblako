@@ -46,6 +46,29 @@ def test_get_foundation_model_invalid(bedrock):
         bedrock.get_foundation_model(modelIdentifier="nope.not-a-model")
 
 
+def test_catalog_advertises_only_serveable_models():
+    # invariant: every advertised chat model routes through the OpenRouter backend
+    # (the Ollama backend serves them all locally anyway). Keeps the advertised
+    # catalog honest and in sync with OPENROUTER_MODEL_MAP.
+    from oblako.engines.bedrock.foundation_models import FOUNDATION_MODELS
+    from oblako.engines.bedrock.models import resolve_openrouter
+
+    for model_id, detail in FOUNDATION_MODELS.items():
+        if "EMBEDDING" in detail["outputModalities"]:
+            continue  # embeddings have no OpenRouter chat equivalent
+        resolve_openrouter(model_id)  # raises if not serveable
+
+    # the modern families the extract advertises are now present
+    ids = set(FOUNDATION_MODELS)
+    for expected in (
+        "amazon.nova-lite-v1:0",
+        "meta.llama3-2-90b-instruct-v1:0",
+        "mistral.mistral-large-2402-v1:0",
+        "ai21.jamba-1-5-large-v1:0",
+    ):
+        assert expected in ids
+
+
 def test_batch_model_invocation_job(bedrock):
     if not OllamaClient().is_available() or not OllamaClient().list_models():
         pytest.skip("Bedrock engine (Ollama) not available with a model")

@@ -42,13 +42,23 @@ def _model(
     }
 
 
-# Curated catalog (modelId -> details, minus the modelArn which is added per-region).
+_TEXT_IMAGE = ["TEXT", "IMAGE"]
+
+# Catalog (modelId -> details, minus the modelArn added per-region). Curated to
+# the models oblako can actually serve: every id here routes through a backend
+# (the OpenRouter backend maps each to a real model; the Ollama backend serves
+# them all locally). Kept in sync with OPENROUTER_MODEL_MAP in models.py.
 FOUNDATION_MODELS: dict[str, dict] = {
     m["modelId"]: m
     for m in [
-        # Amazon Titan
+        # Amazon Titan + Nova
+        _model("amazon.titan-text-lite-v1", "Titan Text G1 - Lite", "Amazon"),
         _model("amazon.titan-text-express-v1", "Titan Text G1 - Express", "Amazon"),
         _model("amazon.titan-text-premier-v1:0", "Titan Text G1 - Premier", "Amazon"),
+        _model("amazon.nova-micro-v1:0", "Nova Micro", "Amazon"),
+        _model("amazon.nova-lite-v1:0", "Nova Lite", "Amazon", inp=_TEXT_IMAGE),
+        _model("amazon.nova-pro-v1:0", "Nova Pro", "Amazon", inp=_TEXT_IMAGE),
+        _model("amazon.nova-premier-v1:0", "Nova Premier", "Amazon", inp=_TEXT_IMAGE),
         _model(
             "amazon.titan-embed-text-v1",
             "Titan Embeddings G1 - Text",
@@ -64,29 +74,38 @@ FOUNDATION_MODELS: dict[str, dict] = {
             streaming=False,
         ),
         # Anthropic Claude
+        _model("anthropic.claude-instant-v1", "Claude Instant", "Anthropic"),
+        _model("anthropic.claude-v2", "Claude", "Anthropic"),
+        _model("anthropic.claude-v2:1", "Claude", "Anthropic"),
         _model(
             "anthropic.claude-3-haiku-20240307-v1:0",
             "Claude 3 Haiku",
             "Anthropic",
-            inp=["TEXT", "IMAGE"],
+            inp=_TEXT_IMAGE,
         ),
         _model(
             "anthropic.claude-3-sonnet-20240229-v1:0",
             "Claude 3 Sonnet",
             "Anthropic",
-            inp=["TEXT", "IMAGE"],
+            inp=_TEXT_IMAGE,
         ),
         _model(
             "anthropic.claude-3-opus-20240229-v1:0",
             "Claude 3 Opus",
             "Anthropic",
-            inp=["TEXT", "IMAGE"],
+            inp=_TEXT_IMAGE,
+        ),
+        _model(
+            "anthropic.claude-3-5-sonnet-20240620-v1:0",
+            "Claude 3.5 Sonnet",
+            "Anthropic",
+            inp=_TEXT_IMAGE,
         ),
         _model(
             "anthropic.claude-3-5-sonnet-20241022-v2:0",
             "Claude 3.5 Sonnet v2",
             "Anthropic",
-            inp=["TEXT", "IMAGE"],
+            inp=_TEXT_IMAGE,
         ),
         _model(
             "anthropic.claude-3-5-haiku-20241022-v1:0", "Claude 3.5 Haiku", "Anthropic"
@@ -94,12 +113,33 @@ FOUNDATION_MODELS: dict[str, dict] = {
         # Meta Llama
         _model("meta.llama3-8b-instruct-v1:0", "Llama 3 8B Instruct", "Meta"),
         _model("meta.llama3-70b-instruct-v1:0", "Llama 3 70B Instruct", "Meta"),
+        _model("meta.llama3-1-8b-instruct-v1:0", "Llama 3.1 8B Instruct", "Meta"),
+        _model("meta.llama3-1-70b-instruct-v1:0", "Llama 3.1 70B Instruct", "Meta"),
+        _model("meta.llama3-2-1b-instruct-v1:0", "Llama 3.2 1B Instruct", "Meta"),
+        _model("meta.llama3-2-3b-instruct-v1:0", "Llama 3.2 3B Instruct", "Meta"),
+        _model(
+            "meta.llama3-2-11b-instruct-v1:0",
+            "Llama 3.2 11B Instruct",
+            "Meta",
+            inp=_TEXT_IMAGE,
+        ),
+        _model(
+            "meta.llama3-2-90b-instruct-v1:0",
+            "Llama 3.2 90B Instruct",
+            "Meta",
+            inp=_TEXT_IMAGE,
+        ),
         # Mistral
         _model("mistral.mistral-7b-instruct-v0:2", "Mistral 7B Instruct", "Mistral AI"),
         _model(
             "mistral.mixtral-8x7b-instruct-v0:1", "Mixtral 8x7B Instruct", "Mistral AI"
         ),
+        _model("mistral.mistral-small-2402-v1:0", "Mistral Small", "Mistral AI"),
+        _model("mistral.mistral-large-2402-v1:0", "Mistral Large", "Mistral AI"),
         # Cohere
+        _model("cohere.command-text-v14", "Command", "Cohere"),
+        _model("cohere.command-light-text-v14", "Command Light", "Cohere"),
+        _model("cohere.command-r-v1:0", "Command R", "Cohere"),
         _model("cohere.command-r-plus-v1:0", "Command R+", "Cohere"),
         _model(
             "cohere.embed-english-v3",
@@ -108,6 +148,17 @@ FOUNDATION_MODELS: dict[str, dict] = {
             embedding=True,
             streaming=False,
         ),
+        _model(
+            "cohere.embed-multilingual-v3",
+            "Embed Multilingual",
+            "Cohere",
+            embedding=True,
+            streaming=False,
+        ),
+        # AI21 Jamba
+        _model("ai21.jamba-instruct-v1:0", "Jamba-Instruct", "AI21 Labs"),
+        _model("ai21.jamba-1-5-mini-v1:0", "Jamba 1.5 Mini", "AI21 Labs"),
+        _model("ai21.jamba-1-5-large-v1:0", "Jamba 1.5 Large", "AI21 Labs"),
     ]
 }
 
