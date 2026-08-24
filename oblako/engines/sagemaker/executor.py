@@ -96,6 +96,8 @@ class SageMakerExecutor:
         self._feature_groups: dict[str, dict] = {}
         self._online: dict[str, dict[str, dict]] = {}
         self._monitoring_schedules: dict[str, dict] = {}
+        self._package_groups: dict[str, dict] = {}
+        self._packages: dict[str, dict] = {}  # keyed by ModelPackageArn
         self._stopping: set[str] = set()
         self._lock = threading.Lock()
 
@@ -1524,6 +1526,141 @@ class SageMakerExecutor:
         """Remove a monitoring schedule (idempotent)."""
         with self._lock:
             self._monitoring_schedules.pop(name, None)
+
+    # -- Model Registry: package groups + versioned packages -----------------
+    def create_model_package_group(self, req: dict) -> str:
+        """Register a model package group; return its ARN."""
+        name = req["ModelPackageGroupName"]
+        arn = f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:model-package-group/{name}"
+        with self._lock:
+            self._package_groups[name] = {
+                "ModelPackageGroupName": name,
+                "ModelPackageGroupArn": arn,
+                "ModelPackageGroupDescription": req.get("ModelPackageGroupDescription"),
+                "ModelPackageGroupStatus": "Completed",
+                "CreationTime": _now(),
+            }
+        return arn
+
+    def describe_model_package_group(self, name: str) -> dict | None:
+        """Return a model package group record, or None if unknown."""
+        with self._lock:
+            group = self._package_groups.get(name)
+            return _public(group) if group else None
+
+    def list_model_package_groups(self) -> list[dict]:
+        """Return a summary list of all model package groups."""
+        with self._lock:
+            return [
+                {
+                    "ModelPackageGroupName": g["ModelPackageGroupName"],
+                    "ModelPackageGroupArn": g["ModelPackageGroupArn"],
+                    "ModelPackageGroupStatus": g["ModelPackageGroupStatus"],
+                    "CreationTime": g["CreationTime"],
+                }
+                for g in self._package_groups.values()
+            ]
+
+    def delete_model_package_group(self, name: str) -> None:
+        """Remove a model package group (idempotent)."""
+        with self._lock:
+            self._package_groups.pop(name, None)
+
+    def create_model_package(self, req: dict) -> str:
+        """Register a model package (a versioned entry in a group); return its ARN."""
+        group = req.get("ModelPackageGroupName")
+        with self._lock:
+            if group:  # versioned package: auto-increment the group's version
+                version = 1 + sum(
+                    1
+                    for p in self._packages.values()
+                    if p.get("ModelPackageGroupName") == group
+                )
+                arn = (
+                    f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}"
+                    f":model-package/{group}/{version}"
+                )
+                name = group
+            else:  # unversioned package
+                version = None
+                name = req["ModelPackageName"]
+                arn = f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:model-package/{name}"
+            self._packages[arn] = {
+                "ModelPackageName": name,
+                "ModelPackageArn": arn,
+                "ModelPackageGroupName": group,
+                "ModelPackageVersion": version,
+                "ModelPackageDescription": req.get("ModelPackageDescription"),
+                "ModelPackageStatus": "Completed",
+                "ModelApprovalStatus": req.get(
+                    "ModelApprovalStatus",
+                    "PendingManualApproval" if group else "Approved",
+                ),
+                "InferenceSpecification": req.get("InferenceSpecification", {}),
+                "SourceAlgorithmSpecification": req.get(
+                    "SourceAlgorithmSpecification", {}
+                ),
+                "CreationTime": _now(),
+            }
+        return arn
+
+    def _find_package(self, identifier: str) -> dict | None:
+        """Resolve a package by ARN or (unversioned) name."""
+        pkg = self._packages.get(identifier)
+        if pkg:
+            return pkg
+        return next(
+            (
+                p
+                for p in self._packages.values()
+                if p["ModelPackageName"] == identifier
+                and p["ModelPackageVersion"] is None
+            ),
+            None,
+        )
+
+    def describe_model_package(self, identifier: str) -> dict | None:
+        """Return a model package record (by ARN or name), or None if unknown."""
+        with self._lock:
+            pkg = self._find_package(identifier)
+            return _public(pkg) if pkg else None
+
+    def update_model_package(self, req: dict) -> str | None:
+        """Update a package's approval status; return its ARN, or None if unknown."""
+        with self._lock:
+            pkg = self._find_package(req["ModelPackageArn"])
+            if pkg is None:
+                return None
+            if req.get("ModelApprovalStatus"):
+                pkg["ModelApprovalStatus"] = req["ModelApprovalStatus"]
+            if req.get("ApprovalDescription") is not None:
+                pkg["ApprovalDescription"] = req["ApprovalDescription"]
+            pkg["LastModifiedTime"] = _now()
+            return pkg["ModelPackageArn"]
+
+    def list_model_packages(self, group: str | None = None) -> list[dict]:
+        """Return a summary list of model packages, optionally filtered by group."""
+        with self._lock:
+            return [
+                {
+                    "ModelPackageName": p["ModelPackageName"],
+                    "ModelPackageGroupName": p["ModelPackageGroupName"],
+                    "ModelPackageVersion": p["ModelPackageVersion"],
+                    "ModelPackageArn": p["ModelPackageArn"],
+                    "ModelPackageStatus": p["ModelPackageStatus"],
+                    "ModelApprovalStatus": p["ModelApprovalStatus"],
+                    "CreationTime": p["CreationTime"],
+                }
+                for p in self._packages.values()
+                if group is None or p["ModelPackageGroupName"] == group
+            ]
+
+    def delete_model_package(self, identifier: str) -> None:
+        """Remove a model package (by ARN or name; idempotent)."""
+        with self._lock:
+            pkg = self._find_package(identifier)
+            if pkg:
+                self._packages.pop(pkg["ModelPackageArn"], None)
 
 
 def _offline_append(name: str, meta: dict, values: dict, offline_uri: str) -> None:

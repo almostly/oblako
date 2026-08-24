@@ -426,6 +426,73 @@ class SageMakerApp:
         )
         return _json_response({})
 
+    def op_CreateModelPackageGroup(self, req: dict) -> Response:
+        """Register a model package group (Model Registry)."""
+        if not req.get("ModelPackageGroupName"):
+            return _error("ValidationException", "ModelPackageGroupName is required")
+        return _json_response(
+            {"ModelPackageGroupArn": self.executor.create_model_package_group(req)}
+        )
+
+    def op_DescribeModelPackageGroup(self, req: dict) -> Response:
+        """Return a model package group record."""
+        group = self.executor.describe_model_package_group(
+            _require(req, "ModelPackageGroupName")
+        )
+        if group is None:
+            raise _NotFound(
+                f"ModelPackageGroup {req.get('ModelPackageGroupName')} not found"
+            )
+        return _json_response(group)
+
+    def op_ListModelPackageGroups(self, req: dict) -> Response:
+        """Return a summary list of all model package groups."""
+        return _json_response(
+            {"ModelPackageGroupSummaryList": self.executor.list_model_package_groups()}
+        )
+
+    def op_DeleteModelPackageGroup(self, req: dict) -> Response:
+        """Delete a model package group."""
+        self.executor.delete_model_package_group(
+            _require(req, "ModelPackageGroupName")
+        )
+        return _json_response({})
+
+    def op_CreateModelPackage(self, req: dict) -> Response:
+        """Register a model package (a versioned model in the registry)."""
+        return _json_response(
+            {"ModelPackageArn": self.executor.create_model_package(req)}
+        )
+
+    def op_DescribeModelPackage(self, req: dict) -> Response:
+        """Return a model package record (by name or ARN)."""
+        pkg = self.executor.describe_model_package(_require(req, "ModelPackageName"))
+        if pkg is None:
+            raise _NotFound(f"ModelPackage {req.get('ModelPackageName')} not found")
+        return _json_response(pkg)
+
+    def op_UpdateModelPackage(self, req: dict) -> Response:
+        """Update a model package's approval status."""
+        arn = self.executor.update_model_package(req)
+        if arn is None:
+            raise _NotFound(f"ModelPackage {req.get('ModelPackageArn')} not found")
+        return _json_response({"ModelPackageArn": arn})
+
+    def op_ListModelPackages(self, req: dict) -> Response:
+        """Return a summary list of model packages (optionally by group)."""
+        return _json_response(
+            {
+                "ModelPackageSummaryList": self.executor.list_model_packages(
+                    req.get("ModelPackageGroupName")
+                )
+            }
+        )
+
+    def op_DeleteModelPackage(self, req: dict) -> Response:
+        """Delete a model package."""
+        self.executor.delete_model_package(_require(req, "ModelPackageName"))
+        return _json_response({})
+
     async def feature_record(self, request: Request) -> Response:
         """featurestore-runtime Put/Get/DeleteRecord on /FeatureGroup/{name}."""
         from starlette.concurrency import run_in_threadpool
