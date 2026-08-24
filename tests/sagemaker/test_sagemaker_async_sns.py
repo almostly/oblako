@@ -27,7 +27,7 @@ def moto():
     svc = MotoService()
     try:
         svc.start()
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         pytest.skip(f"moto unavailable: {err}")
     endpoint = svc.endpoint_url
     os.environ["AWS_ENDPOINT_URL_SNS"] = endpoint

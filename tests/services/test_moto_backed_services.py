@@ -39,7 +39,7 @@ def moto_endpoint():
     svc = MotoService()
     try:
         svc.start()
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         pytest.skip(f"moto unavailable: {err}")
     return svc.endpoint_url
 

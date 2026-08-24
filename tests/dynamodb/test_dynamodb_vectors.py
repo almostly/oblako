@@ -25,7 +25,7 @@ def ddb():
 
     try:
         client = DynamoDBService().get_vector_client()
-    except Exception as err:  # noqa: BLE001
+    except Exception as err:
         pytest.skip(f"DynamoDB Local unavailable: {err}")
     return client
 

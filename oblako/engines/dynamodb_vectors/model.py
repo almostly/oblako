@@ -181,7 +181,7 @@ def _prepend_search_path(session, data_dir: str) -> None:
     inner = getattr(session, "_session", session)  # boto3.Session wraps botocore
     try:
         loader = inner.get_component("data_loader")
-    except Exception:  # noqa: BLE001 - no loader on this object
+    except Exception:  # no loader on this object
         return
     if data_dir not in loader.search_paths:
         loader.search_paths.insert(0, data_dir)

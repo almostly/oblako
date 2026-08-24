@@ -161,7 +161,7 @@ class SageMakerExecutor:
                 job["SecondaryStatus"] = "Completed"
                 job["ModelArtifacts"] = {"S3ModelArtifacts": artifact_uri}
                 job["TrainingEndTime"] = _now()
-        except Exception as err:  # noqa: BLE001 - surface as a Failed/Stopped job
+        except Exception as err:  # surface as a Failed/Stopped job
             with self._lock:
                 stopped = name in self._stopping
                 self._stopping.discard(name)
@@ -394,7 +394,7 @@ class SageMakerExecutor:
                     _variant=(variants[0].get("VariantName") if variants else None)
                     or "AllTraffic",
                 )
-        except Exception as err:  # noqa: BLE001 - surface as a Failed endpoint
+        except Exception as err:  # surface as a Failed endpoint
             with self._lock:
                 endpoint["EndpointStatus"] = "Failed"
                 endpoint["FailureReason"] = str(err).strip()
@@ -561,7 +561,7 @@ class SageMakerExecutor:
             out_bucket, out_key = _split_uri(context["output_location"])
             s3.put_object(Bucket=out_bucket, Key=out_key, Body=result)
             self._notify_async(context, "Completed")
-        except Exception as err:  # noqa: BLE001 - write a failure record like AWS
+        except Exception as err:  # write a failure record like AWS
             with contextlib.suppress(Exception):
                 fail_bucket, fail_key = _split_uri(context["failure_location"])
                 s3.put_object(
@@ -626,7 +626,7 @@ class SageMakerExecutor:
         import random
 
         pct = cfg.get("InitialSamplingPercentage", 100)
-        if pct < 100 and random.uniform(0, 100) > pct:  # noqa: S311 - not crypto
+        if pct < 100 and random.uniform(0, 100) > pct:  # not crypto
             return
         modes = {
             o.get("CaptureMode")
@@ -714,7 +714,7 @@ class SageMakerExecutor:
             with self._lock:
                 job["TransformJobStatus"] = "Completed"
                 job["TransformEndTime"] = _now()
-        except Exception as err:  # noqa: BLE001 - surface as a Failed/Stopped job
+        except Exception as err:  # surface as a Failed/Stopped job
             with self._lock:
                 stopped = name in self._stopping
                 self._stopping.discard(name)
@@ -810,7 +810,7 @@ class SageMakerExecutor:
             with self._lock:
                 job["ProcessingJobStatus"] = "Completed"
                 job["ProcessingEndTime"] = _now()
-        except Exception as err:  # noqa: BLE001 - surface as a Failed/Stopped job
+        except Exception as err:  # surface as a Failed/Stopped job
             with self._lock:
                 stopped = name in self._stopping
                 self._stopping.discard(name)
@@ -1023,7 +1023,7 @@ class SageMakerExecutor:
                                 "TunedHyperParameters": tuned,
                                 "FinalHyperParameterTuningJobObjectiveMetric": final,
                             }
-                except Exception as err:  # noqa: BLE001 - record the trial as failed
+                except Exception as err:  # record the trial as failed
                     with self._lock:
                         trial.update(
                             TrainingJobStatus="Failed",
@@ -1041,7 +1041,7 @@ class SageMakerExecutor:
                     "Stopped" if stopped else "Completed"
                 )
                 job["HyperParameterTuningEndTime"] = _now()
-        except Exception as err:  # noqa: BLE001 - surface as a Failed tuning job
+        except Exception as err:  # surface as a Failed tuning job
             with self._lock:
                 job["HyperParameterTuningJobStatus"] = "Failed"
                 job["FailureReason"] = str(err).strip()
@@ -1788,7 +1788,7 @@ def _make_search(ranges: dict, do_minimize: bool, strategy: str):
         return _RandomSearch(ranges)
     try:
         return _SyneTuneSearch(ranges, do_minimize)
-    except Exception:  # noqa: BLE001 - syne-tune not installed / unusable
+    except Exception:  # syne-tune not installed / unusable
         return _RandomSearch(ranges)
 
 
@@ -1863,7 +1863,7 @@ class _SyneTuneSearch:
         trial = Trial(
             trial_id=self._trial_id,
             config=config,
-            creation_time=datetime.datetime.now(),  # noqa: DTZ005 - local only
+            creation_time=datetime.datetime.now(),  # local only
         )
         self._scheduler.on_trial_complete(trial, {self._metric: value})
         self._trial_id += 1

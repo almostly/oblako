@@ -362,7 +362,7 @@ class SageMakerService:
         stack = _domain_stack(name)
         try:
             s = self._cfn().describe_stacks(StackName=stack)["Stacks"][0]
-        except Exception:  # noqa: BLE001
+        except Exception:
             return {"domain": name, "status": "NONE"}
         return {
             "domain": name,
@@ -415,5 +415,5 @@ class SageMakerService:
         """Tear down the domain's CloudFormation stack (S3 bucket + EC2 + EBS)."""
         try:
             self._cfn().delete_stack(StackName=_domain_stack(name))
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass

@@ -93,7 +93,7 @@ class BedrockRuntimeApp:
         body = await request.body()
         try:
             result = self.adapter.invoke_model(model_id, body)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return _error(str(e), "ModelErrorException")
         return Response(json.dumps(result), media_type="application/json")
 
@@ -113,7 +113,7 @@ class BedrockRuntimeApp:
                     yield encode_event(
                         "chunk", {"bytes": base64.b64encode(inner).decode()}
                     )
-            except Exception as err:  # noqa: BLE001 - surface as a stream error event
+            except Exception as err:  # surface as a stream error event
                 yield encode_event("internalServerException", {"message": str(err)})
 
         return StreamingResponse(
@@ -141,7 +141,7 @@ class BedrockRuntimeApp:
                     inference_config=req.get("inferenceConfig"),
                 ):
                     yield encode_event(event_type, payload)
-            except Exception as err:  # noqa: BLE001
+            except Exception as err:
                 yield encode_event("internalServerException", {"message": str(err)})
 
         return StreamingResponse(
@@ -162,7 +162,7 @@ class BedrockRuntimeApp:
                 system=req.get("system"),
                 inference_config=req.get("inferenceConfig"),
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return _error(str(e), "ModelErrorException")
         return JSONResponse(result)
 
@@ -188,7 +188,7 @@ class BedrockControlApp:
                         m["modelId"], m["providerName"], self.region
                     )
                 )
-        except Exception:  # noqa: BLE001 - engine may be down; static catalog still returned
+        except Exception:  # engine may be down; static catalog still returned
             pass
         return _json({"modelSummaries": summaries})
 

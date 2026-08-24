@@ -80,7 +80,7 @@ class SageMakerApp:
             return handler(req)
         except _NotFound as err:
             return _error("ResourceNotFound", str(err), status=400)
-        except Exception as err:  # noqa: BLE001 - surface as ValidationException
+        except Exception as err:  # surface as ValidationException
             return _error("ValidationException", str(err))
 
     def op_CreateTrainingJob(self, req: dict) -> Response:
@@ -527,7 +527,7 @@ class SageMakerApp:
                 status=404,
                 error_type="ResourceNotFound",
             )
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             return _rest_json(
                 {"Message": str(err)}, status=400, error_type="ValidationException"
             )
@@ -569,7 +569,7 @@ class SageMakerApp:
             )
         except KeyError as err:
             return _error("ValidationError", str(err), status=404)
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             return _error("ModelError", str(err))
         return Response(
             json.dumps({"InferenceId": iid}),
@@ -594,7 +594,7 @@ class SageMakerApp:
             )
         except KeyError as err:
             return _error("ValidationError", str(err), status=404)
-        except Exception as err:  # noqa: BLE001
+        except Exception as err:
             return _error("ModelError", str(err))
         return Response(result, media_type=content_type)
 
