@@ -35,6 +35,7 @@ DYNAMODB_VECTORS = 8007  # dynamodb vector-search proxy in front of DynamoDB Loc
 FIREHOSE = 8008  # kinesis Data Firehose (DirectPut -> S3), local delivery loop
 ATHENA = 8009  # athena boto3 API executed via the Trino engine, results to S3
 EVENTBRIDGE = 8010  # eventbridge proxy over moto that actually fires rule targets
+ECS_METADATA = 8011  # ECS task metadata endpoint (ECS_CONTAINER_METADATA_URI) for tasks
 
 # Engines / data plane
 OLLAMA = 11434  # Bedrock runtime is backed by Ollama
