@@ -8,6 +8,7 @@ import json
 import time
 
 from .backends import make_backend
+from .models import EMBEDDING_MODEL_MAP
 
 
 class BedrockAdapter:
@@ -25,10 +26,16 @@ class BedrockAdapter:
 
     # -- invoke_model (Anthropic Messages format) ---------------------------
     def invoke_model(self, model_id: str, body: bytes | str) -> dict:
-        """Invoke a model with an Anthropic Messages-format body and return the response dict."""
+        """Invoke a model with an Anthropic Messages-format body and return the response dict.
+
+        Embedding models (Titan / Cohere embed, or any ``inputText``/``texts``
+        body) return a real vector from the backend instead of a chat message.
+        """
         if isinstance(body, bytes):
             body = body.decode("utf-8")
         request = json.loads(body)
+        if self._is_embedding_request(model_id, request):
+            return self._invoke_embedding(model_id, request)
         messages = self._extract_messages(request)
         result = self.backend.chat(
             model_id,
@@ -38,6 +45,36 @@ class BedrockAdapter:
             top_p=request.get("top_p"),
         )
         return self._format_invoke_response(result, model_id)
+
+    # -- embeddings ---------------------------------------------------------
+    @staticmethod
+    def _is_embedding_request(model_id: str, request: dict) -> bool:
+        """True if this is an embedding invocation (by model id or body shape)."""
+        return (
+            "inputText" in request
+            or "texts" in request
+            or model_id in EMBEDDING_MODEL_MAP
+            or "embed" in model_id.lower()
+        )
+
+    def _invoke_embedding(self, model_id: str, request: dict) -> dict:
+        """Embed the input text and return the model family's response shape."""
+        texts = request.get("texts")
+        text = " ".join(texts) if isinstance(texts, list) else request.get("inputText", "")
+        result = self.backend.embed(model_id, text)
+        embedding = result["embedding"]
+        if model_id.startswith("cohere."):
+            return {
+                "embeddings": [embedding],
+                "id": f"embed_{int(time.time())}",
+                "texts": texts or [text],
+                "response_type": "embeddings_floats",
+            }
+        # Amazon Titan (and default) embedding response shape
+        return {
+            "embedding": embedding,
+            "inputTextTokenCount": result.get("input_tokens", 0),
+        }
 
     def _extract_messages(self, request: dict) -> list[dict]:
         """Extract messages from Bedrock invoke_model request format."""

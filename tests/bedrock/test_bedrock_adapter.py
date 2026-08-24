@@ -29,6 +29,10 @@ class FakeBackend:
             "output_tokens": 5,
         }
 
+    def embed(self, model_id, text):
+        self.calls.append({"embed_model": model_id, "text": text})
+        return {"embedding": [0.1, 0.2, 0.3], "input_tokens": 7}
+
     def list_models(self):
         return [{"modelId": "qwen2.5:0.5b", "providerName": "ollama"}]
 
@@ -54,6 +58,32 @@ def test_invoke_model():
     assert result["usage"]["input_tokens"] == 10
     assert result["usage"]["output_tokens"] == 5
     assert result["stop_reason"] == "end_turn"
+
+
+def test_invoke_model_titan_embedding():
+    adapter = _make_adapter()
+    body = json.dumps({"inputText": "embed me"})
+    result = adapter.invoke_model("amazon.titan-embed-text-v1", body)
+    assert result["embedding"] == [0.1, 0.2, 0.3]  # Titan response shape
+    assert result["inputTextTokenCount"] == 7
+    assert adapter.backend.calls[0]["text"] == "embed me"
+
+
+def test_invoke_model_cohere_embedding():
+    adapter = _make_adapter()
+    body = json.dumps({"texts": ["a", "b"], "input_type": "search_document"})
+    result = adapter.invoke_model("cohere.embed-english-v3", body)
+    assert result["embeddings"] == [[0.1, 0.2, 0.3]]  # Cohere response shape
+    assert result["response_type"] == "embeddings_floats"
+    assert adapter.backend.calls[0]["text"] == "a b"
+
+
+def test_invoke_model_ollama_prefixed_embedding():
+    # a raw embed model via the ollama. passthrough (not in the catalog) is
+    # still detected as an embedding by its body / name
+    adapter = _make_adapter()
+    result = adapter.invoke_model("ollama.mxbai-embed-large", json.dumps({"inputText": "x"}))
+    assert result["embedding"] == [0.1, 0.2, 0.3]
 
 
 def test_invoke_model_with_system():

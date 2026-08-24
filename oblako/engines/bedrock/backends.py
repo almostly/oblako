@@ -48,6 +48,15 @@ class OllamaBackend:
             "output_tokens": result.get("eval_count", 0),
         }
 
+    def embed(self, model_id, text: str) -> dict:
+        """Return ``{"embedding": [...], "input_tokens": int}`` from Ollama."""
+        result = self.client.embed(resolve_model(model_id), text)
+        embedding = result.get("embedding", [])
+        return {
+            "embedding": embedding,
+            "input_tokens": result.get("prompt_eval_count") or len(text.split()),
+        }
+
     def list_models(self) -> list[dict]:
         """Return a list of locally available Ollama models as modelId/providerName dicts."""
         return [
@@ -101,6 +110,13 @@ class OpenRouterBackend:
             "input_tokens": usage.get("prompt_tokens", 0),
             "output_tokens": usage.get("completion_tokens", 0),
         }
+
+    def embed(self, model_id, text: str) -> dict:
+        """Embeddings aren't served via OpenRouter; use the Ollama backend."""
+        raise RuntimeError(
+            "the OpenRouter backend does not serve embeddings; use the Ollama "
+            "backend (unset OBLAKO_BEDROCK_BACKEND) for invoke_model on embed models"
+        )
 
     def list_models(self) -> list[dict]:
         """Return the configured OpenRouter model map as modelId/providerName dicts."""

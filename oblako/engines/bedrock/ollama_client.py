@@ -30,6 +30,16 @@ class OllamaClient:
         resp.raise_for_status()
         return resp.json()
 
+    def embed(self, model: str, text: str) -> dict:
+        """Return an embedding for ``text`` from an Ollama embedding model."""
+        resp = httpx.post(
+            f"{self.base_url}/api/embeddings",
+            json={"model": model, "prompt": text},
+            timeout=120.0,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     def list_models(self) -> list[dict]:
         """List locally available models."""
         resp = httpx.get(f"{self.base_url}/api/tags", timeout=10.0)
