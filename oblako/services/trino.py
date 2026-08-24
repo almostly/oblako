@@ -65,21 +65,38 @@ class TrinoService(Service):
         """Trino HTTP endpoint (clients submit SQL via /v1/statement)."""
         return f"http://localhost:{self.host_port}"
 
-    def query(self, sql: str, *, timeout: float = 60.0) -> dict:
-        """Run a SQL query through Trino's REST API. Returns ``{columns, rows}`` or ``{error}``."""
+    def query(
+        self,
+        sql: str,
+        *,
+        catalog: str | None = None,
+        schema: str | None = None,
+        timeout: float = 60.0,
+    ) -> dict:
+        """Run SQL through Trino's REST API. Returns ``{columns, types, rows}`` or ``{error}``.
+
+        ``catalog``/``schema`` set the Trino session defaults (so unqualified table
+        names resolve), the way Athena's QueryExecutionContext does.
+        """
         base = self.endpoint_url
         headers = {"X-Trino-User": "oblako", "Content-Type": "text/plain"}
+        if catalog:
+            headers["X-Trino-Catalog"] = catalog
+        if schema:
+            headers["X-Trino-Schema"] = schema
         result = httpx.post(
             f"{base}/v1/statement", content=sql, headers=headers, timeout=timeout
         ).json()
         rows: list = []
         columns: list[str] | None = None
+        types: list[str] = []
         deadline = time.time() + timeout
         while True:
             if "error" in result:
                 return {"error": result["error"]}
             if columns is None and result.get("columns"):
                 columns = [c["name"] for c in result["columns"]]
+                types = [c["type"] for c in result["columns"]]
             rows.extend(result.get("data") or [])
             next_uri = result.get("nextUri")
             if not next_uri:
@@ -87,7 +104,7 @@ class TrinoService(Service):
             if time.time() > deadline:
                 return {"error": {"message": "query timeout"}}
             result = httpx.get(next_uri, headers=headers, timeout=timeout).json()
-        return {"columns": columns or [], "rows": rows}
+        return {"columns": columns or [], "types": types, "rows": rows}
 
     def _health_check(self) -> bool:
         try:
