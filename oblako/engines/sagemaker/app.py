@@ -476,6 +476,44 @@ class SageMakerApp:
         )
         return _rest_json(result)
 
+    async def invoke_async(self, request: Request) -> Response:
+        """sagemaker-runtime InvokeEndpointAsync: queue an S3-in/S3-out inference."""
+        from starlette.concurrency import run_in_threadpool
+
+        name = request.path_params["name"]
+        input_location = request.headers.get("X-Amzn-SageMaker-InputLocation")
+        if not input_location:
+            return _error(
+                "ValidationError",
+                "X-Amzn-SageMaker-InputLocation header is required",
+                status=400,
+            )
+        content_type = request.headers.get(
+            "X-Amzn-SageMaker-Content-Type", "application/octet-stream"
+        )
+        inference_id = request.headers.get("X-Amzn-SageMaker-Inference-Id")
+        try:
+            iid, output_location, failure_location = await run_in_threadpool(
+                self.executor.invoke_endpoint_async,
+                name,
+                input_location,
+                content_type,
+                inference_id,
+            )
+        except KeyError as err:
+            return _error("ValidationError", str(err), status=404)
+        except Exception as err:  # noqa: BLE001
+            return _error("ModelError", str(err))
+        return Response(
+            json.dumps({"InferenceId": iid}),
+            status_code=202,
+            media_type="application/json",
+            headers={
+                "X-Amzn-SageMaker-OutputLocation": output_location,
+                "X-Amzn-SageMaker-FailureLocation": failure_location,
+            },
+        )
+
     async def invoke(self, request: Request) -> Response:
         """sagemaker-runtime InvokeEndpoint: proxy to the serving container."""
         from starlette.concurrency import run_in_threadpool
@@ -515,6 +553,12 @@ def create_app(executor: SageMakerExecutor | None = None) -> Starlette:
             Route(
                 "/endpoints/{name}/invocations",
                 dispatcher.invoke,
+                methods=["POST"],
+            ),
+            # sagemaker-runtime InvokeEndpointAsync: S3-in/S3-out
+            Route(
+                "/endpoints/{name}/async-invocations",
+                dispatcher.invoke_async,
                 methods=["POST"],
             ),
             # sagemaker-featurestore-runtime: REST record put/get/delete + batch

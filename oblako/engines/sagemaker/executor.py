@@ -276,6 +276,7 @@ class SageMakerExecutor:
                 "EndpointConfigArn": arn,
                 "ProductionVariants": req.get("ProductionVariants", []),
                 "DataCaptureConfig": req.get("DataCaptureConfig", {}),
+                "AsyncInferenceConfig": req.get("AsyncInferenceConfig", {}),
                 "CreationTime": _now(),
             }
         return arn
@@ -373,6 +374,7 @@ class SageMakerExecutor:
                     EndpointStatus="InService",
                     ProductionVariants=summaries,
                     DataCaptureConfig=config.get("DataCaptureConfig", {}),
+                    AsyncInferenceConfig=config.get("AsyncInferenceConfig", {}),
                     _container=container.id,
                     _port=host_port,
                     _variant=(variants[0].get("VariantName") if variants else None)
@@ -461,17 +463,95 @@ class SageMakerExecutor:
             raise KeyError(f"endpoint {name} not found")
         if status != "InService" or port is None:
             raise RuntimeError(f"endpoint {name} is not InService (status {status})")
+        result, result_ct = self._post_invocations(port, body, content_type)
+        self._capture_invocation(endpoint, body, content_type, result, result_ct)
+        return result
+
+    @staticmethod
+    def _post_invocations(
+        port: int, body: bytes, content_type: str
+    ) -> tuple[bytes, str]:
+        """POST a body to a serving container's /invocations; return (bytes, type)."""
         req = urllib.request.Request(
             f"http://localhost:{port}/invocations",
             data=body,
             method="POST",
             headers={"Content-Type": content_type or "application/octet-stream"},
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            result = resp.read()
-            result_ct = resp.headers.get("Content-Type", content_type)
-        self._capture_invocation(endpoint, body, content_type, result, result_ct)
-        return result
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            return resp.read(), resp.headers.get("Content-Type", content_type)
+
+    def invoke_endpoint_async(
+        self,
+        name: str,
+        input_location: str,
+        content_type: str,
+        inference_id: str | None = None,
+    ) -> tuple[str, str, str]:
+        """Queue an async inference: S3 input -> container -> S3 output.
+
+        Returns ``(inference_id, output_location, failure_location)`` immediately;
+        a background thread downloads the S3 input, invokes the serving container,
+        and writes the response to the output location (or an error to the failure
+        location), the SageMaker Asynchronous Inference contract.
+        """
+        with self._lock:
+            endpoint = self._endpoints.get(name)
+            port = endpoint.get("_port") if endpoint else None
+            status = endpoint.get("EndpointStatus") if endpoint else None
+            async_cfg = (endpoint or {}).get("AsyncInferenceConfig") or {}
+        if endpoint is None:
+            raise KeyError(f"endpoint {name} not found")
+        if status != "InService" or port is None:
+            raise RuntimeError(f"endpoint {name} is not InService (status {status})")
+        output_cfg = async_cfg.get("OutputConfig") or {}
+        s3_output = output_cfg.get("S3OutputPath")
+        if not s3_output:
+            raise RuntimeError(
+                f"endpoint {name} has no AsyncInferenceConfig.OutputConfig.S3OutputPath"
+            )
+        inference_id = inference_id or uuid.uuid4().hex
+        base_out = s3_output.rstrip("/")
+        output_location = f"{base_out}/{inference_id}.out"
+        s3_failure = output_cfg.get("S3FailurePath")
+        failure_location = (
+            f"{s3_failure.rstrip('/')}/{inference_id}.out"
+            if s3_failure
+            else f"{base_out}/failures/{inference_id}.out"
+        )
+        threading.Thread(
+            target=self._run_async,
+            args=(port, input_location, content_type, output_location, failure_location),
+            daemon=True,
+        ).start()
+        return inference_id, output_location, failure_location
+
+    def _run_async(
+        self,
+        port: int,
+        input_location: str,
+        content_type: str,
+        output_location: str,
+        failure_location: str,
+    ) -> None:
+        """Download the S3 input, invoke the container, write the result to S3."""
+        s3 = _s3_client()
+        try:
+            in_bucket, in_key = _split_uri(input_location)
+            body = s3.get_object(Bucket=in_bucket, Key=in_key)["Body"].read()
+            result, _ = self._post_invocations(port, body, content_type)
+            out_bucket, out_key = _split_uri(output_location)
+            s3.put_object(Bucket=out_bucket, Key=out_key, Body=result)
+        except Exception as err:  # noqa: BLE001 - write a failure record like AWS
+            with contextlib.suppress(Exception):
+                fail_bucket, fail_key = _split_uri(failure_location)
+                s3.put_object(
+                    Bucket=fail_bucket,
+                    Key=fail_key,
+                    Body=json.dumps(
+                        {"ErrorCode": "InternalFailure", "Message": str(err).strip()}
+                    ).encode(),
+                )
 
     def _capture_invocation(
         self, endpoint: dict, request_body, request_ct, response_body, response_ct
