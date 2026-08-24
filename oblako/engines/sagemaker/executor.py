@@ -19,6 +19,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import io
+import json
 import os
 import tarfile
 import tempfile
@@ -82,6 +83,7 @@ class SageMakerExecutor:
         self._user_profiles: dict[tuple[str, str], dict] = {}
         self._feature_groups: dict[str, dict] = {}
         self._online: dict[str, dict[str, dict]] = {}
+        self._monitoring_schedules: dict[str, dict] = {}
         self._stopping: set[str] = set()
         self._lock = threading.Lock()
 
@@ -273,6 +275,7 @@ class SageMakerExecutor:
                 "EndpointConfigName": name,
                 "EndpointConfigArn": arn,
                 "ProductionVariants": req.get("ProductionVariants", []),
+                "DataCaptureConfig": req.get("DataCaptureConfig", {}),
                 "CreationTime": _now(),
             }
         return arn
@@ -369,8 +372,11 @@ class SageMakerExecutor:
                 endpoint.update(
                     EndpointStatus="InService",
                     ProductionVariants=summaries,
+                    DataCaptureConfig=config.get("DataCaptureConfig", {}),
                     _container=container.id,
                     _port=host_port,
+                    _variant=(variants[0].get("VariantName") if variants else None)
+                    or "AllTraffic",
                 )
         except Exception as err:  # noqa: BLE001 - surface as a Failed endpoint
             with self._lock:
@@ -462,7 +468,60 @@ class SageMakerExecutor:
             headers={"Content-Type": content_type or "application/octet-stream"},
         )
         with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.read()
+            result = resp.read()
+            result_ct = resp.headers.get("Content-Type", content_type)
+        self._capture_invocation(endpoint, body, content_type, result, result_ct)
+        return result
+
+    def _capture_invocation(
+        self, endpoint: dict, request_body, request_ct, response_body, response_ct
+    ) -> None:
+        """Log an invocation to S3 in SageMaker's Data Capture JSONL format.
+
+        Best-effort: capture must never break inference, so any failure (e.g. S3
+        unreachable) is swallowed. One JSON Lines record per invocation is written
+        under ``<DestinationS3Uri>/<endpoint>/<variant>/YYYY/MM/DD/HH/<uuid>.jsonl``,
+        with the ``captureData`` envelope (endpointInput/endpointOutput) that a
+        Model Monitor / the book's capture reader consumes unchanged.
+        """
+        cfg = endpoint.get("DataCaptureConfig") or {}
+        if not cfg.get("EnableCapture") or not cfg.get("DestinationS3Uri"):
+            return
+        import random
+
+        pct = cfg.get("InitialSamplingPercentage", 100)
+        if pct < 100 and random.uniform(0, 100) > pct:  # noqa: S311 - not crypto
+            return
+        modes = {
+            o.get("CaptureMode")
+            for o in cfg.get(
+                "CaptureOptions", [{"CaptureMode": "Input"}, {"CaptureMode": "Output"}]
+            )
+        }
+        capture: dict = {}
+        if "Input" in modes:
+            capture["endpointInput"] = _capture_part(request_body, request_ct, "INPUT")
+        if "Output" in modes:
+            capture["endpointOutput"] = _capture_part(
+                response_body, response_ct, "OUTPUT"
+            )
+        now = _now()
+        record = {
+            "captureData": capture,
+            "eventMetadata": {
+                "eventId": uuid.uuid4().hex,
+                "inferenceTime": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+            "eventVersion": "0",
+        }
+        variant = endpoint.get("_variant") or "AllTraffic"
+        base = cfg["DestinationS3Uri"].rstrip("/")
+        key_prefix = f"{endpoint['EndpointName']}/{variant}/{now:%Y/%m/%d/%H}"
+        bucket, prefix = _split_uri(f"{base}/{key_prefix}/{uuid.uuid4().hex}.jsonl")
+        with contextlib.suppress(Exception):
+            _s3_client().put_object(
+                Bucket=bucket, Key=prefix, Body=(json.dumps(record) + "\n").encode()
+            )
 
     # -- batch transform -----------------------------------------------------
     def create_transform_job(self, req: dict) -> str:
@@ -1161,6 +1220,177 @@ class SageMakerExecutor:
                     )
         return {"Records": records, "Errors": errors, "UnprocessedIdentifiers": []}
 
+    # -- Model Monitor: monitoring schedules ---------------------------------
+    def create_monitoring_schedule(self, req: dict) -> str:
+        """Register a monitoring schedule and run its analysis once; return ARN.
+
+        Model Monitor's analysis is a processing job that reads an endpoint's
+        captured data (and an optional baseline) and writes a violations report.
+        A real schedule runs it on a cron; oblako runs it once immediately (the
+        simulated-topology equivalent) and records it as the last execution.
+        """
+        name = req["MonitoringScheduleName"]
+        arn = f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:monitoring-schedule/{name}"
+        cfg = req.get("MonitoringScheduleConfig", {})
+        now = _now()
+        with self._lock:
+            self._monitoring_schedules[name] = {
+                "MonitoringScheduleName": name,
+                "MonitoringScheduleArn": arn,
+                "MonitoringScheduleStatus": "Scheduled",
+                "MonitoringType": cfg.get("MonitoringType", "DataQuality"),
+                "MonitoringScheduleConfig": cfg,
+                "CreationTime": now,
+                "LastModifiedTime": now,
+            }
+        summary = self._run_monitoring_once(name, cfg)
+        if summary is not None:
+            with self._lock:
+                self._monitoring_schedules[name]["LastMonitoringExecutionSummary"] = (
+                    summary
+                )
+        return arn
+
+    def _run_monitoring_once(self, name: str, cfg: dict) -> dict | None:
+        """Translate a MonitoringJobDefinition to a processing job and run it."""
+        jobdef = cfg.get("MonitoringJobDefinition")
+        if not jobdef:
+            return None
+        app = jobdef.get("MonitoringAppSpecification", {})
+        image = app.get("ImageUri")
+        if not image:
+            return None
+        inputs: list[dict] = []
+        for mi in jobdef.get("MonitoringInputs", []):
+            endpoint_input = mi.get("EndpointInput")
+            if endpoint_input:
+                uri = self._capture_uri_for(endpoint_input.get("EndpointName"))
+                if uri:
+                    inputs.append(
+                        {
+                            "InputName": "endpoint",
+                            "S3Input": {
+                                "S3Uri": uri,
+                                "LocalPath": endpoint_input.get(
+                                    "LocalPath", "/opt/ml/processing/input/endpoint"
+                                ),
+                                "S3DataType": "S3Prefix",
+                            },
+                        }
+                    )
+            elif mi.get("S3Input"):  # oblako convenience: a direct S3 input
+                inputs.append(
+                    {"InputName": mi.get("InputName", "input"), "S3Input": mi["S3Input"]}
+                )
+        base = jobdef.get("BaselineConfig", {})
+        for key, local in (
+            ("ConstraintsResource", "constraints"),
+            ("StatisticsResource", "statistics"),
+        ):
+            uri = (base.get(key) or {}).get("S3Uri")
+            if uri:
+                inputs.append(
+                    {
+                        "InputName": local,
+                        "S3Input": {
+                            "S3Uri": uri,
+                            "LocalPath": f"/opt/ml/processing/baseline/{local}",
+                            "S3DataType": "S3Prefix",
+                        },
+                    }
+                )
+        outputs = [
+            {
+                "OutputName": mo.get("S3Output", {}).get("OutputName", "result"),
+                "S3Output": {
+                    "S3Uri": mo["S3Output"]["S3Uri"],
+                    "LocalPath": mo["S3Output"].get(
+                        "LocalPath", "/opt/ml/processing/output"
+                    ),
+                    "S3UploadMode": mo["S3Output"].get("S3UploadMode", "EndOfJob"),
+                },
+            }
+            for mo in jobdef.get("MonitoringOutputConfig", {}).get("MonitoringOutputs", [])
+            if mo.get("S3Output", {}).get("S3Uri")
+        ]
+        proc_name = f"{name}-{uuid.uuid4().hex[:8]}"
+        self.create_processing_job(
+            {
+                "ProcessingJobName": proc_name,
+                "AppSpecification": {
+                    "ImageUri": image,
+                    "ContainerEntrypoint": app.get("ContainerEntrypoint"),
+                    "ContainerArguments": app.get("ContainerArguments"),
+                },
+                "ProcessingInputs": inputs,
+                "ProcessingOutputConfig": {"Outputs": outputs},
+                "ProcessingResources": jobdef.get("MonitoringResources", {}),
+                "RoleArn": jobdef.get("RoleArn"),
+            }
+        )
+        return {
+            "MonitoringScheduleName": name,
+            "ScheduledTime": _now(),
+            "CreationTime": _now(),
+            "MonitoringExecutionStatus": "InProgress",
+            "ProcessingJobArn": (
+                f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:processing-job/{proc_name}"
+            ),
+            "_processing_job": proc_name,
+        }
+
+    def _capture_uri_for(self, endpoint_name: str | None) -> str | None:
+        """Return the S3 prefix an endpoint captures its invocations to."""
+        with self._lock:
+            endpoint = self._endpoints.get(endpoint_name)
+            cfg = (endpoint or {}).get("DataCaptureConfig") or {}
+        dest = cfg.get("DestinationS3Uri")
+        return f"{dest.rstrip('/')}/{endpoint_name}" if dest else None
+
+    def describe_monitoring_schedule(self, name: str) -> dict | None:
+        """Return a schedule, refreshing its last execution's status."""
+        with self._lock:
+            schedule = self._monitoring_schedules.get(name)
+            if schedule is None:
+                return None
+            summary = schedule.get("LastMonitoringExecutionSummary")
+            proc = (summary or {}).get("_processing_job")
+        if proc:
+            job = self.describe_processing_job(proc)
+            status = (job or {}).get("ProcessingJobStatus", "InProgress")
+            mapped = {
+                "Completed": "Completed",
+                "Failed": "Failed",
+                "Stopped": "Stopped",
+                "InProgress": "InProgress",
+            }.get(status, "InProgress")
+            with self._lock:
+                schedule["LastMonitoringExecutionSummary"][
+                    "MonitoringExecutionStatus"
+                ] = mapped
+        with self._lock:
+            return _public_deep(self._monitoring_schedules[name])
+
+    def list_monitoring_schedules(self) -> list[dict]:
+        """Return a summary list of all monitoring schedules."""
+        with self._lock:
+            return [
+                {
+                    "MonitoringScheduleName": s["MonitoringScheduleName"],
+                    "MonitoringScheduleArn": s["MonitoringScheduleArn"],
+                    "MonitoringScheduleStatus": s["MonitoringScheduleStatus"],
+                    "MonitoringType": s["MonitoringType"],
+                    "CreationTime": s["CreationTime"],
+                    "LastModifiedTime": s["LastModifiedTime"],
+                }
+                for s in self._monitoring_schedules.values()
+            ]
+
+    def delete_monitoring_schedule(self, name: str) -> None:
+        """Remove a monitoring schedule (idempotent)."""
+        with self._lock:
+            self._monitoring_schedules.pop(name, None)
+
 
 def _offline_append(name: str, meta: dict, values: dict, offline_uri: str) -> None:
     """Append one record to a feature group's offline store as S3 Parquet.
@@ -1214,6 +1444,36 @@ def _arrow_type(feature_type: str):
 def _public(record: dict) -> dict:
     """Copy a record without internal (underscore-prefixed) bookkeeping fields."""
     return {k: v for k, v in record.items() if not k.startswith("_")}
+
+
+def _public_deep(record: dict) -> dict:
+    """Like ``_public`` but recurse into nested dicts (strip internal fields)."""
+    out = {}
+    for key, value in record.items():
+        if key.startswith("_"):
+            continue
+        out[key] = _public_deep(value) if isinstance(value, dict) else value
+    return out
+
+
+def _capture_part(data: bytes, content_type: str | None, mode: str) -> dict:
+    """Build a Data Capture endpointInput/endpointOutput part.
+
+    Text payloads (CSV/JSON/plain) are stored as-is with a CSV/JSON encoding; any
+    other content type is base64-encoded with a BASE64 encoding, matching how a
+    real endpoint captures binary bodies (and how the reader decodes them).
+    """
+    import base64
+
+    ct = content_type or "application/octet-stream"
+    raw = data if isinstance(data, (bytes, bytearray)) else str(data).encode()
+    if ct.startswith("text/csv"):
+        encoding, payload = "CSV", raw.decode("utf-8", "replace")
+    elif ct.startswith("application/json") or ct.startswith("text/"):
+        encoding, payload = "JSON", raw.decode("utf-8", "replace")
+    else:
+        encoding, payload = "BASE64", base64.b64encode(raw).decode("ascii")
+    return {"observedContentType": ct, "mode": mode, "data": payload, "encoding": encoding}
 
 
 def _hp_str(value) -> str:

@@ -394,6 +394,38 @@ class SageMakerApp:
         self.executor.delete_feature_group(_require(req, "FeatureGroupName"))
         return _json_response({})
 
+    def op_CreateMonitoringSchedule(self, req: dict) -> Response:
+        """Register a Model Monitor schedule and run its analysis once."""
+        if not req.get("MonitoringScheduleName"):
+            return _error("ValidationException", "MonitoringScheduleName is required")
+        return _json_response(
+            {"MonitoringScheduleArn": self.executor.create_monitoring_schedule(req)}
+        )
+
+    def op_DescribeMonitoringSchedule(self, req: dict) -> Response:
+        """Return a monitoring schedule (with its last execution status)."""
+        schedule = self.executor.describe_monitoring_schedule(
+            _require(req, "MonitoringScheduleName")
+        )
+        if schedule is None:
+            raise _NotFound(
+                f"MonitoringSchedule {req.get('MonitoringScheduleName')} not found"
+            )
+        return _json_response(schedule)
+
+    def op_ListMonitoringSchedules(self, req: dict) -> Response:
+        """Return a summary list of all monitoring schedules."""
+        return _json_response(
+            {"MonitoringScheduleSummaries": self.executor.list_monitoring_schedules()}
+        )
+
+    def op_DeleteMonitoringSchedule(self, req: dict) -> Response:
+        """Delete a monitoring schedule."""
+        self.executor.delete_monitoring_schedule(
+            _require(req, "MonitoringScheduleName")
+        )
+        return _json_response({})
+
     async def feature_record(self, request: Request) -> Response:
         """featurestore-runtime Put/Get/DeleteRecord on /FeatureGroup/{name}."""
         from starlette.concurrency import run_in_threadpool
