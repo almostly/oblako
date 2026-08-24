@@ -31,6 +31,7 @@ BEDROCK_RUNTIME = 8004
 GLUE_CATALOG = 8486
 APPCONFIG = 8003  # appconfig (management) + appconfigdata (data)
 SAGEMAKER = 8005  # sagemaker (control plane) + sagemaker-runtime + featurestore-runtime
+DYNAMODB_VECTORS = 8007  # dynamodb vector-search proxy in front of DynamoDB Local
 
 # Engines / data plane
 OLLAMA = 11434  # Bedrock runtime is backed by Ollama
