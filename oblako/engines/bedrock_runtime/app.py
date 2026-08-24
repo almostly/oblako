@@ -205,11 +205,7 @@ class BedrockControlApp:
         return _json({"modelDetails": detail})
 
     # -------------------------------------------------------------------------
-    # 
-    # -------------------------------------------------------------------------
     # Model-invocation jobs
-    # -------------------------------------------------------------------------
-    # 
     # -------------------------------------------------------------------------
     async def create_job(self, request: Request) -> Response:
         """Handle POST /model-invocation-job, create a batch job, and return its ARN."""
@@ -271,6 +267,50 @@ class BedrockControlApp:
         return _json({})
 
 
+class GuardrailApp:
+    """bedrock Guardrails: control plane (create/get/list/delete) + ApplyGuardrail."""
+
+    def __init__(self, store):
+        """Bind to a shared GuardrailStore."""
+        self.store = store
+
+    async def create(self, request: Request) -> Response:
+        """POST /guardrails: register a guardrail."""
+        req = json.loads(await request.body() or b"{}")
+        if not req.get("name"):
+            return _error("name is required", "ValidationException", 400)
+        return _json(self.store.create(req))
+
+    async def get(self, request: Request) -> Response:
+        """GET /guardrails/{id}: return a guardrail."""
+        guardrail = self.store.get(request.path_params["guardrail_id"])
+        if guardrail is None:
+            return _error("guardrail not found", "ResourceNotFoundException", 404)
+        return _json(guardrail)
+
+    async def list(self, request: Request) -> Response:
+        """GET /guardrails: list guardrails."""
+        return _json({"guardrails": self.store.list()})
+
+    async def delete(self, request: Request) -> Response:
+        """DELETE /guardrails/{id}: delete a guardrail."""
+        self.store.delete(request.path_params["guardrail_id"])
+        return _json({})
+
+    async def apply(self, request: Request) -> Response:
+        """POST /guardrail/{id}/version/{v}/apply: evaluate content against the policy."""
+        req = json.loads(await request.body() or b"{}")
+        try:
+            result = self.store.apply(
+                request.path_params["guardrail_id"],
+                req.get("source", "INPUT"),
+                req.get("content", []),
+            )
+        except KeyError:
+            return _error("guardrail not found", "ResourceNotFoundException", 404)
+        return _json(result)
+
+
 def create_app(
     adapter: BedrockAdapter | None = None,
     ollama_url: str | None = None,
@@ -281,6 +321,10 @@ def create_app(
         adapter = BedrockAdapter(make_backend(ollama_url=ollama_url))
     runtime = BedrockRuntimeApp(adapter)
     control = BedrockControlApp(adapter, region=region)
+
+    from oblako.engines.bedrock.guardrails import GuardrailStore
+
+    guardrails = GuardrailApp(GuardrailStore(region=region))
 
     async def health(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
@@ -325,6 +369,16 @@ def create_app(
                 "/model-invocation-job/{job_identifier:path}",
                 control.get_job,
                 methods=["GET"],
+            ),
+            # bedrock Guardrails
+            Route("/guardrails", guardrails.create, methods=["POST"]),
+            Route("/guardrails", guardrails.list, methods=["GET"]),
+            Route("/guardrails/{guardrail_id}", guardrails.get, methods=["GET"]),
+            Route("/guardrails/{guardrail_id}", guardrails.delete, methods=["DELETE"]),
+            Route(
+                "/guardrail/{guardrail_id}/version/{version}/apply",
+                guardrails.apply,
+                methods=["POST"],
             ),
         ]
     )
