@@ -44,6 +44,20 @@ def _error(code: str, message: str, status: int = 400) -> Response:
     )
 
 
+def _rest_json(
+    payload: dict, status: int = 200, error_type: str | None = None
+) -> Response:
+    """Return an ``application/json`` response for the rest-json featurestore-runtime."""
+    body = dict(payload)
+    headers = {"Content-Type": "application/json"}
+    if error_type:
+        body = {"__type": error_type, **body}
+        headers["X-Amzn-Errortype"] = error_type
+    return Response(
+        json.dumps(body, default=_jsonable), status_code=status, headers=headers
+    )
+
+
 class SageMakerApp:
     """Dispatches sagemaker control-plane operations to a ``SageMakerExecutor``."""
 
@@ -351,6 +365,85 @@ class SageMakerApp:
             }
         )
 
+    def op_CreateFeatureGroup(self, req: dict) -> Response:
+        """Register a feature group (Feature Store control plane)."""
+        for field in ("FeatureGroupName", "RecordIdentifierFeatureName", "EventTimeFeatureName"):
+            if not req.get(field):
+                return _error("ValidationException", f"{field} is required")
+        return _json_response(
+            {"FeatureGroupArn": self.executor.create_feature_group(req)}
+        )
+
+    def op_DescribeFeatureGroup(self, req: dict) -> Response:
+        """Return a feature group's definition."""
+        group = self.executor.describe_feature_group(
+            _require(req, "FeatureGroupName")
+        )
+        if group is None:
+            raise _NotFound(f"FeatureGroup {req.get('FeatureGroupName')} not found")
+        return _json_response(group)
+
+    def op_ListFeatureGroups(self, req: dict) -> Response:
+        """Return a summary list of all feature groups."""
+        return _json_response(
+            {"FeatureGroupSummaries": self.executor.list_feature_groups()}
+        )
+
+    def op_DeleteFeatureGroup(self, req: dict) -> Response:
+        """Delete a feature group."""
+        self.executor.delete_feature_group(_require(req, "FeatureGroupName"))
+        return _json_response({})
+
+    async def feature_record(self, request: Request) -> Response:
+        """featurestore-runtime Put/Get/DeleteRecord on /FeatureGroup/{name}."""
+        from starlette.concurrency import run_in_threadpool
+
+        name = request.path_params["name"]
+        try:
+            if request.method == "PUT":
+                body = await request.body()
+                record = (json.loads(body) if body else {}).get("Record", [])
+                await run_in_threadpool(self.executor.put_record, name, record)
+                return _rest_json({})
+            if request.method == "DELETE":
+                if not request.query_params.get("EventTime"):
+                    return _rest_json(
+                        {"Message": "EventTime is required"},
+                        status=400,
+                        error_type="ValidationException",
+                    )
+                rid = request.query_params.get("RecordIdentifierValueAsString", "")
+                await run_in_threadpool(self.executor.delete_record, name, rid)
+                return _rest_json({})
+            # GET
+            rid = request.query_params.get("RecordIdentifierValueAsString", "")
+            features = request.query_params.getlist("FeatureName") or None
+            record = await run_in_threadpool(
+                self.executor.get_record, name, rid, features
+            )
+            return _rest_json({"Record": record} if record else {})
+        except KeyError:
+            return _rest_json(
+                {"Message": f"feature group {name} not found"},
+                status=404,
+                error_type="ResourceNotFound",
+            )
+        except Exception as err:  # noqa: BLE001
+            return _rest_json(
+                {"Message": str(err)}, status=400, error_type="ValidationException"
+            )
+
+    async def batch_get_record(self, request: Request) -> Response:
+        """featurestore-runtime BatchGetRecord on /BatchGetRecord."""
+        from starlette.concurrency import run_in_threadpool
+
+        body = await request.body()
+        identifiers = (json.loads(body) if body else {}).get("Identifiers", [])
+        result = await run_in_threadpool(
+            self.executor.batch_get_record, identifiers
+        )
+        return _rest_json(result)
+
     async def invoke(self, request: Request) -> Response:
         """sagemaker-runtime InvokeEndpoint: proxy to the serving container."""
         from starlette.concurrency import run_in_threadpool
@@ -390,6 +483,17 @@ def create_app(executor: SageMakerExecutor | None = None) -> Starlette:
             Route(
                 "/endpoints/{name}/invocations",
                 dispatcher.invoke,
+                methods=["POST"],
+            ),
+            # sagemaker-featurestore-runtime: REST record put/get/delete + batch
+            Route(
+                "/FeatureGroup/{name}",
+                dispatcher.feature_record,
+                methods=["PUT", "GET", "DELETE"],
+            ),
+            Route(
+                "/BatchGetRecord",
+                dispatcher.batch_get_record,
                 methods=["POST"],
             ),
         ]

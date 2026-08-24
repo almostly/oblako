@@ -80,6 +80,8 @@ class SageMakerExecutor:
         self._tags: dict[str, list[dict]] = {}
         self._domains: dict[str, dict] = {}
         self._user_profiles: dict[tuple[str, str], dict] = {}
+        self._feature_groups: dict[str, dict] = {}
+        self._online: dict[str, dict[str, dict]] = {}
         self._stopping: set[str] = set()
         self._lock = threading.Lock()
 
@@ -1036,6 +1038,177 @@ class SageMakerExecutor:
                 for p in self._user_profiles.values()
                 if domain_id is None or p["DomainId"] == domain_id
             ]
+
+    # -- Feature Store: control plane ----------------------------------------
+    def create_feature_group(self, req: dict) -> str:
+        """Register a feature group (online KV + offline S3 Parquet); return ARN."""
+        name = req["FeatureGroupName"]
+        arn = f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:feature-group/{name}"
+        with self._lock:
+            self._feature_groups[name] = {
+                "FeatureGroupName": name,
+                "FeatureGroupArn": arn,
+                "RecordIdentifierFeatureName": req["RecordIdentifierFeatureName"],
+                "EventTimeFeatureName": req["EventTimeFeatureName"],
+                "FeatureDefinitions": req.get("FeatureDefinitions", []),
+                "OnlineStoreConfig": req.get("OnlineStoreConfig", {}),
+                "OfflineStoreConfig": req.get("OfflineStoreConfig", {}),
+                "RoleArn": req.get("RoleArn"),
+                "FeatureGroupStatus": "Created",
+                "CreationTime": _now(),
+            }
+            self._online.setdefault(name, {})
+        return arn
+
+    def describe_feature_group(self, name: str) -> dict | None:
+        """Return a feature group's definition, or None if unknown."""
+        with self._lock:
+            group = self._feature_groups.get(name)
+            return _public(group) if group else None
+
+    def list_feature_groups(self) -> list[dict]:
+        """Return a summary list of all feature groups."""
+        with self._lock:
+            return [
+                {
+                    "FeatureGroupName": g["FeatureGroupName"],
+                    "FeatureGroupArn": g["FeatureGroupArn"],
+                    "FeatureGroupStatus": g["FeatureGroupStatus"],
+                    "CreationTime": g["CreationTime"],
+                }
+                for g in self._feature_groups.values()
+            ]
+
+    def delete_feature_group(self, name: str) -> None:
+        """Remove a feature group and its online records (idempotent)."""
+        with self._lock:
+            self._feature_groups.pop(name, None)
+            self._online.pop(name, None)
+
+    # -- Feature Store: data plane (featurestore-runtime) --------------------
+    def put_record(self, name: str, record: list[dict]) -> None:
+        """Write a record to the online store and append it to the offline store."""
+        with self._lock:
+            meta = self._feature_groups.get(name)
+            if meta is None:
+                raise KeyError(name)
+            online_enabled = bool(meta["OnlineStoreConfig"].get("EnableOnlineStore"))
+            offline_uri = (
+                (meta["OfflineStoreConfig"].get("S3StorageConfig") or {}).get("S3Uri")
+            )
+        values = {f["FeatureName"]: f["ValueAsString"] for f in record}
+        if meta["RecordIdentifierFeatureName"] not in values:
+            raise ValueError(
+                f"record is missing identifier '{meta['RecordIdentifierFeatureName']}'"
+            )
+        rid = values[meta["RecordIdentifierFeatureName"]]
+        if online_enabled:
+            with self._lock:
+                self._online.setdefault(name, {})[rid] = values
+        if offline_uri:
+            _offline_append(name, meta, values, offline_uri)
+
+    def get_record(
+        self, name: str, record_id: str, feature_names: list[str] | None
+    ) -> list[dict]:
+        """Read one record from the online store; [] if the record is absent."""
+        with self._lock:
+            if name not in self._feature_groups:
+                raise KeyError(name)
+            values = self._online.get(name, {}).get(record_id)
+        if not values:
+            return []
+        keep = feature_names or list(values)
+        return [
+            {"FeatureName": k, "ValueAsString": str(v)}
+            for k, v in values.items()
+            if k in keep
+        ]
+
+    def delete_record(self, name: str, record_id: str) -> None:
+        """Remove a record from the online store."""
+        with self._lock:
+            if name not in self._feature_groups:
+                raise KeyError(name)
+            self._online.get(name, {}).pop(record_id, None)
+
+    def batch_get_record(self, identifiers: list[dict]) -> dict:
+        """Serve BatchGetRecord across feature groups and identifiers."""
+        records, errors = [], []
+        for ident in identifiers or []:
+            name = ident["FeatureGroupName"]
+            features = ident.get("FeatureNames")
+            for rid in ident.get("RecordIdentifiersValueAsString", []):
+                try:
+                    rec = self.get_record(name, rid, features)
+                except KeyError:
+                    errors.append(
+                        {
+                            "FeatureGroupName": name,
+                            "RecordIdentifierValueAsString": rid,
+                            "ErrorCode": "ResourceNotFound",
+                            "ErrorMessage": f"feature group {name} not found",
+                        }
+                    )
+                    continue
+                if rec:
+                    records.append(
+                        {
+                            "FeatureGroupName": name,
+                            "RecordIdentifierValueAsString": rid,
+                            "Record": rec,
+                        }
+                    )
+        return {"Records": records, "Errors": errors, "UnprocessedIdentifiers": []}
+
+
+def _offline_append(name: str, meta: dict, values: dict, offline_uri: str) -> None:
+    """Append one record to a feature group's offline store as S3 Parquet.
+
+    Writes one Parquet object per record under ``<S3Uri>/<group>/data/``, the
+    physical layout of a real offline store, so the data is immediately
+    queryable (DuckDB/Spectrum/awswrangler) with columns typed per the group's
+    FeatureDefinitions.
+    """
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    types = {
+        d["FeatureName"]: d.get("FeatureType", "String")
+        for d in meta.get("FeatureDefinitions", [])
+    }
+    columns = {
+        k: pa.array([_cast_feature(v, types.get(k, "String"))], _arrow_type(types.get(k, "String")))
+        for k, v in values.items()
+    }
+    buf = io.BytesIO()
+    pq.write_table(pa.table(columns), buf)
+    bucket, prefix = _split_uri(offline_uri.rstrip("/"))
+    key = f"{prefix}/{name}/data/{uuid.uuid4().hex}.parquet".lstrip("/")
+    _s3_client().put_object(Bucket=bucket, Key=key, Body=buf.getvalue())
+
+
+def _cast_feature(value: str, feature_type: str):
+    """Cast a ValueAsString to its FeatureDefinition type (fallback to string)."""
+    try:
+        if feature_type == "Integral":
+            return int(value)
+        if feature_type == "Fractional":
+            return float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return str(value)
+
+
+def _arrow_type(feature_type: str):
+    """Map a SageMaker FeatureType to a pyarrow type."""
+    import pyarrow as pa
+
+    if feature_type == "Integral":
+        return pa.int64()
+    if feature_type == "Fractional":
+        return pa.float64()
+    return pa.string()
 
 
 def _public(record: dict) -> dict:
