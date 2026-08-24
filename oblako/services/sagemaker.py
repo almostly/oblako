@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -22,11 +23,13 @@ def _domain_stack(name: str) -> str:
 
 
 class SageMakerService:
-    """Wrapper around SageMaker SDK local mode.
+    """Local SageMaker execution: oblako drives Docker directly.
 
-    SageMaker local mode uses Docker directly (no separate container needed).
-    This class provides helpers for managing training images, checking status,
-    and cleaning up local mode artifacts.
+    Rather than depending on the SageMaker SDK's local mode, oblako builds and
+    runs the training/inference containers itself against SageMaker's ``/opt/ml``
+    contract (see ``run_training``), so it's independent of the SDK version. This
+    class also manages images, container status, and cleanup, and the Studio
+    domain (composed from CloudFormation + EC2).
     """
 
     def __init__(self):
@@ -43,10 +46,76 @@ class SageMakerService:
         return self._client
 
     def get_session(self):
-        """Return a SageMaker LocalSession for local mode training/inference."""
-        from sagemaker.local import LocalSession
+        """Return a SageMaker LocalSession (client helper).
+
+        v3 relocated it from ``sagemaker.local`` to ``sagemaker.core.local``.
+        oblako's own execution no longer uses it (see ``run_training``); this
+        stays for client code that wants the SDK's local session.
+        """
+        from sagemaker.core.local import LocalSession
 
         return LocalSession()
+
+    def get_client(self):
+        """Return a boto3 ``sagemaker`` client wired to the local control plane.
+
+        Auto-starts the in-process server (``ports.SAGEMAKER``) that answers the
+        boto3 ``sagemaker`` API and runs training jobs locally in Docker, so
+        unmodified boto3 / SageMaker SDK code targets oblako.
+        """
+        import boto3
+
+        from oblako import ports
+        from oblako.engines import sagemaker as sagemaker_engine
+
+        sagemaker_engine.start_in_thread(port=ports.SAGEMAKER)
+        return boto3.client(
+            "sagemaker",
+            endpoint_url=f"http://localhost:{ports.SAGEMAKER}",
+            region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "test"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "test"),
+        )
+
+    def get_runtime_client(self):
+        """Return a boto3 ``sagemaker-runtime`` client wired to the local server.
+
+        ``invoke_endpoint`` is proxied to the local serving container that
+        ``create_endpoint`` started.
+        """
+        import boto3
+
+        from oblako import ports
+        from oblako.engines import sagemaker as sagemaker_engine
+
+        sagemaker_engine.start_in_thread(port=ports.SAGEMAKER)
+        return boto3.client(
+            "sagemaker-runtime",
+            endpoint_url=f"http://localhost:{ports.SAGEMAKER}",
+            region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "test"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "test"),
+        )
+
+    def get_featurestore_runtime_client(self):
+        """Return a boto3 ``sagemaker-featurestore-runtime`` client (local).
+
+        ``put_record`` / ``get_record`` hit the local Feature Store: an in-process
+        online store plus an S3 Parquet offline store.
+        """
+        import boto3
+
+        from oblako import ports
+        from oblako.engines import sagemaker as sagemaker_engine
+
+        sagemaker_engine.start_in_thread(port=ports.SAGEMAKER)
+        return boto3.client(
+            "sagemaker-featurestore-runtime",
+            endpoint_url=f"http://localhost:{ports.SAGEMAKER}",
+            region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID", "test"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY", "test"),
+        )
 
     def build_image(self, path: str, tag: str) -> str:
         """Build a training/inference Docker image."""
@@ -55,6 +124,107 @@ class SageMakerService:
             if "stream" in chunk:
                 print(chunk["stream"], end="")
         return image.tags[0]
+
+    def run_training(
+        self,
+        image: str,
+        channels: dict[str, str],
+        hyperparameters: dict | None = None,
+        environment: dict | None = None,
+        gpus: bool = False,
+        timeout: int = 1800,
+        return_logs: bool = False,
+        on_container=None,
+    ) -> dict[str, bytes] | tuple[dict[str, bytes], str]:
+        """Run a SageMaker training container per the ``/opt/ml`` contract.
+
+        oblako drives Docker itself (no SageMaker SDK), so it works the same on
+        Docker Desktop and Linux and doesn't depend on the SDK's local mode.
+        Input is copied *into* the container and the model copied *out* with the
+        ``docker cp`` mechanism (``put_archive``/``get_archive``), so there are no
+        host bind-mounts to share.
+
+        ``channels`` maps a channel name to a local directory whose files are
+        placed under ``/opt/ml/input/data/<channel>/``. ``hyperparameters`` is
+        written (values stringified) to ``/opt/ml/input/config/hyperparameters.json``
+        as the container expects. Returns the collected ``/opt/ml/model`` as a
+        ``{relative_path: bytes}`` map. Raises on a non-zero exit. With
+        ``return_logs=True`` returns ``(files, container_logs)`` instead, so a
+        caller (e.g. automatic model tuning) can scrape an objective metric from
+        the container's stdout via a ``MetricDefinitions`` regex. ``on_container``,
+        if given, is called with the container right after it is created (before
+        it starts), so a caller can record it and later ``StopTrainingJob`` by
+        killing it.
+        """
+        import io
+        import json
+        import tarfile
+        import uuid
+
+        payload = io.BytesIO()
+        with tarfile.open(fileobj=payload, mode="w") as tar:
+            hp = json.dumps(
+                {k: str(v) for k, v in (hyperparameters or {}).items()}
+            ).encode()
+            info = tarfile.TarInfo("opt/ml/input/config/hyperparameters.json")
+            info.size = len(hp)
+            tar.addfile(info, io.BytesIO(hp))
+            for channel, directory in channels.items():
+                for entry in sorted(os.listdir(directory)):
+                    fpath = os.path.join(directory, entry)
+                    if not os.path.isfile(fpath):
+                        continue
+                    with open(fpath, "rb") as fh:
+                        data = fh.read()
+                    info = tarfile.TarInfo(f"opt/ml/input/data/{channel}/{entry}")
+                    info.size = len(data)
+                    tar.addfile(info, io.BytesIO(data))
+        payload.seek(0)
+
+        # instance_type="local_gpu" -> request all GPUs (nvidia-docker). Real on
+        # Linux+NVIDIA; on a host without it Docker rejects it, which surfaces as a
+        # clear training error rather than a silent CPU run.
+        device_requests = (
+            [docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]])]
+            if gpus
+            else None
+        )
+        container = self.client.containers.create(
+            image,
+            environment=environment or {},
+            name=f"sagemaker-local-train-{uuid.uuid4().hex[:12]}",
+            detach=True,
+            device_requests=device_requests,
+        )
+        try:
+            if on_container is not None:
+                on_container(container)
+            container.put_archive("/", payload.getvalue())
+            container.start()
+            result = container.wait(timeout=timeout)
+            code = result.get("StatusCode", 1)
+            logs = container.logs().decode("utf-8", "replace")
+            if code != 0:
+                raise RuntimeError(f"training container exited {code}:\n{logs[-4000:]}")
+            bits, _ = container.get_archive("/opt/ml/model")
+            model_tar = io.BytesIO(b"".join(bits))
+            model_tar.seek(0)
+            files: dict[str, bytes] = {}
+            with tarfile.open(fileobj=model_tar) as tar:
+                for member in tar.getmembers():
+                    if not member.isfile():
+                        continue
+                    # strip the leading "model/" that get_archive prepends
+                    name = (
+                        member.name.split("/", 1)[1]
+                        if "/" in member.name
+                        else member.name
+                    )
+                    files[name] = tar.extractfile(member).read()
+            return (files, logs) if return_logs else files
+        finally:
+            with contextlib.suppress(Exception):
+                container.remove(force=True)
 
     def list_training_containers(self) -> list[dict]:
         """List running SageMaker local mode containers."""
@@ -192,7 +362,7 @@ class SageMakerService:
         stack = _domain_stack(name)
         try:
             s = self._cfn().describe_stacks(StackName=stack)["Stacks"][0]
-        except Exception:  # noqa: BLE001
+        except Exception:
             return {"domain": name, "status": "NONE"}
         return {
             "domain": name,
@@ -245,5 +415,5 @@ class SageMakerService:
         """Tear down the domain's CloudFormation stack (S3 bucket + EC2 + EBS)."""
         try:
             self._cfn().delete_stack(StackName=_domain_stack(name))
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass

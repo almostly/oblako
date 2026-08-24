@@ -30,6 +30,11 @@ RDS_DATA = 8006
 BEDROCK_RUNTIME = 8004
 GLUE_CATALOG = 8486
 APPCONFIG = 8003  # appconfig (management) + appconfigdata (data)
+SAGEMAKER = 8005  # sagemaker (control plane) + sagemaker-runtime + featurestore-runtime
+DYNAMODB_VECTORS = 8007  # dynamodb vector-search proxy in front of DynamoDB Local
+FIREHOSE = 8008  # kinesis Data Firehose (DirectPut -> S3), local delivery loop
+ATHENA = 8009  # athena boto3 API executed via the Trino engine, results to S3
+EVENTBRIDGE = 8010  # eventbridge proxy over moto that actually fires rule targets
 
 # Engines / data plane
 OLLAMA = 11434  # Bedrock runtime is backed by Ollama

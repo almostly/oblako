@@ -40,6 +40,19 @@ class DynamoDBService(Service):
         """Return a boto3 DynamoDB resource for higher-level API."""
         return resource("dynamodb", self.endpoint_url)
 
+    def get_vector_client(self):
+        """Return a boto3 dynamodb client with native vector search enabled.
+
+        Starts DynamoDB Local (if needed) and the oblako vector-search proxy in
+        front of it, and grafts the ``SearchVectors`` / ``VectorIndexes`` API onto
+        the client so an unpatched boto3 can call it. See
+        ``oblako.engines.dynamodb_vectors``.
+        """
+        from oblako.engines import dynamodb_vectors
+
+        self.start()
+        return dynamodb_vectors.get_client(backend_url=self.endpoint_url)
+
     def _health_check(self) -> bool:
         try:
             client = self.get_client()

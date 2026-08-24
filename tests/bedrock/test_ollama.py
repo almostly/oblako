@@ -47,3 +47,19 @@ def test_list_models_live(adapter):
     result = adapter.list_foundation_models()
     assert len(result["modelSummaries"]) > 0
     assert result["modelSummaries"][0]["providerName"] == "ollama"
+
+
+def test_invoke_embedding_live(adapter):
+    # find a pulled embedding model and invoke it via the ollama. passthrough
+    embed = next(
+        (m["name"] for m in OllamaClient().list_models() if "embed" in m["name"]),
+        None,
+    )
+    if embed is None:
+        pytest.skip("No embedding model pulled in Ollama")
+    result = adapter.invoke_model(
+        f"ollama.{embed}", json.dumps({"inputText": "vector search"})
+    )
+    assert isinstance(result["embedding"], list)
+    assert len(result["embedding"]) > 0
+    assert all(isinstance(v, (int, float)) for v in result["embedding"])

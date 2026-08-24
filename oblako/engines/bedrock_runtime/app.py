@@ -18,6 +18,7 @@ one ``endpoint_url`` works for both clients):
 
 from __future__ import annotations
 
+import base64
 import datetime
 import json
 import os
@@ -92,9 +93,60 @@ class BedrockRuntimeApp:
         body = await request.body()
         try:
             result = self.adapter.invoke_model(model_id, body)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return _error(str(e), "ModelErrorException")
         return Response(json.dumps(result), media_type="application/json")
+
+    async def invoke_model_with_response_stream(self, request: Request) -> Response:
+        """POST /model/{modelId}/invoke-with-response-stream: a Bedrock event stream."""
+        from starlette.responses import StreamingResponse
+
+        from oblako.engines.bedrock.eventstream import encode_event
+
+        model_id = request.path_params["model_id"]
+        body = await request.body()
+
+        def frames():
+            try:
+                for chunk in self.adapter.invoke_model_stream(model_id, body):
+                    inner = json.dumps(chunk).encode()
+                    yield encode_event(
+                        "chunk", {"bytes": base64.b64encode(inner).decode()}
+                    )
+            except Exception as err:  # surface as a stream error event
+                yield encode_event("internalServerException", {"message": str(err)})
+
+        return StreamingResponse(
+            frames(), media_type="application/vnd.amazon.eventstream"
+        )
+
+    async def converse_stream(self, request: Request) -> Response:
+        """POST /model/{modelId}/converse-stream: a Bedrock Converse event stream."""
+        from starlette.responses import StreamingResponse
+
+        from oblako.engines.bedrock.eventstream import encode_event
+
+        model_id = request.path_params["model_id"]
+        try:
+            req = json.loads(await request.body() or b"{}")
+        except json.JSONDecodeError:
+            return _error("Invalid JSON body", "ValidationException", 400)
+
+        def frames():
+            try:
+                for event_type, payload in self.adapter.converse_stream(
+                    model_id=model_id,
+                    messages=req.get("messages", []),
+                    system=req.get("system"),
+                    inference_config=req.get("inferenceConfig"),
+                ):
+                    yield encode_event(event_type, payload)
+            except Exception as err:
+                yield encode_event("internalServerException", {"message": str(err)})
+
+        return StreamingResponse(
+            frames(), media_type="application/vnd.amazon.eventstream"
+        )
 
     async def converse(self, request: Request) -> Response:
         """Handle POST /model/{modelId}/converse and return a Bedrock Converse response."""
@@ -110,7 +162,7 @@ class BedrockRuntimeApp:
                 system=req.get("system"),
                 inference_config=req.get("inferenceConfig"),
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return _error(str(e), "ModelErrorException")
         return JSONResponse(result)
 
@@ -125,7 +177,9 @@ class BedrockControlApp:
         self.jobs = JobStore()
         self.s3_factory = _s3_factory(region)
 
-    # -- foundation models --------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Foundation models
+    # -------------------------------------------------------------------------
     async def list_foundation_models(self, request: Request) -> Response:
         """Handle GET /foundation-models and return catalog summaries plus live backend models."""
         summaries = foundation_models.list_models(self.region)
@@ -136,7 +190,7 @@ class BedrockControlApp:
                         m["modelId"], m["providerName"], self.region
                     )
                 )
-        except Exception:  # noqa: BLE001 - engine may be down; static catalog still returned
+        except Exception:  # engine may be down; static catalog still returned
             pass
         return _json({"modelSummaries": summaries})
 
@@ -150,9 +204,9 @@ class BedrockControlApp:
             )
         return _json({"modelDetails": detail})
 
-    # -------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     # Model-invocation jobs
-    # -------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
     async def create_job(self, request: Request) -> Response:
         """Handle POST /model-invocation-job, create a batch job, and return its ARN."""
         try:
@@ -213,6 +267,50 @@ class BedrockControlApp:
         return _json({})
 
 
+class GuardrailApp:
+    """bedrock Guardrails: control plane (create/get/list/delete) + ApplyGuardrail."""
+
+    def __init__(self, store):
+        """Bind to a shared GuardrailStore."""
+        self.store = store
+
+    async def create(self, request: Request) -> Response:
+        """POST /guardrails: register a guardrail."""
+        req = json.loads(await request.body() or b"{}")
+        if not req.get("name"):
+            return _error("name is required", "ValidationException", 400)
+        return _json(self.store.create(req))
+
+    async def get(self, request: Request) -> Response:
+        """GET /guardrails/{id}: return a guardrail."""
+        guardrail = self.store.get(request.path_params["guardrail_id"])
+        if guardrail is None:
+            return _error("guardrail not found", "ResourceNotFoundException", 404)
+        return _json(guardrail)
+
+    async def list(self, request: Request) -> Response:
+        """GET /guardrails: list guardrails."""
+        return _json({"guardrails": self.store.list()})
+
+    async def delete(self, request: Request) -> Response:
+        """DELETE /guardrails/{id}: delete a guardrail."""
+        self.store.delete(request.path_params["guardrail_id"])
+        return _json({})
+
+    async def apply(self, request: Request) -> Response:
+        """POST /guardrail/{id}/version/{v}/apply: evaluate content against the policy."""
+        req = json.loads(await request.body() or b"{}")
+        try:
+            result = self.store.apply(
+                request.path_params["guardrail_id"],
+                req.get("source", "INPUT"),
+                req.get("content", []),
+            )
+        except KeyError:
+            return _error("guardrail not found", "ResourceNotFoundException", 404)
+        return _json(result)
+
+
 def create_app(
     adapter: BedrockAdapter | None = None,
     ollama_url: str | None = None,
@@ -223,6 +321,10 @@ def create_app(
         adapter = BedrockAdapter(make_backend(ollama_url=ollama_url))
     runtime = BedrockRuntimeApp(adapter)
     control = BedrockControlApp(adapter, region=region)
+
+    from oblako.engines.bedrock.guardrails import GuardrailStore
+
+    guardrails = GuardrailApp(GuardrailStore(region=region))
 
     async def health(_request: Request) -> Response:
         return JSONResponse({"status": "ok"})
@@ -236,6 +338,16 @@ def create_app(
             ),
             Route(
                 "/model/{model_id:path}/converse", runtime.converse, methods=["POST"]
+            ),
+            Route(
+                "/model/{model_id:path}/invoke-with-response-stream",
+                runtime.invoke_model_with_response_stream,
+                methods=["POST"],
+            ),
+            Route(
+                "/model/{model_id:path}/converse-stream",
+                runtime.converse_stream,
+                methods=["POST"],
             ),
             # bedrock control plane
             Route(
@@ -257,6 +369,16 @@ def create_app(
                 "/model-invocation-job/{job_identifier:path}",
                 control.get_job,
                 methods=["GET"],
+            ),
+            # bedrock Guardrails
+            Route("/guardrails", guardrails.create, methods=["POST"]),
+            Route("/guardrails", guardrails.list, methods=["GET"]),
+            Route("/guardrails/{guardrail_id}", guardrails.get, methods=["GET"]),
+            Route("/guardrails/{guardrail_id}", guardrails.delete, methods=["DELETE"]),
+            Route(
+                "/guardrail/{guardrail_id}/version/{version}/apply",
+                guardrails.apply,
+                methods=["POST"],
             ),
         ]
     )

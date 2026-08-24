@@ -19,12 +19,11 @@ tree-walk, summing per-class for multiclass).
 
 from __future__ import annotations
 
-import glob
 import json
 import os
 import pathlib
 import re
-import tarfile
+import shutil
 import tempfile
 
 _TRAIN_DIR = pathlib.Path(__file__).parent / "train"
@@ -219,35 +218,29 @@ def _ensure_table(cur):
 
 
 def _train_local(X: list[list[float]], y: list[float], hyperparameters: dict) -> dict:
-    """Train in a real SageMaker local container; return the exported model dict."""
-    os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
-    os.environ.setdefault("AWS_ACCESS_KEY_ID", "test")
-    os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "test")
-    from sagemaker.estimator import Estimator
+    """Train in a real SageMaker training container; return the exported model dict.
 
+    oblako runs the training container itself, per SageMaker's ``/opt/ml`` contract
+    (``SageMakerService.run_training``), rather than through the SDK's local mode,
+    so this is independent of the SageMaker SDK version.
+    """
     from oblako.services import SageMakerService
 
     data_dir = tempfile.mkdtemp(prefix="rsml-train-")
-    out_dir = tempfile.mkdtemp(prefix="rsml-out-")
-    with open(os.path.join(data_dir, "train.csv"), "w") as fh:
-        for row, target in zip(X, y):
-            fh.write(",".join(str(v) for v in row) + "," + str(target) + "\n")
-
-    sm = SageMakerService()
-    sm.build_image(path=str(_TRAIN_DIR), tag=_TRAIN_IMAGE)
-    estimator = Estimator(
-        image_uri=_TRAIN_IMAGE,
-        role="arn:aws:iam::000000000000:role/dummy",
-        instance_count=1,
-        instance_type="local",
-        sagemaker_session=sm.get_session(),
-        output_path=f"file://{out_dir}",
-        hyperparameters=hyperparameters,
-    )
-    estimator.fit({"train": f"file://{data_dir}"})
-    tar = glob.glob(os.path.join(out_dir, "**", "model.tar.gz"), recursive=True)[0]
-    with tarfile.open(tar) as t:
-        return json.load(t.extractfile("model.json"))
+    try:
+        with open(os.path.join(data_dir, "train.csv"), "w") as fh:
+            for row, target in zip(X, y):
+                fh.write(",".join(str(v) for v in row) + "," + str(target) + "\n")
+        sm = SageMakerService()
+        sm.build_image(path=str(_TRAIN_DIR), tag=_TRAIN_IMAGE)
+        files = sm.run_training(
+            image=_TRAIN_IMAGE,
+            channels={"train": data_dir},
+            hyperparameters=hyperparameters,
+        )
+        return json.loads(files["model.json"])
+    finally:
+        shutil.rmtree(data_dir, ignore_errors=True)
 
 
 def create_model(

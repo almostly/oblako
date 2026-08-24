@@ -1,18 +1,12 @@
 """Integration tests for Redshift ML (CREATE MODEL) across model types.
 
-Requires: pip install 'oblako[sagemaker]', Docker, and the Redshift engine on 5439.
-Each model is trained in a real SageMaker local container, so this is slow and
-skipped unless the pieces are present.
+Requires Docker and the Redshift engine on 5439. Each model is trained in a real
+SageMaker training container (oblako's /opt/ml container runner, no SageMaker SDK),
+so this is slow and skipped unless the pieces are present.
 """
 
 import psycopg2
 import pytest
-
-pytest.importorskip("sagemaker")
-try:
-    from sagemaker.local import LocalSession  # noqa: F401
-except Exception:  # pragma: no cover
-    pytest.skip("sagemaker local mode unavailable", allow_module_level=True)
 
 from oblako.engines.redshift_data.executor import RedshiftDataExecutor
 
