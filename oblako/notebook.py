@@ -42,6 +42,8 @@ ENDPOINTS = {
     "AWS_ENDPOINT_URL_LAMBDA": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_IAM": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_API_GATEWAY": _local(ports.MOTO),
+    "AWS_ENDPOINT_URL_SNS": _local(ports.MOTO),
+    "AWS_ENDPOINT_URL_SQS": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_BEDROCK_RUNTIME": _local(ports.BEDROCK_RUNTIME),
     "AWS_ENDPOINT_URL_BEDROCK": _local(ports.BEDROCK_RUNTIME),
     "AWS_ENDPOINT_URL_APPCONFIG": _local(ports.APPCONFIG),

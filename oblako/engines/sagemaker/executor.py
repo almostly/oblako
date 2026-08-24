@@ -66,6 +66,18 @@ def _split_uri(uri: str) -> tuple[str, str]:
     return bucket, key
 
 
+def _sns_client():
+    """boto3 SNS client for the local control plane (moto), host-side."""
+    import boto3
+
+    endpoint = os.environ.get("AWS_ENDPOINT_URL_SNS") or "http://localhost:5500"
+    kwargs = {"endpoint_url": endpoint, "region_name": _REGION}
+    if not os.environ.get("AWS_ACCESS_KEY_ID"):
+        kwargs["aws_access_key_id"] = "test"
+        kwargs["aws_secret_access_key"] = "test"
+    return boto3.client("sns", **kwargs)
+
+
 class SageMakerExecutor:
     """Runs SageMaker training jobs in local Docker and tracks their state."""
 
@@ -519,32 +531,37 @@ class SageMakerExecutor:
             if s3_failure
             else f"{base_out}/failures/{inference_id}.out"
         )
+        context = {
+            "endpoint_name": name,
+            "inference_id": inference_id,
+            "input_location": input_location,
+            "output_location": output_location,
+            "failure_location": failure_location,
+            "content_type": content_type,
+            "notification": output_cfg.get("NotificationConfig") or {},
+        }
         threading.Thread(
-            target=self._run_async,
-            args=(port, input_location, content_type, output_location, failure_location),
-            daemon=True,
+            target=self._run_async, args=(port, context), daemon=True
         ).start()
         return inference_id, output_location, failure_location
 
-    def _run_async(
-        self,
-        port: int,
-        input_location: str,
-        content_type: str,
-        output_location: str,
-        failure_location: str,
-    ) -> None:
-        """Download the S3 input, invoke the container, write the result to S3."""
+    def _run_async(self, port: int, context: dict) -> None:
+        """Download the S3 input, invoke the container, write the result to S3.
+
+        On completion (or failure) an SNS notification is published to the
+        configured Success/Error topic, the SageMaker async-inference contract.
+        """
         s3 = _s3_client()
         try:
-            in_bucket, in_key = _split_uri(input_location)
+            in_bucket, in_key = _split_uri(context["input_location"])
             body = s3.get_object(Bucket=in_bucket, Key=in_key)["Body"].read()
-            result, _ = self._post_invocations(port, body, content_type)
-            out_bucket, out_key = _split_uri(output_location)
+            result, _ = self._post_invocations(port, body, context["content_type"])
+            out_bucket, out_key = _split_uri(context["output_location"])
             s3.put_object(Bucket=out_bucket, Key=out_key, Body=result)
+            self._notify_async(context, "Completed")
         except Exception as err:  # noqa: BLE001 - write a failure record like AWS
             with contextlib.suppress(Exception):
-                fail_bucket, fail_key = _split_uri(failure_location)
+                fail_bucket, fail_key = _split_uri(context["failure_location"])
                 s3.put_object(
                     Bucket=fail_bucket,
                     Key=fail_key,
@@ -552,6 +569,43 @@ class SageMakerExecutor:
                         {"ErrorCode": "InternalFailure", "Message": str(err).strip()}
                     ).encode(),
                 )
+            self._notify_async(context, "Failed", str(err).strip())
+
+    @staticmethod
+    def _notify_async(context: dict, status: str, failure_reason: str = "") -> None:
+        """Publish a SageMaker async-inference notification to the SNS topic."""
+        notification = context.get("notification") or {}
+        topic = notification.get(
+            "SuccessTopic" if status == "Completed" else "ErrorTopic"
+        )
+        if not topic:
+            return
+        now = _now().strftime("%Y-%m-%dT%H:%M:%SZ")
+        message = {
+            "awsRegion": _REGION,
+            "eventTime": now,
+            "receivedTime": now,
+            "invocationStatus": status,
+            "requestParameters": {
+                "endpointName": context["endpoint_name"],
+                "inputLocation": context["input_location"],
+            },
+            "inferenceId": context["inference_id"],
+            "eventVersion": "1.0",
+            "eventSource": "aws:sagemaker",
+            "eventName": "InferenceResult",
+        }
+        if status == "Completed":
+            message["responseParameters"] = {
+                "outputLocation": context["output_location"]
+            }
+        else:
+            message["failureReason"] = failure_reason
+            message["responseParameters"] = {
+                "failureLocation": context["failure_location"]
+            }
+        with contextlib.suppress(Exception):  # notifications are best-effort
+            _sns_client().publish(TopicArn=topic, Message=json.dumps(message))
 
     def _capture_invocation(
         self, endpoint: dict, request_body, request_ct, response_body, response_ct
