@@ -152,18 +152,25 @@ class EcsService:
             task_id = uuid.uuid4().hex
             task_arn = f"arn:aws:ecs:{region}:000000000000:task/{cluster}/{task_id}"
             containers = []
+            container_metas: dict[str, dict] = {}
             for cdef in td.get("containerDefinitions", []):
-                bindings = (
-                    self._run_container(task_id, task_arn, cluster, cdef, service_name)
-                    if backed
-                    else []
-                )
+                if backed:
+                    bindings, meta = self._run_container(
+                        task_id, task_arn, cluster, cdef, service_name
+                    )
+                    container_metas[cdef["name"]] = meta
+                else:
+                    bindings = []
                 containers.append(
                     {
                         "name": cdef["name"],
                         "lastStatus": "RUNNING" if backed else "PENDING",
                         "networkBindings": bindings,
                     }
+                )
+            if container_metas:
+                self._register_metadata(
+                    task_id, task_arn, cluster, td, launch_type, region, container_metas
                 )
             attachments = (
                 self._awsvpc_attachment(network_configuration)
@@ -250,8 +257,8 @@ class EcsService:
         cluster: str,
         cdef: dict,
         service_name: str | None = None,
-    ) -> list[dict]:
-        """Run one container of a task; return its networkBindings."""
+    ) -> tuple[list[dict], dict]:
+        """Run one container of a task; return (networkBindings, container metadata)."""
         client = _docker()
         image = cdef["image"]
         try:
@@ -260,6 +267,13 @@ class EcsService:
             client.images.pull(image)
 
         env = _task_endpoint_env()
+        # the ECS task metadata endpoint (v3/v4): served on the host, reached over
+        # the host gateway, so task code that reads its own metadata works locally
+        meta_base = f"http://host.docker.internal:{ports.ECS_METADATA}"
+        env["ECS_CONTAINER_METADATA_URI"] = f"{meta_base}/{task_id}/{cdef['name']}"
+        env["ECS_CONTAINER_METADATA_URI_V4"] = (
+            f"{meta_base}/v4/{task_id}/{cdef['name']}"
+        )
         env.update(_env_list_to_dict(cdef.get("environment")))
 
         port_bindings, bindings = {}, []
@@ -280,7 +294,7 @@ class EcsService:
         labels = {SERVICE_LABEL: "ecs", TASK_LABEL: task_arn, CLUSTER_LABEL: cluster}
         if service_name:
             labels[SERVICE_NAME_LABEL] = service_name
-        client.containers.run(
+        container = client.containers.run(
             image,
             command=cdef.get("command") or None,
             detach=True,
@@ -290,7 +304,62 @@ class EcsService:
             extra_hosts={"host.docker.internal": "host-gateway"},
             labels=labels,
         )
-        return bindings
+        container_meta = {
+            "DockerId": container.id,
+            "Name": cdef["name"],
+            "DockerName": _container_name(task_id, cdef["name"]),
+            "Image": image,
+            "ImageID": "",
+            "Labels": labels,
+            "DesiredStatus": "RUNNING",
+            "KnownStatus": "RUNNING",
+            "Limits": {
+                "CPU": cdef.get("cpu", 0),
+                "Memory": cdef.get("memory", 0),
+            },
+            "Type": "NORMAL",
+            "Networks": [{"NetworkMode": "bridge"}],
+            "Ports": [
+                {
+                    "ContainerPort": b["containerPort"],
+                    "HostPort": b["hostPort"],
+                    "Protocol": b["protocol"],
+                }
+                for b in bindings
+            ],
+        }
+        return bindings, container_meta
+
+    @staticmethod
+    def _register_metadata(
+        task_id: str,
+        task_arn: str,
+        cluster: str,
+        td: dict,
+        launch_type: str,
+        region: str,
+        container_metas: dict[str, dict],
+    ) -> None:
+        """Publish a task's metadata to the ECS metadata endpoint (started lazily)."""
+        from oblako.engines import ecs_metadata
+
+        ecs_metadata.start_in_thread()
+        task_metadata = {
+            "Cluster": cluster,
+            "TaskARN": task_arn,
+            "Family": td.get("family"),
+            "Revision": str(td.get("revision", 1)),
+            "DesiredStatus": "RUNNING",
+            "KnownStatus": "RUNNING",
+            "Limits": {
+                "CPU": float(td.get("cpu", 0) or 0),
+                "Memory": int(td.get("memory", 0) or 0),
+            },
+            "AvailabilityZone": f"{region}a",
+            "LaunchType": launch_type,
+            "Containers": list(container_metas.values()),
+        }
+        ecs_metadata.register(task_id, task_metadata, container_metas)
 
     # Services: run desiredCount tasks and register them behind a load balancer
     def create_service(
@@ -391,9 +460,12 @@ class EcsService:
 
     def stop_task(self, task: str) -> None:
         """Stop and remove every container of a task (idempotent)."""
+        from oblako.engines import ecs_metadata
+
         for c in self._task_containers():
             if c.labels.get(TASK_LABEL) == task:
                 c.remove(force=True)
+        ecs_metadata.deregister(task.split("/")[-1])
 
     def task_url(self, task: str) -> str | None:
         """Reachable URL for a task's first published port, or None."""

@@ -8,6 +8,7 @@ env-map assertions need nothing; the round-trips need Docker (moto).
 
 import boto3
 import pytest
+import uuid
 
 
 def test_notebook_env_exposes_moto_services():
@@ -22,6 +23,8 @@ def test_notebook_env_exposes_moto_services():
         "AWS_ENDPOINT_URL_CLOUDWATCH",
         "AWS_ENDPOINT_URL_EVENTBRIDGE",
         "AWS_ENDPOINT_URL_ECR",
+        "AWS_ENDPOINT_URL_ECS",
+        "AWS_ENDPOINT_URL_EKS",
     ):
         assert name in env, name
 
@@ -56,14 +59,16 @@ def _client(service, endpoint):
 
 def test_secrets_manager(moto_endpoint):
     sm = _client("secretsmanager", moto_endpoint)
-    sm.create_secret(Name="oblako/db", SecretString="s3cr3t")
-    assert sm.get_secret_value(SecretId="oblako/db")["SecretString"] == "s3cr3t"
+    name = f"oblako/db-{uuid.uuid4().hex[:8]}"
+    sm.create_secret(Name=name, SecretString="s3cr3t")
+    assert sm.get_secret_value(SecretId=name)["SecretString"] == "s3cr3t"
 
 
 def test_ssm_parameter_store(moto_endpoint):
     ssm = _client("ssm", moto_endpoint)
-    ssm.put_parameter(Name="/oblako/mode", Value="local", Type="String")
-    assert ssm.get_parameter(Name="/oblako/mode")["Parameter"]["Value"] == "local"
+    pname = f"/oblako/mode-{uuid.uuid4().hex[:8]}"
+    ssm.put_parameter(Name=pname, Value="local", Type="String")
+    assert ssm.get_parameter(Name=pname)["Parameter"]["Value"] == "local"
 
 
 def test_sts_identity(moto_endpoint):
@@ -79,14 +84,15 @@ def test_kms_encrypt_decrypt_roundtrip(moto_endpoint):
 
 def test_cloudwatch_logs(moto_endpoint):
     logs = _client("logs", moto_endpoint)
-    logs.create_log_group(logGroupName="/oblako/svc")
+    group = f"/oblako/svc-{uuid.uuid4().hex[:8]}"
+    logs.create_log_group(logGroupName=group)
     names = [g["logGroupName"] for g in logs.describe_log_groups()["logGroups"]]
-    assert "/oblako/svc" in names
+    assert group in names
 
 
 def test_ecr_repository(moto_endpoint):
     ecr = _client("ecr", moto_endpoint)
-    repo = ecr.create_repository(repositoryName="oblako/img")["repository"]
+    repo = ecr.create_repository(repositoryName=f"oblako/img-{uuid.uuid4().hex[:8]}")["repository"]
     assert repo["repositoryUri"]
 
 
@@ -94,3 +100,35 @@ def test_eventbridge_rule(moto_endpoint):
     events = _client("events", moto_endpoint)
     events.put_rule(Name="oblako-rule", EventPattern='{"source":["oblako"]}')
     assert any(r["Name"] == "oblako-rule" for r in events.list_rules()["Rules"])
+
+
+def test_ecs_control_plane(moto_endpoint):
+    ecs = _client("ecs", moto_endpoint)
+    cluster = f"oblako-ecs-{uuid.uuid4().hex[:8]}"
+    ecs.create_cluster(clusterName=cluster)
+    ecs.register_task_definition(
+        family="scorer",
+        containerDefinitions=[
+            {"name": "app", "image": "oblako-app:latest", "memory": 256}
+        ],
+    )
+    assert "scorer" in [
+        arn.split("/")[-1].split(":")[0]
+        for arn in ecs.list_task_definitions()["taskDefinitionArns"]
+    ]
+    clusters = ecs.describe_clusters(clusters=[cluster])["clusters"]
+    assert clusters[0]["clusterName"] == cluster
+
+
+def test_eks_control_plane(moto_endpoint):
+    eks = _client("eks", moto_endpoint)
+    name = f"oblako-eks-{uuid.uuid4().hex[:8]}"
+    eks.create_cluster(
+        name=name,
+        roleArn="arn:aws:iam::123456789012:role/eks",
+        resourcesVpcConfig={},
+    )
+    cluster = eks.describe_cluster(name=name)["cluster"]
+    assert cluster["name"] == name
+    assert cluster["status"] == "ACTIVE"
+    assert name in eks.list_clusters()["clusters"]

@@ -149,3 +149,60 @@ def test_run_task_and_service_behind_alb():
     finally:
         ecs.delete_service(svc)
         elb.delete_load_balancer(lb_arn)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not _ecs_up(), reason="moto + Docker not running")
+def test_task_metadata_endpoint():
+    """A running task exposes the ECS task metadata endpoint (v3/v4)."""
+    import json
+
+    from oblako import ports
+    from oblako.services import Oblako
+    from oblako.services.backends import docker_client
+    from oblako.services.ecs import _container_name
+
+    ecs = Oblako().ecs
+    sfx = uuid.uuid4().hex[:6]
+    family = f"meta-{sfx}"
+    ecs.register_task_definition(
+        family=family,
+        requiresCompatibilities=["FARGATE"],
+        networkMode="awsvpc",
+        cpu="256",
+        memory="512",
+        containerDefinitions=[
+            {
+                "name": "web",
+                "image": WHOAMI,
+                "portMappings": [{"containerPort": 80, "protocol": "tcp"}],
+            }
+        ],
+    )
+    task_arn = ecs.run_task(family, count=1)["tasks"][0]["taskArn"]
+    task_id = task_arn.split("/")[-1]
+    try:
+        base = f"http://localhost:{ports.ECS_METADATA}/{task_id}/web"
+        task_meta = json.load(urllib.request.urlopen(base + "/task", timeout=5))
+        assert task_meta["TaskARN"] == task_arn
+        assert task_meta["Family"] == family
+        assert [c["Name"] for c in task_meta["Containers"]] == ["web"]
+
+        container_meta = json.load(urllib.request.urlopen(base, timeout=5))
+        assert container_meta["Name"] == "web"
+        assert container_meta["Image"] == WHOAMI
+        assert container_meta["DockerId"]
+
+        # v4 serves the same records
+        v4 = f"http://localhost:{ports.ECS_METADATA}/v4/{task_id}/web/task"
+        assert json.load(urllib.request.urlopen(v4, timeout=5))["TaskARN"] == task_arn
+
+        # the container itself is wired to reach the metadata endpoint
+        container = docker_client().containers.get(_container_name(task_id, "web"))
+        env = dict(
+            e.split("=", 1) for e in container.attrs["Config"]["Env"] if "=" in e
+        )
+        assert env["ECS_CONTAINER_METADATA_URI"].endswith(f"/{task_id}/web")
+        assert "/v4/" in env["ECS_CONTAINER_METADATA_URI_V4"]
+    finally:
+        ecs.stop_task(task_arn)
