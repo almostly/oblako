@@ -177,8 +177,9 @@ class VectorProxy:
         status, scored = await self._score_items(table, attribute, distance, query, auth)
         if status != 200:
             return _err("ResourceNotFoundException", f"table {table!r} not found")
-        higher_is_closer = distance in ("COSINE", "DOT_PRODUCT")
-        scored.sort(key=lambda s: s[0], reverse=higher_is_closer)
+        # AWS score semantics: DOT_PRODUCT returns k highest; COSINE/EUCLIDEAN
+        # are distances (0 = identical) and return k smallest.
+        scored.sort(key=lambda s: s[0], reverse=distance == "DOT_PRODUCT")
         results = [
             {"Item": _project(item, index, attribute), "Score": score}
             for score, item in scored[:top_k]
@@ -273,11 +274,12 @@ def _distance(function: str, q: list[float], v: list[float]) -> float:
         return sum(a * b for a, b in zip(q, v))
     if function == "EUCLIDEAN":
         return math.sqrt(sum((a - b) ** 2 for a, b in zip(q, v)))
-    # COSINE similarity (default)
+    # COSINE distance (default): 0 = identical, 2 = opposite, matching AWS
     dot = sum(a * b for a, b in zip(q, v))
     nq = math.sqrt(sum(a * a for a in q))
     nv = math.sqrt(sum(b * b for b in v))
-    return dot / (nq * nv) if nq and nv else 0.0
+    similarity = dot / (nq * nv) if nq and nv else 0.0
+    return 1.0 - similarity
 
 
 def _project(item: dict, index: dict, attribute: str) -> dict:

@@ -93,7 +93,9 @@ def test_search_vectors_returns_nearest_first(ddb):
         )
         results = resp["SearchResults"]
         assert [r["Item"]["id"]["S"] for r in results] == ["a", "c"]  # nearest first
-        assert results[0]["Score"] > results[1]["Score"]  # a more similar than c
+        # COSINE score is a distance (0 = identical): a is exact, so ~0 and smallest
+        assert results[0]["Score"] < results[1]["Score"]
+        assert results[0]["Score"] == pytest.approx(0.0, abs=1e-9)
 
         # projection ALL returns the item minus the embedding (excluded by default)
         first = results[0]["Item"]
