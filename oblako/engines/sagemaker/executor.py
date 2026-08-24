@@ -358,7 +358,12 @@ class SageMakerExecutor:
             name=container_name,
             detach=True,
         )
-        if container_def.get("ModelDataUrl"):
+        # a multi-model endpoint loads its models on demand (per TargetModel),
+        # so its container starts empty; a single-model one is loaded now
+        if (
+            container_def.get("ModelDataUrl")
+            and container_def.get("Mode") != "MultiModel"
+        ):
             container.put_archive(
                 "/", self._model_payload(container_def["ModelDataUrl"])
             )
@@ -375,6 +380,7 @@ class SageMakerExecutor:
             config = self._endpoint_configs[config_name]
             variants = config.get("ProductionVariants", [])
             model = self._models[variants[0]["ModelName"]]
+            container_def = model["PrimaryContainer"]
             container, host_port = self._start_serving_container(
                 model, f"sagemaker-local-endpoint-{name}"
             )
@@ -397,6 +403,9 @@ class SageMakerExecutor:
                     _port=host_port,
                     _variant=(variants[0].get("VariantName") if variants else None)
                     or "AllTraffic",
+                    _mme=container_def.get("Mode") == "MultiModel",
+                    _model_data_url=container_def.get("ModelDataUrl"),
+                    _loaded_models=set(),
                 )
         except Exception as err:  # surface as a Failed endpoint
             with self._lock:
@@ -471,8 +480,19 @@ class SageMakerExecutor:
                     force=True
                 )
 
-    def invoke_endpoint(self, name: str, body: bytes, content_type: str) -> bytes:
-        """Proxy an inference request to the endpoint's /invocations."""
+    def invoke_endpoint(
+        self,
+        name: str,
+        body: bytes,
+        content_type: str,
+        target_model: str | None = None,
+    ) -> bytes:
+        """Proxy an inference request to the endpoint's /invocations.
+
+        For a multi-model endpoint, ``target_model`` (the InvokeEndpoint
+        ``TargetModel``) selects which model under the endpoint's S3 prefix to
+        serve; it is loaded into the container on first use.
+        """
         with self._lock:
             endpoint = self._endpoints.get(name)
             port = endpoint.get("_port") if endpoint else None
@@ -481,20 +501,46 @@ class SageMakerExecutor:
             raise KeyError(f"endpoint {name} not found")
         if status != "InService" or port is None:
             raise RuntimeError(f"endpoint {name} is not InService (status {status})")
-        result, result_ct = self._post_invocations(port, body, content_type)
+        headers = None
+        if endpoint.get("_mme"):
+            if not target_model:
+                raise RuntimeError(
+                    "endpoint is a multi-model endpoint; TargetModel is required"
+                )
+            self._ensure_mme_model(endpoint, target_model)
+            headers = {"X-Amzn-SageMaker-Target-Model": target_model}
+        result, result_ct = self._post_invocations(port, body, content_type, headers)
         self._capture_invocation(endpoint, body, content_type, result, result_ct)
         return result
 
+    def _ensure_mme_model(self, endpoint: dict, target_model: str) -> None:
+        """Load a model into a multi-model container on first use (docker cp)."""
+        with self._lock:
+            if target_model in endpoint["_loaded_models"]:
+                return
+            container_id = endpoint["_container"]
+            model_data_url = endpoint["_model_data_url"]
+        from oblako.services import SageMakerService
+
+        container = SageMakerService().client.containers.get(container_id)
+        artifact = f"{model_data_url.rstrip('/')}/{target_model}"
+        container.put_archive("/", _mme_payload(artifact, target_model))
+        with self._lock:
+            endpoint["_loaded_models"].add(target_model)
+
     @staticmethod
     def _post_invocations(
-        port: int, body: bytes, content_type: str
+        port: int, body: bytes, content_type: str, extra_headers: dict | None = None
     ) -> tuple[bytes, str]:
         """POST a body to a serving container's /invocations; return (bytes, type)."""
+        headers = {"Content-Type": content_type or "application/octet-stream"}
+        if extra_headers:
+            headers.update(extra_headers)
         req = urllib.request.Request(
             f"http://localhost:{port}/invocations",
             data=body,
             method="POST",
-            headers={"Content-Type": content_type or "application/octet-stream"},
+            headers=headers,
         )
         with urllib.request.urlopen(req, timeout=120) as resp:
             return resp.read(), resp.headers.get("Content-Type", content_type)
@@ -1889,6 +1935,26 @@ class _SyneTuneSearch:
         )
         self._scheduler.on_trial_complete(trial, {self._metric: value})
         self._trial_id += 1
+
+
+def _mme_payload(model_url: str, target_model: str) -> bytes:
+    """Download an MME model.tar.gz from S3, re-tar rooted at /opt/ml/models/<name>."""
+    s3 = _s3_client()
+    bucket, key = _split_uri(model_url)
+    raw = s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+    out = io.BytesIO()
+    with (
+        tarfile.open(fileobj=io.BytesIO(raw), mode="r:gz") as src,
+        tarfile.open(fileobj=out, mode="w") as dst,
+    ):
+        for member in src.getmembers():
+            if not member.isfile():
+                continue
+            data = src.extractfile(member).read()
+            info = tarfile.TarInfo(f"opt/ml/models/{target_model}/{member.name}")
+            info.size = len(data)
+            dst.addfile(info, io.BytesIO(data))
+    return out.getvalue()
 
 
 def _tar_model(files: dict[str, bytes]) -> bytes:

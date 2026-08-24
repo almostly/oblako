@@ -588,9 +588,14 @@ class SageMakerApp:
         name = request.path_params["name"]
         body = await request.body()
         content_type = request.headers.get("Content-Type", "application/octet-stream")
+        target_model = request.headers.get("X-Amzn-SageMaker-Target-Model")
         try:
             result = await run_in_threadpool(
-                self.executor.invoke_endpoint, name, body, content_type
+                self.executor.invoke_endpoint,
+                name,
+                body,
+                content_type,
+                target_model,
             )
         except KeyError as err:
             return _error("ValidationError", str(err), status=404)
