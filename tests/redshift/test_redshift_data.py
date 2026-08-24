@@ -10,6 +10,7 @@ SQL against the Redshift engine) clients.
 import boto3
 import pytest
 
+from oblako import ports
 from oblako.engines.redshift_data import start_in_thread
 from oblako.engines.redshift_data.executor import RedshiftDataExecutor
 
@@ -23,7 +24,7 @@ def data_client():
     executor = RedshiftDataExecutor(
         host="localhost", port=5439, user="oblako", password="oblako", database="oblako"
     )
-    url = start_in_thread(port=8011, executor=executor)
+    url = start_in_thread(port=ports.REDSHIFT_DATA, executor=executor)
     return boto3.client("redshift-data", endpoint_url=url, **CREDS)
 
 
