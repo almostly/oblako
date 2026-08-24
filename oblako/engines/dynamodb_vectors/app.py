@@ -82,7 +82,9 @@ class VectorProxy:
     def _headers(self, op: str, auth: dict) -> dict:
         return {"X-Amz-Target": _TARGET_PREFIX + op, "Content-Type": _JSON, **auth}
 
-    # -- passthrough ---------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Passthrough
+    # -------------------------------------------------------------------------
     async def _forward(self, op: str, body: bytes, auth: dict) -> Response:
         """Forward a request unchanged to DynamoDB Local."""
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -102,7 +104,9 @@ class VectorProxy:
         data = resp.json() if resp.content else {}
         return resp.status_code, data
 
-    # -- table lifecycle (capture VectorIndexes) -----------------------------
+    # -------------------------------------------------------------------------
+    # Table lifecycle (capture VectorIndexes)
+    # -------------------------------------------------------------------------
     async def op_CreateTable(self, payload: dict, auth: dict) -> Response:
         """Capture VectorIndexes, forward the rest, annotate the response."""
         indexes = payload.pop("VectorIndexes", None)
@@ -155,7 +159,9 @@ class VectorProxy:
                 self._indexes.pop(payload.get("TableName", ""), None)
         return _json(data, status)
 
-    # -- vector search -------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Vector search
+    # -------------------------------------------------------------------------
     async def op_SearchVectors(self, payload: dict, auth: dict) -> Response:
         """Brute-force KNN over the table's stored vectors."""
         table = payload.get("TableName", "")
@@ -208,7 +214,9 @@ class VectorProxy:
             if not start_key:
                 return 200, scored
 
-    # -- index metadata ------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Index metadata
+    # -------------------------------------------------------------------------
     def _store_indexes(self, table: str, indexes: list[dict], keys: list[str]) -> None:
         with self._lock:
             store = self._indexes.setdefault(table, {})

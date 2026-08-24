@@ -24,7 +24,9 @@ class BedrockAdapter:
         """Initialize with a chat backend, defaulting to the env-configured backend."""
         self.backend = backend or make_backend()
 
-    # -- invoke_model (Anthropic Messages format) ---------------------------
+    # -------------------------------------------------------------------------
+    # Invoke_model (Anthropic Messages format)
+    # -------------------------------------------------------------------------
     def invoke_model(self, model_id: str, body: bytes | str) -> dict:
         """Invoke a model with an Anthropic Messages-format body and return the response dict.
 
@@ -46,7 +48,9 @@ class BedrockAdapter:
         )
         return self._format_invoke_response(result, model_id)
 
-    # -- embeddings ---------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Embeddings
+    # -------------------------------------------------------------------------
     @staticmethod
     def _is_embedding_request(model_id: str, request: dict) -> bool:
         """True if this is an embedding invocation (by model id or body shape)."""
@@ -117,7 +121,9 @@ class BedrockAdapter:
             },
         }
 
-    # -- streaming ----------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Streaming
+    # -------------------------------------------------------------------------
     def invoke_model_stream(self, model_id: str, body: bytes | str):
         """Stream invoke_model, yielding Anthropic-style chunk dicts.
 
@@ -216,7 +222,9 @@ class BedrockAdapter:
             },
         )
 
-    # -- converse -----------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Converse
+    # -------------------------------------------------------------------------
     def converse(
         self,
         model_id: str,
@@ -265,7 +273,9 @@ class BedrockAdapter:
             },
         }
 
-    # -- list_foundation_models ---------------------------------------------
+    # -------------------------------------------------------------------------
+    # List_foundation_models
+    # -------------------------------------------------------------------------
     def list_foundation_models(self) -> dict:
         """Return a ListFoundationModels-shaped dict of all models from the backend."""
         return {

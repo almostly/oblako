@@ -177,7 +177,9 @@ class BedrockControlApp:
         self.jobs = JobStore()
         self.s3_factory = _s3_factory(region)
 
-    # -- foundation models --------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Foundation models
+    # -------------------------------------------------------------------------
     async def list_foundation_models(self, request: Request) -> Response:
         """Handle GET /foundation-models and return catalog summaries plus live backend models."""
         summaries = foundation_models.list_models(self.region)
@@ -202,9 +204,13 @@ class BedrockControlApp:
             )
         return _json({"modelDetails": detail})
 
-    # -------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # 
+    # -------------------------------------------------------------------------
     # Model-invocation jobs
-    # -------------------------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # 
+    # -------------------------------------------------------------------------
     async def create_job(self, request: Request) -> Response:
         """Handle POST /model-invocation-job, create a batch job, and return its ARN."""
         try:

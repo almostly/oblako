@@ -101,7 +101,9 @@ class SageMakerExecutor:
         self._stopping: set[str] = set()
         self._lock = threading.Lock()
 
-    # -- training jobs -------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Training jobs
+    # -------------------------------------------------------------------------
     def create_training_job(self, req: dict) -> str:
         """Register a training job and run it in the background; return its ARN."""
         name = req["TrainingJobName"]
@@ -242,7 +244,9 @@ class SageMakerExecutor:
                 for j in self._jobs.values()
             ]
 
-    # -- models / endpoints --------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Models / endpoints
+    # -------------------------------------------------------------------------
     def create_model(self, req: dict) -> str:
         """Register a model (image + model data + env); return its ARN."""
         name = req["ModelName"]
@@ -659,7 +663,9 @@ class SageMakerExecutor:
                 Bucket=bucket, Key=prefix, Body=(json.dumps(record) + "\n").encode()
             )
 
-    # -- batch transform -----------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Batch transform
+    # -------------------------------------------------------------------------
     def create_transform_job(self, req: dict) -> str:
         """Register a batch transform job and run it in the background; return ARN."""
         name = req["TransformJobName"]
@@ -750,7 +756,9 @@ class SageMakerExecutor:
                 for j in self._transform_jobs.values()
             ]
 
-    # -- processing jobs (the ProcessingStep atom) ---------------------------
+    # -------------------------------------------------------------------------
+    # Processing jobs (the ProcessingStep atom)
+    # -------------------------------------------------------------------------
     def create_processing_job(self, req: dict) -> str:
         """Register a processing job and run it in the background; return its ARN."""
         name = req["ProcessingJobName"]
@@ -881,7 +889,9 @@ class SageMakerExecutor:
                 for j in self._processing_jobs.values()
             ]
 
-    # -- automatic model tuning (HPO) ----------------------------------------
+    # -------------------------------------------------------------------------
+    # Automatic model tuning (HPO)
+    # -------------------------------------------------------------------------
     def create_hyper_parameter_tuning_job(self, req: dict) -> str:
         """Register a tuning job and run the search in the background; return ARN."""
         name = req["HyperParameterTuningJobName"]
@@ -1074,7 +1084,9 @@ class SageMakerExecutor:
                 for j in self._tuning_jobs.values()
             ]
 
-    # -- tags ----------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Tags
+    # -------------------------------------------------------------------------
     def add_tags(self, resource_arn: str, tags: list[dict]) -> list[dict]:
         """Attach tags to a resource (new keys overwrite existing), return all."""
         with self._lock:
@@ -1100,7 +1112,9 @@ class SageMakerExecutor:
         with self._lock:
             return list(self._tags.get(resource_arn, []))
 
-    # -- SageMaker Studio: domains + user profiles ---------------------------
+    # -------------------------------------------------------------------------
+    # SageMaker Studio: domains + user profiles
+    # -------------------------------------------------------------------------
     def create_domain(self, req: dict) -> dict:
         """Register a Studio domain; return {DomainArn, DomainId, Url}."""
         domain_id = f"d-{uuid.uuid4().hex[:12]}"
@@ -1234,7 +1248,9 @@ class SageMakerExecutor:
                 if domain_id is None or p["DomainId"] == domain_id
             ]
 
-    # -- Feature Store: control plane ----------------------------------------
+    # -------------------------------------------------------------------------
+    # Feature Store: control plane
+    # -------------------------------------------------------------------------
     def create_feature_group(self, req: dict) -> str:
         """Register a feature group (online KV + offline S3 Parquet); return ARN."""
         name = req["FeatureGroupName"]
@@ -1280,7 +1296,9 @@ class SageMakerExecutor:
             self._feature_groups.pop(name, None)
             self._online.pop(name, None)
 
-    # -- Feature Store: data plane (featurestore-runtime) --------------------
+    # -------------------------------------------------------------------------
+    # Feature Store: data plane (featurestore-runtime)
+    # -------------------------------------------------------------------------
     def put_record(self, name: str, record: list[dict]) -> None:
         """Write a record to the online store and append it to the offline store."""
         with self._lock:
@@ -1356,7 +1374,9 @@ class SageMakerExecutor:
                     )
         return {"Records": records, "Errors": errors, "UnprocessedIdentifiers": []}
 
-    # -- Model Monitor: monitoring schedules ---------------------------------
+    # -------------------------------------------------------------------------
+    # Model Monitor: monitoring schedules
+    # -------------------------------------------------------------------------
     def create_monitoring_schedule(self, req: dict) -> str:
         """Register a monitoring schedule and run its analysis once; return ARN.
 
@@ -1527,7 +1547,9 @@ class SageMakerExecutor:
         with self._lock:
             self._monitoring_schedules.pop(name, None)
 
-    # -- Model Registry: package groups + versioned packages -----------------
+    # -------------------------------------------------------------------------
+    # Model Registry: package groups + versioned packages
+    # -------------------------------------------------------------------------
     def create_model_package_group(self, req: dict) -> str:
         """Register a model package group; return its ARN."""
         name = req["ModelPackageGroupName"]
