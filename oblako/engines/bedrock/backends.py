@@ -48,6 +48,28 @@ class OllamaBackend:
             "output_tokens": result.get("eval_count", 0),
         }
 
+    def chat_stream(
+        self, model_id, messages, *, max_tokens=None, temperature=None, top_p=None
+    ):
+        """Stream a chat completion: yield ``{"text": ...}`` then a final done event."""
+        kwargs = {}
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+        if top_p is not None:
+            kwargs["top_p"] = top_p
+        for chunk in self.client.chat_stream(resolve_model(model_id), messages, **kwargs):
+            text = chunk.get("message", {}).get("content", "")
+            if text:
+                yield {"text": text}
+            if chunk.get("done"):
+                yield {
+                    "done": True,
+                    "input_tokens": chunk.get("prompt_eval_count", 0),
+                    "output_tokens": chunk.get("eval_count", 0),
+                }
+
     def embed(self, model_id, text: str) -> dict:
         """Return ``{"embedding": [...], "input_tokens": int}`` from Ollama."""
         result = self.client.embed(resolve_model(model_id), text)
@@ -110,6 +132,45 @@ class OpenRouterBackend:
             "input_tokens": usage.get("prompt_tokens", 0),
             "output_tokens": usage.get("completion_tokens", 0),
         }
+
+    def chat_stream(
+        self, model_id, messages, *, max_tokens=None, temperature=None, top_p=None
+    ):
+        """Stream a chat completion from OpenRouter (OpenAI SSE format)."""
+        payload = {
+            "model": resolve_openrouter(model_id),
+            "messages": messages,
+            "stream": True,
+        }
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        if temperature is not None:
+            payload["temperature"] = temperature
+        if top_p is not None:
+            payload["top_p"] = top_p
+        out_tokens = 0
+        with httpx.stream(
+            "POST",
+            f"{self.base_url}/chat/completions",
+            json=payload,
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            timeout=self.timeout,
+        ) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if not line.startswith("data:"):
+                    continue
+                data = line[len("data:") :].strip()
+                if data == "[DONE]":
+                    break
+                import json
+
+                event = json.loads(data)
+                delta = event["choices"][0].get("delta", {}).get("content")
+                if delta:
+                    out_tokens += 1
+                    yield {"text": delta}
+        yield {"done": True, "input_tokens": 0, "output_tokens": out_tokens}
 
     def embed(self, model_id, text: str) -> dict:
         """Embeddings aren't served via OpenRouter; use the Ollama backend."""

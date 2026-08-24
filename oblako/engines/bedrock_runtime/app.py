@@ -18,6 +18,7 @@ one ``endpoint_url`` works for both clients):
 
 from __future__ import annotations
 
+import base64
 import datetime
 import json
 import os
@@ -95,6 +96,57 @@ class BedrockRuntimeApp:
         except Exception as e:  # noqa: BLE001
             return _error(str(e), "ModelErrorException")
         return Response(json.dumps(result), media_type="application/json")
+
+    async def invoke_model_with_response_stream(self, request: Request) -> Response:
+        """POST /model/{modelId}/invoke-with-response-stream: a Bedrock event stream."""
+        from starlette.responses import StreamingResponse
+
+        from oblako.engines.bedrock.eventstream import encode_event
+
+        model_id = request.path_params["model_id"]
+        body = await request.body()
+
+        def frames():
+            try:
+                for chunk in self.adapter.invoke_model_stream(model_id, body):
+                    inner = json.dumps(chunk).encode()
+                    yield encode_event(
+                        "chunk", {"bytes": base64.b64encode(inner).decode()}
+                    )
+            except Exception as err:  # noqa: BLE001 - surface as a stream error event
+                yield encode_event("internalServerException", {"message": str(err)})
+
+        return StreamingResponse(
+            frames(), media_type="application/vnd.amazon.eventstream"
+        )
+
+    async def converse_stream(self, request: Request) -> Response:
+        """POST /model/{modelId}/converse-stream: a Bedrock Converse event stream."""
+        from starlette.responses import StreamingResponse
+
+        from oblako.engines.bedrock.eventstream import encode_event
+
+        model_id = request.path_params["model_id"]
+        try:
+            req = json.loads(await request.body() or b"{}")
+        except json.JSONDecodeError:
+            return _error("Invalid JSON body", "ValidationException", 400)
+
+        def frames():
+            try:
+                for event_type, payload in self.adapter.converse_stream(
+                    model_id=model_id,
+                    messages=req.get("messages", []),
+                    system=req.get("system"),
+                    inference_config=req.get("inferenceConfig"),
+                ):
+                    yield encode_event(event_type, payload)
+            except Exception as err:  # noqa: BLE001
+                yield encode_event("internalServerException", {"message": str(err)})
+
+        return StreamingResponse(
+            frames(), media_type="application/vnd.amazon.eventstream"
+        )
 
     async def converse(self, request: Request) -> Response:
         """Handle POST /model/{modelId}/converse and return a Bedrock Converse response."""
@@ -236,6 +288,16 @@ def create_app(
             ),
             Route(
                 "/model/{model_id:path}/converse", runtime.converse, methods=["POST"]
+            ),
+            Route(
+                "/model/{model_id:path}/invoke-with-response-stream",
+                runtime.invoke_model_with_response_stream,
+                methods=["POST"],
+            ),
+            Route(
+                "/model/{model_id:path}/converse-stream",
+                runtime.converse_stream,
+                methods=["POST"],
             ),
             # bedrock control plane
             Route(

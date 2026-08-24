@@ -57,3 +57,42 @@ def test_invoke_model(bedrock, model):
     )
     payload = json.loads(resp["body"].read())
     assert payload["content"][0]["text"]
+
+
+def test_invoke_model_with_response_stream(bedrock, model):
+    body = json.dumps(
+        {
+            "anthropic_version": "bedrock-2023-05-31",
+            "max_tokens": 16,
+            "messages": [{"role": "user", "content": "Say hello."}],
+        }
+    )
+    resp = bedrock.invoke_model_with_response_stream(modelId=model, body=body)
+    text, saw_stop = "", False
+    for event in resp["body"]:
+        chunk = json.loads(event["chunk"]["bytes"])
+        if chunk.get("type") == "content_block_delta":
+            text += chunk["delta"]["text"]
+        if chunk.get("type") == "message_stop":
+            saw_stop = True
+    assert text.strip()
+    assert saw_stop
+
+
+def test_converse_stream(bedrock, model):
+    resp = bedrock.converse_stream(
+        modelId=model,
+        messages=[{"role": "user", "content": [{"text": "Reply with one word."}]}],
+        inferenceConfig={"maxTokens": 16},
+    )
+    text, stop_reason, usage = "", None, None
+    for event in resp["stream"]:
+        if "contentBlockDelta" in event:
+            text += event["contentBlockDelta"]["delta"]["text"]
+        if "messageStop" in event:
+            stop_reason = event["messageStop"]["stopReason"]
+        if "metadata" in event:
+            usage = event["metadata"]["usage"]
+    assert text.strip()
+    assert stop_reason == "end_turn"
+    assert usage["totalTokens"] >= 0

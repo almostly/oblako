@@ -117,6 +117,105 @@ class BedrockAdapter:
             },
         }
 
+    # -- streaming ----------------------------------------------------------
+    def invoke_model_stream(self, model_id: str, body: bytes | str):
+        """Stream invoke_model, yielding Anthropic-style chunk dicts.
+
+        Each dict is one streaming event ({message_start, content_block_delta,
+        content_block_stop, message_delta, message_stop}); the runtime app frames
+        each as a Bedrock ``chunk`` event.
+        """
+        if isinstance(body, bytes):
+            body = body.decode("utf-8")
+        request = json.loads(body)
+        messages = self._extract_messages(request)
+        yield {
+            "type": "message_start",
+            "message": {"role": "assistant", "content": [], "model": model_id},
+        }
+        yield {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}
+        output_tokens = input_tokens = 0
+        for piece in self.backend.chat_stream(
+            model_id,
+            messages,
+            max_tokens=request.get("max_tokens"),
+            temperature=request.get("temperature"),
+            top_p=request.get("top_p"),
+        ):
+            if "text" in piece:
+                yield {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": piece["text"]},
+                }
+            if piece.get("done"):
+                input_tokens = piece.get("input_tokens", 0)
+                output_tokens = piece.get("output_tokens", 0)
+        yield {"type": "content_block_stop", "index": 0}
+        yield {
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": output_tokens},
+        }
+        yield {
+            "type": "message_stop",
+            "amazon-bedrock-invocationMetrics": {
+                "inputTokenCount": input_tokens,
+                "outputTokenCount": output_tokens,
+            },
+        }
+
+    def converse_stream(
+        self,
+        model_id: str,
+        messages: list[dict],
+        system: list[dict] | None = None,
+        inference_config: dict | None = None,
+    ):
+        """Stream converse, yielding (event_type, payload) for each Converse event."""
+        chat_messages = []
+        if system and (text := " ".join(b.get("text", "") for b in system)):
+            chat_messages.append({"role": "system", "content": text})
+        for msg in messages:
+            text = " ".join(
+                b.get("text", "")
+                for b in msg.get("content", [])
+                if isinstance(b, dict) and "text" in b
+            )
+            chat_messages.append({"role": msg["role"], "content": text})
+
+        cfg = inference_config or {}
+        yield "messageStart", {"role": "assistant"}
+        input_tokens = output_tokens = 0
+        for piece in self.backend.chat_stream(
+            model_id,
+            chat_messages,
+            max_tokens=cfg.get("maxTokens"),
+            temperature=cfg.get("temperature"),
+            top_p=cfg.get("topP"),
+        ):
+            if "text" in piece:
+                yield (
+                    "contentBlockDelta",
+                    {"delta": {"text": piece["text"]}, "contentBlockIndex": 0},
+                )
+            if piece.get("done"):
+                input_tokens = piece.get("input_tokens", 0)
+                output_tokens = piece.get("output_tokens", 0)
+        yield "contentBlockStop", {"contentBlockIndex": 0}
+        yield "messageStop", {"stopReason": "end_turn"}
+        yield (
+            "metadata",
+            {
+                "usage": {
+                    "inputTokens": input_tokens,
+                    "outputTokens": output_tokens,
+                    "totalTokens": input_tokens + output_tokens,
+                },
+                "metrics": {"latencyMs": 0},
+            },
+        )
+
     # -- converse -----------------------------------------------------------
     def converse(
         self,
