@@ -24,4 +24,5 @@ services
 dashboard
 runtimes
 api
+license
 ```

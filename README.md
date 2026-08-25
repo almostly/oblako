@@ -110,3 +110,14 @@ backend, selected with `OBLAKO_CONTAINER_BACKEND`: `docker` (default), `podman`,
 The full docs (architecture, every service with its limitations, the dashboard,
 container runtimes, and the Python API reference) live at
 **[oblako-sdk.almostly.ai](https://oblako-sdk.almostly.ai/)**.
+
+## License
+
+oblako is open core. This repository is the open-source edition, licensed under
+the [Apache License 2.0](LICENSE); see [`NOTICE`](NOTICE). Commercial Pro and
+hosted editions are offered separately under their own terms.
+
+oblako orchestrates third-party engines (moto, S3Proxy, Trino, Postgres, and
+others) that it pulls at runtime rather than redistributing; each keeps its own
+license. Two of them (Citus, DynamoDB Local) carry terms that matter for
+commercial use, inventoried in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).

@@ -7,14 +7,15 @@ This page lists what each one provides and where it diverges from AWS.
 
 | Service | Description | Limitations |
 |---|---|---|
-| **Bedrock (runtime)** | `bedrock-runtime` `invoke_model` / `converse`, translated to **Ollama** (offline) or **OpenRouter** (real frontier models with your key). | Local model quality ≠ frontier unless using the OpenRouter backend. |
+| **Bedrock (runtime)** | `bedrock-runtime` `invoke_model` / `converse`, plus **streaming** (`invoke_model_with_response_stream`, `converse_stream`) with real Bedrock eventstream framing. Translated to **Ollama** (offline) or **OpenRouter** (real frontier models with your key). | Local model quality ≠ frontier unless using the OpenRouter backend. |
 | **Bedrock (control plane)** | `bedrock`: foundation-model catalog + batch model-invocation jobs. | Catalog is curated, not the full AWS list. |
-| **Bedrock embeddings** | Ollama + `nomic-embed-text` for RAG vectors. | Embedding dims/model differ from Titan/Cohere. |
+| **Bedrock Guardrails** | `bedrock` guardrail CRUD + `bedrock-runtime` `ApplyGuardrail`; enforces custom word filters and denied-topic policies, returns `GUARDRAIL_INTERVENED` with per-policy assessments. | Content-filter and PII (`sensitiveInformation`) policies are stored but not enforced; the managed profanity list is small. |
+| **Bedrock embeddings** | Titan Embed v1/v2 and Cohere Embed v3 mapped to Ollama `nomic-embed-text`; responses shaped per model family. | Vectors are `nomic-embed-text`'s, not the native Titan/Cohere dimensions; OpenRouter backend has no embedding support. |
 | **Bedrock Agents** | Agent loop with local tool calls (Ollama + SAM local). | No managed orchestration; tool-calling quality is model-dependent. |
 | **Bedrock AgentCore (Runtime)** | Local agent on the `/invocations` + `/ping` contract via the `bedrock-agentcore` SDK. | Runtime only, Gateway/Memory/Identity are managed-only. |
 | **Bedrock Knowledge Bases** | Vector search with k-NN over **OpenSearch**. | Retrieval only; no managed ingestion pipeline. |
-| **SageMaker** | SDK **local mode**: real Docker training containers (`instance_type="local"`). | Needs `oblako[sagemaker]` (v2 SDK) + Docker; local mode only. |
-| **SageMaker MLflow** | Managed MLflow tracking-server container (SigV4 auth, boto3-style creds). | Needs `oblako[mlflow]`. |
+| **SageMaker** | Own Docker engine on the real `/opt/ml` contract (channels copied in, `model.tar.gz` collected, container polled on `/ping` and invoked on `:8080`). Covers training, HPO/AMT tuning, processing, batch transform, real-time + **async** (+ SNS) + **multi-model** endpoints, Studio domains/user-profiles, Feature Store, Model Monitor + data capture, and Model Registry. | Needs `oblako[sagemaker]` (v3 SDK) + Docker. Compute is local containers, not managed instances (`instance_type` is cosmetic); Feature Store online store is in-memory; Model Monitor is a one-shot violations report; HPO search is TPE/random, not AWS's Bayesian tuner; serverless config is echoed, not a distinct runtime. |
+| **SageMaker MLflow** | Managed MLflow tracking-server container (SigV4 auth, boto3-style creds); the `…:mlflow-tracking-server/…` ARN resolves to the local server. | Needs `oblako[mlflow]`. |
 
 ## Storage & databases
 
@@ -22,8 +23,8 @@ This page lists what each one provides and where it diverges from AWS.
 |---|---|---|
 | **S3** | S3 API over the local filesystem (S3Proxy). | No flexible-checksum / `aws-chunked`; oblako sets checksum calc `when_required`. |
 | **S3 Tables / Iceberg** | Iceberg REST catalog with tables on S3Proxy. | Iceberg-on-S3; not the managed S3 Tables maintenance (compaction etc.). |
-| **DynamoDB** | Amazon's DynamoDB Local. | Single local instance; no Streams→Lambda wiring. |
-| **Kinesis** | Kinesis Data Streams via kinesalite (`saidsef/aws-kinesis-local`). | Streams only; no Firehose / Managed Flink. |
+| **DynamoDB** | Amazon's DynamoDB Local, with a proxy that adds native **vector search**: `VectorIndexes` on `CreateTable`/`UpdateTable` + `SearchVectors` (k-NN). | Single local instance; no Streams→Lambda wiring. `SearchVectors` is brute-force KNN (full scan), not ANN; the vector index isn't persisted across restart. |
+| **Kinesis** | Kinesis Data Streams via kinesalite (`saidsef/aws-kinesis-local`). | Streams only; no Managed Flink. (Firehose is a separate service, see Analytics.) |
 | **Redshift** | PostgreSQL 16 impersonating Redshift; `redshift-connector`/dbt connect natively. A bundled proxy tolerates physical DDL (`DISTKEY`/`SORTKEY`/`ENCODE`, `varchar(max)`), terminates TLS, and bridges `COPY`/`UNLOAD` to/from `s3://` (Parquet, CSV, and delimited text) so awswrangler, dbt, and Feast load/unload for real. `SUPER` (jsonb-backed) with PartiQL navigation (`data.a.b`, `data['a'][0]`), `LISTAGG` (→ `string_agg`), `PIVOT`/`UNPIVOT` (→ standard SQL), and native JSON functions are supported. | Row-store, not columnar; late-binding views unsupported; Python UDFs are Python 3; the S3 bridge covers Parquet/CSV/text (not JSON/AVRO/ORC); SUPER dot-navigation yields text (numeric compares need a cast); PIVOT/UNPIVOT need a subquery source (a bare table has no schema in the proxy). |
 | **Redshift (control plane)** | `redshift` clusters/nodes/endpoints/snapshots via moto. | Metadata only, the cluster endpoint isn't the queryable engine. |
 | **Redshift Data API** | `redshift-data`; SQL executes for real against the engine (through the same proxy, so its `COPY`/`UNLOAD` reach S3 too). Feast's Redshift offline store works end to end. | Statement results buffered in memory. |
@@ -35,7 +36,8 @@ This page lists what each one provides and where it diverges from AWS.
 
 | Service | Description | Limitations |
 |---|---|---|
-| **Athena** | Athena-style SQL over the Iceberg REST catalog (= S3 Tables), via **Trino**. | Trino SQL dialect, not Athena/Presto-exact; no workgroups/federation. |
+| **Athena** | The real boto3 `athena` API (`StartQueryExecution`, `GetQueryExecution`, `GetQueryResults`, `StopQueryExecution`) executed via **Trino**, with results written to the S3 `OutputLocation`. | Trino SQL dialect, not Athena/Presto-exact; `StopQueryExecution` is best-effort (Trino runs to completion); no workgroups/federation. |
+| **Firehose** | `firehose` delivery streams: `DirectPut` and `KinesisStreamAsSource` sources, buffered and flushed to **S3** or **Redshift** (S3 staging + `COPY`). | Only S3 and Redshift destinations; buffering floors aren't enforced. |
 | **Glue (jobs)** | PySpark jobs in the official `amazon/aws-glue-libs:5` image (per-job container). | ~5 GB image; sequential workflows only (no full DAGs/crawlers). |
 | **Glue Data Catalog** | boto3 `glue` client bridged to the Iceberg REST catalog. | Catalog operations over Iceberg; not the full Glue catalog surface. |
 
@@ -45,7 +47,8 @@ This page lists what each one provides and where it diverges from AWS.
 |---|---|---|
 | **Step Functions** | Amazon's `aws-stepfunctions-local`. | Lambda-backed states need a running SAM CLI. |
 | **Lambda** | Control plane + **real Docker-based invocation**. | x86_64 + python3.12 runtime image; SAM CLI for the dev-loop. |
-| **ECS / Fargate** | `ecs` control plane (moto) + **each task is a real container**; `run_task`/`create_service` launch the image, wired to oblako's endpoints and published on a host port. | Fargate launch type; no continuous reconciliation/autoscaling; per-task compute needs a Docker socket. |
+| **ECS / Fargate** | `ecs` control plane (moto) + **each task is a real container**; `run_task`/`create_service` launch the image, wired to oblako's endpoints and published on a host port. Tasks also get the **ECS task metadata endpoint** (`ECS_CONTAINER_METADATA_URI[_V4]`) that AWS containers read. | Fargate launch type; no continuous reconciliation/autoscaling; per-task compute needs a Docker socket. |
+| **EKS** | `eks` control plane (moto): create/describe/list clusters. | Control-plane metadata only; no real Kubernetes data plane (for local k8s, use the Kubernetes container backend). |
 | **ELBv2 (ALB)** | `elbv2` control plane (moto) + **each load balancer is a real Caddy reverse proxy** that round-robins to the targets with the target group's health check; `DNSName` resolves to `localhost:<port>`. | ALB (HTTP); no listener-rule path routing yet; NLB/GWLB not modelled. |
 | **API Gateway** | External, AWS SAM CLI (`sam local start-api`) routing HTTP to your functions. | oblako doesn't manage it; bring your own SAM CLI. |
 
@@ -58,6 +61,8 @@ This page lists what each one provides and where it diverges from AWS.
 | **EC2** | moto control plane + real container-backed instances. | `describe_*` fidelity; instances are containers, not VMs. |
 | **OpenSearch** | OpenSearch single-node (Knowledge Bases / RAG). | Security plugin disabled for local use. |
 | **AppConfig** | Python reimplementation (control + data plane + rule evaluation). | Reimplementation, not the AWS engine. |
+| **EventBridge** | `events` control plane (moto) + a proxy that actually **fires rule targets**: it delivers to **Redshift Data** targets (running `ExecuteStatement`) and fires **scheduled** `rate(...)` rules on cadence. | moto already delivers SQS/SNS/Lambda targets natively; the proxy adds only Redshift Data + scheduling. |
+| **Common services (moto)** | Surfaced as-is via the moto container so unmodified boto3 works: `sns`, `sqs`, `sts`, `secretsmanager`, `ssm`, `kms`, `cloudwatch` (metrics), `logs` (CloudWatch Logs), `ecr`. | moto's control-plane fidelity; no data-plane behavior beyond what moto implements. |
 
 ---
 
@@ -141,7 +146,7 @@ the proxy turns `CREATE TABLE … DISTKEY(col)` into a `create_distributed_table
 after the CREATE commits; a `SORTKEY` becomes a btree index on those columns.
 Tables with no distribution style (EVEN/AUTO) stay local on the coordinator. It
 works whether the DDL is autocommitted or inside a transaction (dbt wraps its
-models in one) — the distribution fires on commit, so rows written in the same
+models in one): the distribution fires on commit, so rows written in the same
 transaction are preserved. So a dbt model with a `dist`/`sort` config, or any
 `DISTKEY` DDL, shards with no code change.
 The image (`oblako/images/redshift-cluster`) builds from the single-node one and
@@ -179,10 +184,43 @@ S3 API backed by S3Proxy over the local filesystem.
 
 ## SageMaker
 
-Runs the SageMaker SDK's **local mode**, `instance_type="local"` launches real
-Docker training containers.
+oblako runs SageMaker workloads in **its own Docker containers**, honoring the
+real `/opt/ml` contract: input channels are copied in (`put_archive`), the model
+artifact is collected from `/opt/ml/model` as `model.tar.gz` (`get_archive`), and
+serving containers are polled on `/ping` and invoked on `:8080/invocations`. It
+does **not** rely on the SDK's local mode, so it pins `sagemaker>=3.4,<4` (v3) as
+a client-only dependency. Three clients all point at the same engine:
+`sagemaker` (control plane), `sagemaker-runtime`, and
+`sagemaker-featurestore-runtime`.
+
+The implemented surface:
+
+- **Training / HPO / processing / transform.** `CreateTrainingJob`,
+  `CreateHyperParameterTuningJob` (AMT), `CreateProcessingJob`,
+  `CreateTransformJob`, each with its `Describe*`/`List*`/`Stop*` operations,
+  running the job's image for real.
+- **Endpoints.** `CreateModel` / `CreateEndpointConfig` / `CreateEndpoint` and
+  invocation, including **async inference** (`InvokeEndpointAsync`, S3 in and out,
+  with an SNS success/error notification) and **multi-model endpoints** (models
+  loaded on demand by the `X-Amzn-SageMaker-Target-Model` header).
+- **Studio.** `CreateDomain` / `CreateUserProfile` and their lifecycle ops.
+- **Feature Store.** `CreateFeatureGroup` + `PutRecord` / `GetRecord` /
+  `BatchGetRecord`; the online store is in-memory, the offline store appends
+  Parquet to S3.
+- **Model Monitor.** Monitoring schedules plus endpoint **data capture** (the
+  real `captureData` envelope) written to S3, with a violations report.
+- **Model Registry.** Versioned model package groups and packages with approval
+  status.
+- Tags (`AddTags` / `ListTags` / `DeleteTags`) across all of the above.
 
 **Limitations**
 
-- Requires `pip install 'oblako[sagemaker]'` (pinned to the v2 SDK, v3 dropped
-  local mode) and Docker.
+- Requires `pip install 'oblako[sagemaker]'` (v3 SDK, client-only) and Docker.
+- Compute is local Docker containers, not managed instances; `instance_type` is
+  cosmetic (`local_gpu` requests all GPUs).
+- The Feature Store online store is in-memory (lost on restart); the offline store
+  is plain Parquet append, not the managed Glue/Iceberg-cataloged store.
+- Model Monitor produces a one-shot violations report, not scheduled drift
+  detection. HPO uses a TPE (Syne Tune) or random searcher, not AWS's Bayesian
+  tuner. `ServerlessConfig` is accepted and echoed back, but endpoints are still
+  container-backed.
