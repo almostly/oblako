@@ -1,0 +1,11 @@
+oblako
+Copyright 2026 Almostly
+
+This product is licensed under the Apache License, Version 2.0 (see the LICENSE
+file). It is the open-core edition of oblako; commercial "Pro" / hosted editions
+are offered separately under their own terms.
+
+oblako simulates the topology around real local engines. It orchestrates a
+number of third-party components (run as separate processes / Docker containers),
+each under its own license. oblako does not redistribute those components; they
+are pulled by the user at runtime. See THIRD_PARTY_LICENSES.md for the inventory.
