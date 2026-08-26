@@ -14,6 +14,8 @@ OBLAKO_TEST_RS_PORT / OBLAKO_TEST_S3_ENDPOINT (used to run against an isolated
 stack without touching a warehouse already on 5439).
 """
 
+import gzip
+import json
 import os
 
 import boto3
@@ -249,3 +251,102 @@ def test_awswrangler_copy_and_unload(s3, monkeypatch, tmp_path):
         assert list(out["name"]) == ["x", "y", "z"]
     finally:
         con.close()
+
+
+def _super(value):
+    """A SUPER (jsonb-domain) column comes back as JSON text via psycopg2."""
+    return value if isinstance(value, (list, dict)) else json.loads(value)
+
+
+def test_json_copy_auto_shreds_columns_and_super(conn, s3):
+    """FORMAT JSON 'auto' matches keys to columns; nested values land in SUPER."""
+    body = (
+        b'{"r_regionkey":0,"r_name":"AFRICA","r_nations":[{"n":"AF"},{"n":"EG"}]}\n'
+        b'{"r_regionkey":1,"r_name":"AMERICA","r_nations":[]}'
+    )
+    s3.put_object(Bucket=BUCKET, Key="json_auto/data.json", Body=body)
+    cur = conn.cursor()
+    cur.execute("DROP TABLE IF EXISTS cu_json_auto")
+    cur.execute(
+        "CREATE TABLE cu_json_auto (r_regionkey smallint, r_name varchar, r_nations super)"
+    )
+    cur.execute(
+        "COPY cu_json_auto FROM 's3://rs-bridge-test/json_auto/' "
+        "IAM_ROLE 'x' FORMAT AS JSON 'auto'"
+    )
+    cur.execute("SELECT r_regionkey, r_name, r_nations FROM cu_json_auto ORDER BY r_regionkey")
+    rows = cur.fetchall()
+    assert [(r[0], r[1]) for r in rows] == [(0, "AFRICA"), (1, "AMERICA")]
+    assert _super(rows[0][2]) == [{"n": "AF"}, {"n": "EG"}]
+    assert _super(rows[1][2]) == []
+    cur.execute("DROP TABLE cu_json_auto")
+
+
+def test_json_copy_auto_ignorecase(conn, s3):
+    """'auto ignorecase' matches mixed-case JSON keys to lower-case columns."""
+    s3.put_object(Bucket=BUCKET, Key="json_ic/d.json", Body=b'{"Id":5,"Name":"x"}')
+    cur = conn.cursor()
+    cur.execute("DROP TABLE IF EXISTS cu_json_ic")
+    cur.execute("CREATE TABLE cu_json_ic (id int, name varchar)")
+    cur.execute(
+        "COPY cu_json_ic FROM 's3://rs-bridge-test/json_ic/' "
+        "IAM_ROLE 'x' JSON 'auto ignorecase'"
+    )
+    cur.execute("SELECT id, name FROM cu_json_ic")
+    assert cur.fetchall() == [(5, "x")]
+    cur.execute("DROP TABLE cu_json_ic")
+
+
+def test_json_copy_noshred_into_super(conn, s3):
+    """'noshred' loads the whole JSON document into a single SUPER column."""
+    s3.put_object(Bucket=BUCKET, Key="json_ns/d.json", Body=b'{"a":1,"b":{"c":2}}')
+    cur = conn.cursor()
+    cur.execute("DROP TABLE IF EXISTS cu_json_ns")
+    cur.execute("CREATE TABLE cu_json_ns (rdata super)")
+    cur.execute(
+        "COPY cu_json_ns FROM 's3://rs-bridge-test/json_ns/' IAM_ROLE 'x' JSON 'noshred'"
+    )
+    cur.execute("SELECT rdata FROM cu_json_ns")
+    assert _super(cur.fetchone()[0]) == {"a": 1, "b": {"c": 2}}
+    cur.execute("DROP TABLE cu_json_ns")
+
+
+def test_json_copy_jsonpaths(conn, s3):
+    """A jsonpaths file maps JSON paths to columns positionally."""
+    s3.put_object(
+        Bucket=BUCKET, Key="json_jp/d.json", Body=b'{"rk":0,"nm":"AF","meta":{"x":1}}'
+    )
+    s3.put_object(
+        Bucket=BUCKET,
+        Key="paths/np.json",
+        Body=b'{"jsonpaths":["$.rk","$.nm","$.meta"]}',
+    )
+    cur = conn.cursor()
+    cur.execute("DROP TABLE IF EXISTS cu_json_jp")
+    cur.execute("CREATE TABLE cu_json_jp (regionkey smallint, name varchar, meta super)")
+    cur.execute(
+        "COPY cu_json_jp FROM 's3://rs-bridge-test/json_jp/' "
+        "IAM_ROLE 'x' FORMAT AS JSON 's3://rs-bridge-test/paths/np.json'"
+    )
+    cur.execute("SELECT regionkey, name, meta FROM cu_json_jp")
+    row = cur.fetchone()
+    assert (row[0], row[1]) == (0, "AF")
+    assert _super(row[2]) == {"x": 1}
+    cur.execute("DROP TABLE cu_json_jp")
+
+
+def test_json_copy_gzip(conn, s3):
+    """GZIP-compressed JSON is decompressed and loaded."""
+    s3.put_object(
+        Bucket=BUCKET, Key="json_gz/d.json.gz", Body=gzip.compress(b'{"a":7,"b":8}')
+    )
+    cur = conn.cursor()
+    cur.execute("DROP TABLE IF EXISTS cu_json_gz")
+    cur.execute("CREATE TABLE cu_json_gz (a int, b int)")
+    cur.execute(
+        "COPY cu_json_gz FROM 's3://rs-bridge-test/json_gz/' "
+        "IAM_ROLE 'x' FORMAT AS JSON 'auto' GZIP"
+    )
+    cur.execute("SELECT a, b FROM cu_json_gz")
+    assert cur.fetchall() == [(7, 8)]
+    cur.execute("DROP TABLE cu_json_gz")
