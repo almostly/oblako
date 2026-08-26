@@ -6,7 +6,9 @@ SQL reaches PostgreSQL. Covers the shapes clients emit (Feast, awswrangler, dbt)
 including options the bridge accepts and ignores.
 """
 
+import gzip
 import importlib.util
+import io
 import pathlib
 
 _PATH = (
@@ -131,6 +133,38 @@ def test_detect_format():
     assert _mod._detect_format("IAM_ROLE 'x' FORMAT AS CSV") == "CSV"
     assert _mod._detect_format("IAM_ROLE 'x'") == "TEXT"  # default delimited
     assert _mod._detect_format("FORMAT AS AVRO") == "AVRO"  # unsupported -> named
+    assert _mod._detect_format("FORMAT AS JSON 'auto'") == "JSON"
+    assert _mod._detect_format("JSON 'noshred'") == "JSON"  # bare form
+    # a `.json` jsonpaths filename alone must not read as JSON format
+    assert _mod._detect_format("IAM_ROLE 'x' DELIMITER 's3://b/x.json'") == "TEXT"
+
+
+# --- JSON COPY: parsing ----------------------------------------------------
+def test_parse_copy_json_variants():
+    for tail, arg in [
+        ("FORMAT AS JSON 'auto'", "auto"),
+        ("JSON 'auto ignorecase'", "auto ignorecase"),
+        ("FORMAT JSON 'noshred'", "noshred"),
+        ("FORMAT AS JSON 's3://b/paths.json'", "s3://b/paths.json"),
+    ]:
+        cmd = _mod.parse_copy(f"COPY t FROM 's3://b/k' IAM_ROLE 'x' {tail}")
+        assert cmd.fmt == "JSON"
+        assert cmd.json_arg == arg
+
+
+def test_parse_copy_compression():
+    cmd = _mod.parse_copy("COPY t FROM 's3://b/k' JSON 'auto' GZIP")
+    assert cmd.fmt == "JSON" and cmd.compression == "gzip"
+    assert _mod.parse_copy("COPY t FROM 's3://b/k' CSV BZIP2").compression == "bzip2"
+    assert _mod.parse_copy("COPY t FROM 's3://b/k' CSV").compression is None
+
+
+def test_rewrite_json_copy_carries_arg_and_compression():
+    out = _mod.rewrite_copy_unload("COPY t FROM 's3://b/k' JSON 'auto' GZIP")
+    assert out.startswith("SELECT oblako_copy_from_s3(")
+    assert "$ob$JSON$ob$" in out
+    assert '"json_arg": "auto"' in out
+    assert '"compression": "gzip"' in out
 
 
 def test_parse_copy_csv_options():
@@ -171,3 +205,84 @@ def test_rewrite_csv_copy_carries_format_and_options():
     # options are passed as a JSON blob the engine function parses
     assert '"delimiter": ","' in out
     assert '"ignore_header": 1' in out
+
+
+# --- JSON COPY: shredding logic (engine side, no container) ----------------
+class _FakeS3:
+    """Minimal S3 stub: get_object returns a Body with .read()."""
+
+    def __init__(self, objects):
+        self.objects = objects  # {key: bytes}
+
+    def get_object(self, Bucket, Key):
+        return {"Body": io.BytesIO(self.objects[Key])}
+
+
+class _FakePlpy:
+    def error(self, msg):
+        raise AssertionError(f"plpy.error: {msg}")
+
+
+def test_json_path_expressions():
+    rec = {"a": 1, "b": {"c": 2}, "d": [10, 20]}
+    assert _mod._json_path(rec, "$") == rec
+    assert _mod._json_path(rec, "$.a") == 1
+    assert _mod._json_path(rec, "$.b.c") == 2
+    assert _mod._json_path(rec, "$['b']['c']") == 2
+    assert _mod._json_path(rec, "$.d[1]") == 20
+    assert _mod._json_path(rec, "$.missing") is None
+
+
+def test_iter_json_records_array_and_concatenated():
+    assert list(_mod._iter_json_records(b'[{"a":1},{"a":2}]')) == [{"a": 1}, {"a": 2}]
+    got = list(_mod._iter_json_records(b'{"a":1}\n{"a":2} {"a":3}'))
+    assert got == [{"a": 1}, {"a": 2}, {"a": 3}]
+
+
+def test_decompress_gzip_and_bzip2_and_autodetect():
+    import bz2
+
+    assert _mod._decompress(gzip.compress(b"hi"), "gzip") == b"hi"
+    assert _mod._decompress(bz2.compress(b"hi"), "bzip2") == b"hi"
+    assert _mod._decompress(gzip.compress(b"hi"), None) == b"hi"  # magic-byte detect
+    assert _mod._decompress(b"plain", None) == b"plain"
+
+
+def test_json_rows_auto_keeps_nested_for_super():
+    s3 = _FakeS3({"k": b'{"a":1,"b":{"c":2}}\n{"a":3,"b":[1,2]}'})
+    rows = _mod._json_rows(_FakePlpy(), s3, "bkt", ["k"], ["a", "b"], "auto", None)
+    assert rows == [[1, {"c": 2}], [3, [1, 2]]]
+
+
+def test_json_rows_auto_ignorecase():
+    s3 = _FakeS3({"k": b'{"A":1,"B":2}'})
+    rows = _mod._json_rows(
+        _FakePlpy(), s3, "bkt", ["k"], ["a", "b"], "auto ignorecase", None
+    )
+    assert rows == [[1, 2]]
+
+
+def test_json_rows_noshred_whole_doc():
+    s3 = _FakeS3({"k": b'{"x":1,"y":[2,3]}'})
+    rows = _mod._json_rows(_FakePlpy(), s3, "bkt", ["k"], ["rdata"], "noshred", None)
+    assert rows == [[{"x": 1, "y": [2, 3]}]]
+
+
+def test_json_rows_jsonpaths_positional():
+    s3 = _FakeS3(
+        {
+            "k": b'{"r_regionkey":0,"r_name":"AF","meta":{"x":1}}',
+            "paths.json": b'{"jsonpaths":["$.r_regionkey","$.r_name","$.meta"]}',
+        }
+    )
+    rows = _mod._json_rows(
+        _FakePlpy(), s3, "bkt", ["k"], ["a", "b", "c"], "s3://bkt/paths.json", None
+    )
+    assert rows == [[0, "AF", {"x": 1}]]
+
+
+def test_json_rows_gzip():
+    s3 = _FakeS3({"k": gzip.compress(b'{"a":1}')})
+    assert _mod._json_rows(_FakePlpy(), s3, "bkt", ["k"], ["a"], "auto", "gzip") == [[1]]
+    # auto-detect gzip without the token
+    assert _mod._json_rows(_FakePlpy(), s3, "bkt", ["k"], ["a"], "auto", None) == [[1]]

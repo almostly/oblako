@@ -17,9 +17,12 @@ the simple ('Q') and extended ('P'/'B'/'E') protocols, and because the function
 runs in-session (SPI) it sees temporary tables created earlier in the same batch
 (the redshift-data engine's ``CREATE TEMP TABLE ...; UNLOAD(...)`` pattern).
 
-Formats: ``PARQUET`` (default when a client says so; via pyarrow), ``CSV``, and the
-default delimited ``TEXT`` (pipe) format; the last two via the stdlib ``csv`` with
-``DELIMITER`` / ``HEADER`` / ``IGNOREHEADER`` / ``NULL AS`` / ``QUOTE`` options.
+Formats: ``PARQUET`` (default when a client says so; via pyarrow), ``CSV``, the
+default delimited ``TEXT`` (pipe) format via the stdlib ``csv`` (with ``DELIMITER``
+/ ``HEADER`` / ``IGNOREHEADER`` / ``NULL AS`` / ``QUOTE`` options), and ``JSON``
+(``FORMAT AS JSON 'auto' | 'auto ignorecase' | 'noshred' | 's3://.../paths.json'``)
+which shreds into columns incl. SUPER. ``GZIP`` / ``BZIP2`` / ``ZSTD`` compression
+is decompressed on read (gzip is also auto-detected by magic bytes).
 
 Self-contained (no ``oblako`` imports) so it can be copied into the redshift image
 next to ``redshift_proxy.py`` and imported both by the proxy (``rewrite_*``,
@@ -125,18 +128,26 @@ def _bucket_key(uri: str) -> tuple[str, str]:
     return bucket, key
 
 
-_SUPPORTED_FORMATS = ("PARQUET", "CSV", "TEXT")
-_UNSUPPORTED_FORMAT = re.compile(r"(?i)\b(?:format\s+(?:as\s+)?)?(json|avro|orc)\b")
+_SUPPORTED_FORMATS = ("PARQUET", "CSV", "TEXT", "JSON")
+_UNSUPPORTED_FORMAT = re.compile(r"(?i)\b(avro|orc)\b")
+# [FORMAT [AS]] JSON [ 'auto' | 'auto ignorecase' | 'noshred' | 's3://.../paths.json' ]
+# The `FORMAT AS` is optional (Redshift accepts a bare `JSON 'auto'`); the bare form
+# needs the quoted arg so it can't match a `.json` filename elsewhere in the tail.
+_JSON_FMT = re.compile(r"(?i)\bformat\s+(?:as\s+)?json\b|\bjson\s+'")
+_JSON_ARG = re.compile(r"(?i)(?:\bformat\s+(?:as\s+)?)?json\s+'([^']*)'")
+_COMPRESSION = re.compile(r"(?i)\b(gzip|bzip2|zstd)\b")
 
 
 def _detect_format(opts: str) -> str:
-    """PARQUET / CSV / TEXT from a COPY/UNLOAD options tail.
+    """PARQUET / CSV / TEXT / JSON from a COPY/UNLOAD options tail.
 
-    A recognised-but-unsupported binary format (JSON/AVRO/ORC) is returned as-is
-    so the engine function raises a clear error rather than mis-reading it as text.
+    A recognised-but-unsupported binary format (AVRO/ORC) is returned as-is so the
+    engine function raises a clear error rather than mis-reading it as text.
     """
     if "PARQUET" in opts.upper():
         return "PARQUET"
+    if _JSON_FMT.search(opts):
+        return "JSON"
     if re.search(r"(?i)\bcsv\b", opts):
         return "CSV"
     other = _UNSUPPORTED_FORMAT.search(opts)
@@ -161,6 +172,8 @@ class CopyCommand(BaseModel):
     null_as: str | None = None
     quote: str | None = None
     ignore_header: int = 0
+    json_arg: str | None = None  # 'auto' | 'auto ignorecase' | 'noshred' | jsonpaths s3 uri
+    compression: str | None = None  # gzip | bzip2 | zstd
 
     @field_validator("fmt")
     @classmethod
@@ -174,6 +187,8 @@ class CopyCommand(BaseModel):
             "null_as": self.null_as,
             "quote": self.quote,
             "ignore_header": self.ignore_header,
+            "json_arg": self.json_arg,
+            "compression": self.compression,
         }
 
 
@@ -221,16 +236,24 @@ def parse_copy(stmt: str) -> CopyCommand | None:
     nullas = _NULL_AS.search(opts)
     quote = _QUOTE.search(opts)
     ihdr = _IGNOREHEADER.search(opts)
+    comp = _COMPRESSION.search(opts)
     cols = [c.strip() for c in m.group("cols").split(",")] if m.group("cols") else None
+    fmt = _detect_format(opts)
+    json_arg = None
+    if fmt == "JSON":
+        jarg = _JSON_ARG.search(opts)
+        json_arg = jarg.group(1) if jarg else "auto"  # Redshift defaults to 'auto'
     return CopyCommand(
         table=m.group("table"),
         columns=cols,
         uri=m.group("uri"),
-        fmt=_detect_format(opts),
+        fmt=fmt,
         delimiter=_unescape_delim(delim.group(1)) if delim else None,
         null_as=nullas.group(1) if nullas else None,
         quote=quote.group(1) if quote else None,
         ignore_header=int(ihdr.group(1)) if ihdr else 0,
+        json_arg=json_arg,
+        compression=comp.group(1).lower() if comp else None,
     )
 
 
@@ -499,6 +522,122 @@ def _insert_rows(plpy, table: str, columns: list[str], rows) -> int:
     return count
 
 
+# --- JSON COPY (FORMAT JSON 'auto' | 'auto ignorecase' | 'noshred' | jsonpaths) ---
+def _decompress(data: bytes, compression: str | None) -> bytes:
+    """Decompress a COPY body. Honors the COPY token, and also auto-detects a gzip
+    magic header so a Firehose-written ``.gz`` object loads without the keyword."""
+    comp = (compression or "").lower()
+    if comp == "gzip" or (not comp and data[:2] == b"\x1f\x8b"):
+        import gzip
+
+        return gzip.decompress(data)
+    if comp == "bzip2":
+        import bz2
+
+        return bz2.decompress(data)
+    if comp == "zstd":
+        import zstandard
+
+        return zstandard.ZstdDecompressor().decompress(data)
+    return data
+
+
+def _iter_json_records(data: bytes):
+    """Yield JSON objects from a COPY JSON body: a top-level array of objects, or
+    concatenated / newline-separated objects (Redshift and Firehose both occur)."""
+    text = data.decode("utf-8").strip()
+    if not text:
+        return
+    if text[0] == "[":
+        yield from json.loads(text)
+        return
+    dec = json.JSONDecoder()
+    idx, n = 0, len(text)
+    while idx < n:
+        while idx < n and text[idx] in " \t\r\n":
+            idx += 1
+        if idx >= n:
+            break
+        obj, idx = dec.raw_decode(text, idx)
+        yield obj
+
+
+_JSONPATH_TOKEN = re.compile(r"\.([A-Za-z_$][\w$]*)|\['([^']*)'\]|\[(\d+)\]")
+
+
+def _json_path(obj, path: str):
+    """Evaluate a Redshift jsonpaths expression on a record.
+
+    Supports ``$`` (whole record), ``$.a.b``, ``$['a']['b']`` and ``$[0]``.
+    """
+    if path.strip() in ("$", "$."):
+        return obj
+    cur = obj
+    for dot, bracket, index in _JSONPATH_TOKEN.findall(path):
+        if cur is None:
+            return None
+        if index:
+            i = int(index)
+            cur = cur[i] if isinstance(cur, list) and i < len(cur) else None
+        else:
+            cur = cur.get(dot or bracket) if isinstance(cur, dict) else None
+    return cur
+
+
+def _load_jsonpaths(s3, uri: str) -> list[str]:
+    """Fetch and parse a jsonpaths file (``{"jsonpaths": [ ... ]}``) from s3."""
+    bucket, k = _bucket_key(uri)
+    doc = json.loads(s3.get_object(Bucket=bucket, Key=k)["Body"].read())
+    paths = doc.get("jsonpaths")
+    if not isinstance(paths, list):
+        raise ValueError("jsonpaths file must contain a 'jsonpaths' array")
+    return paths
+
+
+def _json_rows(plpy, s3, bucket, keys, target_cols, json_arg, compression):
+    """Shred JSON object(s) under a prefix into rows aligned to ``target_cols``.
+
+    Mirrors Redshift's FORMAT JSON options: ``auto`` (match keys to column names),
+    ``auto ignorecase``, ``noshred`` (whole doc into one SUPER column), or a
+    jsonpaths s3 file (paths mapped positionally to the target columns). Nested
+    objects/arrays land in SUPER/jsonb columns via ``_insert_rows``.
+    """
+    mode = (json_arg or "auto").strip()
+    lower = mode.lower()
+    paths = None
+    if lower not in ("auto", "auto ignorecase", "noshred"):
+        paths = _load_jsonpaths(s3, mode)  # the arg is a jsonpaths s3:// uri
+        if len(paths) != len(target_cols):
+            plpy.error(
+                f"jsonpaths has {len(paths)} paths but the target has "
+                f"{len(target_cols)} column(s)"
+            )
+    if lower == "noshred" and len(target_cols) != 1:
+        plpy.error("FORMAT JSON 'noshred' requires a single (SUPER) target column")
+    rows = []
+    for k in keys:
+        data = _decompress(
+            s3.get_object(Bucket=bucket, Key=k)["Body"].read(), compression
+        )
+        for rec in _iter_json_records(data):
+            if lower == "noshred":
+                rows.append([rec])
+            elif paths is not None:
+                rows.append([_json_path(rec, p) for p in paths])
+            elif lower == "auto ignorecase":
+                low = (
+                    {kk.lower(): vv for kk, vv in rec.items()}
+                    if isinstance(rec, dict)
+                    else {}
+                )
+                rows.append([low.get(c.lower()) for c in target_cols])
+            else:  # auto
+                rows.append(
+                    [rec.get(c) if isinstance(rec, dict) else None for c in target_cols]
+                )
+    return rows
+
+
 def do_copy(
     plpy, table: str, uri: str, columns=None, fmt: str = "PARQUET", opts: str = "{}"
 ) -> int:
@@ -533,6 +672,15 @@ def do_copy(
         source = [data.column(name).to_pylist() for name in data.column_names]
         return _insert_rows(plpy, table, target_cols, zip(*source))
 
+    if fmt == "JSON":
+        # Shred JSON per the FORMAT JSON option; nested values go to SUPER columns.
+        target_cols = list(columns) if columns else _target_columns(plpy, table)
+        rows = _json_rows(
+            plpy, s3, bucket, keys, target_cols,
+            options.get("json_arg"), options.get("compression"),
+        )
+        return _insert_rows(plpy, table, target_cols, rows)
+
     # CSV / default TEXT: positional load. An empty field or the NULL sentinel
     # becomes NULL (Redshift's default for a delimited empty field).
     delim = _delimiter_for(fmt, options)
@@ -542,7 +690,10 @@ def do_copy(
     target_cols = list(columns) if columns else _target_columns(plpy, table)
     rows: list[list] = []
     for k in keys:
-        text = s3.get_object(Bucket=bucket, Key=k)["Body"].read().decode("utf-8")
+        text = _decompress(
+            s3.get_object(Bucket=bucket, Key=k)["Body"].read(),
+            options.get("compression"),
+        ).decode("utf-8")
         reader = csv.reader(io.StringIO(text), delimiter=delim, quotechar=quote)
         file_rows = list(reader)[ignore:]
         for raw in file_rows:
