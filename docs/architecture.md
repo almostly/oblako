@@ -41,11 +41,62 @@ Control planes that have no local engine (cluster/instance metadata for
 Redshift, RDS, IAM, EC2, Lambda) are served by **moto**, so `describe_*` calls
 behave; the data plane runs against the real engine.
 
-## Caddy ties the topology together
+The three families oblako covers, each service on its own fixed local port:
 
-A **Caddy** reverse proxy fronts services with AWS-style vanity hostnames
-(e.g. `mlflow.oblako.aws` → the local MLflow), so the local topology *looks*
-like AWS, not like a pile of `localhost:PORT` endpoints.
+```{figure} _static/diagrams/containers.svg
+:alt: Containers and compute — ECS, Fargate, EKS, ECR, Lambda, Step Functions
+:width: 100%
+
+Containers & compute: real containers (ECS, Fargate, EKS, ECR, Lambda, Step Functions).
+```
+
+```{figure} _static/diagrams/ai-ml.svg
+:alt: AI/ML — SageMaker, Bedrock, DynamoDB vectors, OpenSearch
+:width: 100%
+
+AI / ML: SageMaker local mode, Bedrock via Ollama, DynamoDB vector search, OpenSearch.
+```
+
+```{figure} _static/diagrams/data.svg
+:alt: Data and analytics — S3, Glue, Redshift, Athena, Kinesis, Firehose, RDS, DynamoDB
+:width: 100%
+
+Data & analytics: real engines (S3, Glue, Redshift, Athena, Kinesis, Firehose, RDS, DynamoDB).
+```
+
+## How your code reaches a service
+
+The default path has no proxy in it. `AWS_ENDPOINT_URL_*` (or an explicit
+`endpoint_url=`) points `boto3` straight at `localhost:PORT`, and the service
+container publishes that port. One client, one fixed local port, one real engine.
+
+```{figure} _static/diagrams/routing.svg
+:alt: boto3 to localhost:PORT to a real engine, with no proxy in the path
+:width: 100%
+
+boto3 / AWS CLI → `localhost:PORT` → the real engine. No proxy in the path.
+```
+
+**Caddy** sits *beside* that path, not in front of it, for two specific jobs:
+
+- **Vanity hostnames**: it gives the local **MLflow** an AWS-shaped URL
+  (`mlflow-oblako.<account>.<region>.experiments.sagemaker.aws`), so a
+  SageMaker-managed tracking server and the local one look identical to your code.
+- **Load balancing**: each **ELBv2 Application Load Balancer** is its own Caddy
+  container, round-robining across its registered targets; the LB's `DNSName`
+  resolves to `localhost:<listener-port>`.
+
+Caddy reaches upstreams on the host via the `host.docker.internal` gateway alias
+(the vmnet gateway on the Apple `container` backend), independent of any Docker
+network. Ordinary services (S3, Redshift, DynamoDB, …) are reached directly and
+never pass through it.
+
+```{figure} _static/diagrams/caddy.svg
+:alt: Caddy's two jobs — MLflow vanity host and per-ALB load balancer
+:width: 100%
+
+Caddy's two jobs beside the fixed-port path: the MLflow vanity host, and one Caddy per ELBv2 load balancer.
+```
 
 ## What this buys you
 
