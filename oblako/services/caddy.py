@@ -1,11 +1,14 @@
-"""Caddy reverse proxy — vanity AWS-style hostnames in front of oblako services.
+"""Caddy reverse proxy: vanity AWS-style hostnames in front of oblako services.
 
 Gives the MLflow App (and future services) "real-looking" URLs like
-``http://mlflow.oblako.aws`` instead of ``http://localhost:5050``. Caddy runs as
-a managed container; the Caddyfile is generated from a small route table.
+``http://mlflow-oblako.<account>.<region>.experiments.sagemaker.aws`` (the shape
+of a SageMaker-managed MLflow tracking server) instead of ``http://localhost:5050``.
+Caddy runs as a managed container; the Caddyfile is generated from a small route
+table. This is orthogonal to the ``AWS_ENDPOINT_URL_*`` contract: ordinary boto3
+traffic still hits ``localhost:<port>`` directly, not Caddy.
 
-One-time per machine: add ``127.0.0.1 mlflow.oblako.aws`` to ``/etc/hosts``
-(``oblako.vanity_hosts_line()`` prints exactly what to paste).
+One-time per machine: add the vanity host to ``/etc/hosts``
+(``CaddyService.hosts_line()`` prints exactly what to paste).
 """
 
 from __future__ import annotations
