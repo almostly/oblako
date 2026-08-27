@@ -12,7 +12,9 @@ instead (no Citus), so it only runs against an actual cluster.
 import psycopg2
 import pytest
 
-RS = dict(host="localhost", port=5439, user="oblako", password="oblako", dbname="oblako")
+RS = dict(
+    host="localhost", port=5439, user="oblako", password="oblako", dbname="oblako"
+)
 
 
 def _active_worker_count() -> int:
@@ -43,8 +45,12 @@ def conn():
     import redshift_connector
 
     c = redshift_connector.connect(
-        host="localhost", port=5439, database="oblako",
-        user="oblako", password="oblako", ssl=False,
+        host="localhost",
+        port=5439,
+        database="oblako",
+        user="oblako",
+        password="oblako",
+        ssl=False,
     )
     c.autocommit = True
     cur = c.cursor()
@@ -121,6 +127,24 @@ def _partmethod(conn, table: str, timeout: float = 8.0) -> str:
         time.sleep(0.5)
 
 
+def _poll_count(conn, sql: str, timeout: float = 8.0) -> int:
+    """Poll a scalar ``count(*)`` query until it is > 0, or return it on timeout.
+
+    Post-distribution work (SORTKEY index, etc.) lands on the same side connection
+    just after the DDL commits, and can trail the pg_dist_partition update by a
+    moment, so a single immediate read races it.
+    """
+    import time
+
+    deadline = time.time() + timeout
+    while True:
+        conn.execute(sql)
+        n = conn.fetchone()[0]
+        if n > 0 or time.time() > deadline:
+            return n
+        time.sleep(0.5)
+
+
 @cluster
 def test_auto_distribute_distkey(conn):
     # increment #2: plain Redshift DDL (no create_distributed_table) -> the proxy
@@ -165,8 +189,10 @@ def test_sortkey_becomes_an_index(conn):
         "DISTSTYLE KEY DISTKEY(user_id) SORTKEY(id)"
     )
     assert _partmethod(conn, "auto_sk") == "distributed"
-    conn.execute("SELECT count(*) FROM pg_indexes WHERE tablename = 'auto_sk'")
-    assert conn.fetchone()[0] >= 1  # the SORTKEY index
+    # the SORTKEY btree index is created just after distribution on the side
+    # connection, so poll for it rather than reading once and racing the creation
+    n = _poll_count(conn, "SELECT count(*) FROM pg_indexes WHERE tablename = 'auto_sk'")
+    assert n >= 1  # the SORTKEY index
     conn.execute("DROP TABLE auto_sk")
 
 
@@ -179,18 +205,26 @@ def test_auto_distribute_in_transaction():
     import redshift_connector
 
     c = redshift_connector.connect(
-        host="localhost", port=5439, database="oblako",
-        user="oblako", password="oblako", ssl=False,
+        host="localhost",
+        port=5439,
+        database="oblako",
+        user="oblako",
+        password="oblako",
+        ssl=False,
     )
     try:
         cur = c.cursor()
         cur.execute("DROP TABLE IF EXISTS txn_tbl")
         c.commit()
         cur.execute("CREATE TABLE txn_tbl (id bigint, k int, v numeric) DISTKEY(k)")
-        cur.execute("INSERT INTO txn_tbl SELECT g, g%200, g*1.0 FROM generate_series(1,50000) g")
+        cur.execute(
+            "INSERT INTO txn_tbl SELECT g, g%200, g*1.0 FROM generate_series(1,50000) g"
+        )
         c.commit()  # distribution fires here
         time.sleep(3)
-        cur.execute("SELECT partmethod FROM pg_dist_partition WHERE logicalrelid='txn_tbl'::regclass")
+        cur.execute(
+            "SELECT partmethod FROM pg_dist_partition WHERE logicalrelid='txn_tbl'::regclass"
+        )
         row = cur.fetchone()
         assert row and row[0] == "h", "not distributed after COMMIT"
         cur.execute("SELECT count(*) FROM txn_tbl")
