@@ -298,3 +298,21 @@ def test_acl_rewrite_leaves_other_array_to_string_alone():
         "SELECT array_to_string(t.tags, ',') FROM t",
     ):
         assert rewrite_sql(expr) == expr
+
+
+def test_password_disable_becomes_password_null():
+    """Redshift's PASSWORD DISABLE (IAM-only account) maps to PostgreSQL's NULL."""
+    for stmt in (
+        "CREATE USER bi_analyst PASSWORD DISABLE;",
+        "ALTER USER bi_analyst PASSWORD DISABLE;",
+        "create user x password   disable ;",
+    ):
+        out = rewrite_sql(stmt)
+        assert "PASSWORD NULL" in out
+        assert "DISABLE" not in out.upper()
+
+
+def test_password_literal_survives():
+    """A real password is untouched, including one that merely contains 'disable'."""
+    stmt = "CREATE USER bi_analyst PASSWORD 'disable_me_1';"
+    assert rewrite_sql(stmt) == stmt

@@ -144,6 +144,18 @@ _VARCHAR_MAX = re.compile(r"(?i)\b(?:character\s+varying|varchar)\s*\(\s*max\s*\
 # emits this for a superuser in its access-management specs.
 _CREATEUSER = re.compile(r"(?i)\bcreateuser\b")
 
+# Redshift CREATE/ALTER USER ... PASSWORD DISABLE -> PostgreSQL PASSWORD NULL.
+# DISABLE is how an IAM-only Redshift account is provisioned: the account exists and
+# holds grants, but carries no password. PostgreSQL spells that PASSWORD NULL, which
+# leaves pg_shadow.passwd NULL exactly as Redshift does. PostgreSQL has no DISABLE
+# keyword and rejects the statement outright, so any script provisioning passwordless
+# accounts fails on the first line.
+#
+# This is about accepting the statement and recording the same account state, not
+# about enforcement: the image ships pg_hba as trust and the proxy reaches the engine
+# over loopback, so no password is checked for any account either way.
+_PASSWORD_DISABLE = re.compile(r"(?i)\bpassword\s+disable\b")
+
 # Hide PostgreSQL's predefined pg_* roles from pg_catalog.pg_group, so Redshift
 # access tools (redtape) see only real groups (Redshift has no pg_* roles). Wrap
 # the table in a filtered subquery: re.sub does not re-scan its replacement, so the
@@ -236,7 +248,8 @@ def _rewrite_catalog(sql: str) -> str:
 def rewrite_sql(sql: str) -> str:
     """Rewrite Redshift-only SQL PostgreSQL can't parse.
 
-    ``VARCHAR(MAX)`` -> ``text`` (any statement); Redshift-only pg_catalog columns
+    ``VARCHAR(MAX)`` -> ``text`` and ``PASSWORD DISABLE`` -> ``PASSWORD NULL``
+    (any statement); Redshift-only pg_catalog columns
     reflection drivers read are answered with neutral literals (see
     ``_rewrite_catalog``); ACL arrays are rendered with Redshift's ``group ``
     prefix (see ``_ACL_TO_STRING``); Redshift physical-DDL storage clauses (DISTSTYLE/
@@ -256,6 +269,7 @@ def rewrite_sql(sql: str) -> str:
         s = listagg.rewrite_listagg(s)  # LISTAGG -> string_agg
     s = _VARCHAR_MAX.sub("text", s)
     s = _CREATEUSER.sub("SUPERUSER", s)
+    s = _PASSWORD_DISABLE.sub("PASSWORD NULL", s)
     s = _PG_GROUP.sub(_PG_GROUP_SUB, s)
     s = _ACL_TO_STRING.sub("redshift_acl(", s)
     s = _rewrite_catalog(s)
