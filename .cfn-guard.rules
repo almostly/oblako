@@ -1,0 +1,52 @@
+#
+# oblako's CloudFormation conventions for the example stacks under examples/.
+# Not a compliance pack: each rule encodes how an oblako example is meant to run
+# against the local control plane (moto) and tear down cleanly, so a failure means
+# a template drifted from that, not a policy opinion.
+#
+
+# ECS runs on Fargate. oblako's local ECS backend runs the container directly;
+# there is no EC2 capacity to launch onto.
+let ecs_services = Resources.*[ Type == 'AWS::ECS::Service' ]
+rule ECS_IS_FARGATE when %ecs_services !empty {
+  %ecs_services.Properties.LaunchType == 'FARGATE'
+  << Violation: oblako runs ECS on Fargate; set LaunchType to FARGATE. >>
+}
+
+# Lambda / SAM functions pin a runtime oblako's local Lambda image supports (the
+# shogo82148 AL2023 images), so `sam local` and the local Lambda runner agree.
+let sam_functions = Resources.*[ Type == 'AWS::Serverless::Function' ]
+rule LAMBDA_SUPPORTED_RUNTIME when %sam_functions !empty {
+  %sam_functions.Properties.Runtime IN ['python3.11', 'python3.12', 'python3.13', 'nodejs20.x', 'nodejs22.x']
+  << Violation: pin a runtime oblako's local Lambda image supports (e.g. python3.12). >>
+}
+
+# Log groups keep a bounded retention, so repeated local runs do not pile up.
+let log_groups = Resources.*[ Type == 'AWS::Logs::LogGroup' ]
+rule LOG_GROUPS_HAVE_RETENTION when %log_groups !empty {
+  %log_groups.Properties.RetentionInDays exists
+  << Violation: set RetentionInDays on log groups so local runs stay tidy. >>
+}
+
+# Teardown leaves nothing behind. Retainable resources delete with the stack, so
+# oblako's local control plane does not keep orphans between runs.
+let buckets = Resources.*[ Type == 'AWS::S3::Bucket' ]
+rule S3_DELETES_WITH_THE_STACK when %buckets !empty {
+  %buckets.DeletionPolicy == 'Delete'
+  %buckets.UpdateReplacePolicy == 'Delete'
+  << Violation: set DeletionPolicy and UpdateReplacePolicy to Delete on buckets. >>
+}
+
+rule S3_PUBLIC_ACCESS_BLOCKED when %buckets !empty {
+  %buckets.Properties.PublicAccessBlockConfiguration.BlockPublicAcls == true
+  %buckets.Properties.PublicAccessBlockConfiguration.BlockPublicPolicy == true
+  %buckets.Properties.PublicAccessBlockConfiguration.IgnorePublicAcls == true
+  %buckets.Properties.PublicAccessBlockConfiguration.RestrictPublicBuckets == true
+  << Violation: buckets block all public access. >>
+}
+
+let ecr_repos = Resources.*[ Type == 'AWS::ECR::Repository' ]
+rule ECR_EMPTY_ON_DELETE when %ecr_repos !empty {
+  %ecr_repos.Properties.EmptyOnDelete == true
+  << Violation: set EmptyOnDelete so a repo with images does not block stack deletion. >>
+}
