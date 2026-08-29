@@ -114,7 +114,16 @@ the group as holding nothing, and re-plan the same `GRANT`s on every pass.
 
 So `redtape export` reads oblako's users, groups, and grants, and `redtape run` plans
 `CREATE USER`/`GROUP`, `GRANT`/`REVOKE`, and `ALTER GROUP` against the real Postgres
-roles underneath, unchanged, and plans nothing once the cluster matches the spec.
+roles underneath, unchanged. Once the cluster matches the spec the group grants read
+back as granted, so the plan has nothing to change.
+
+redtape itself is less steady than that makes it sound. Its diff depends on Python's
+per-process hash ordering, so it intermittently re-plans grants that are already in
+place, at a rate that varies with the schema. Pinning `PYTHONHASHSEED` makes a plan
+reproducible but not correct, because which seeds are clean is a property of the
+schema, not of redtape. Treat an empty plan from a single run as weak evidence: apply,
+then re-plan. None of this is the compat layer, whose ACL reads are stable.
+
 The catalog compat is installed in every database, not just the one `POSTGRES_DB`
 names, because a tool managing a cluster walks `pg_database` and reconnects per
 entry.
