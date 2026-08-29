@@ -103,7 +103,7 @@ STARTUP_PROTOCOL = 196608  # 3.0
 
 
 def _load_ssl_context() -> ssl.SSLContext | None:
-    """A TLS server context from the cert/key, or None if SSL is off/absent."""
+    """Build a TLS server context from the cert/key, or None if SSL is off/absent."""
     if os.environ.get("OBLAKO_SSL", "1") != "1":
         return None
     cert = os.environ.get("OBLAKO_SSL_CERT", "/etc/oblako-redshift/server.crt")
@@ -139,6 +139,22 @@ _STRIPPERS = [
 # redshift destination emits this DDL.)
 _VARCHAR_MAX = re.compile(r"(?i)\b(?:character\s+varying|varchar)\s*\(\s*max\s*\)")
 
+# Redshift CREATE USER ... CREATEUSER (a superuser-ish privilege) -> PostgreSQL
+# SUPERUSER. Matches the one-word keyword, not the two-word "CREATE USER". redtape
+# emits this for a superuser in its access-management specs.
+_CREATEUSER = re.compile(r"(?i)\bcreateuser\b")
+
+# Hide PostgreSQL's predefined pg_* roles from pg_catalog.pg_group, so Redshift
+# access tools (redtape) see only real groups (Redshift has no pg_* roles). Wrap
+# the table in a filtered subquery: re.sub does not re-scan its replacement, so the
+# inner pg_catalog.pg_group is not itself rewritten (no recursion, no stored view
+# that the catalog tests would re-create through the proxy into a self-reference).
+_PG_GROUP = re.compile(r"(?i)\bpg_catalog\.pg_group\b")
+_PG_GROUP_SUB = (
+    "(SELECT groname, grosysid, grolist FROM pg_catalog.pg_group "
+    "WHERE groname !~ '^pg_') AS pg_group"
+)
+
 # Redshift reflection drivers (sqlalchemy-redshift, and thus Alembic) run three
 # fixed catalog queries against a forked pg_catalog. Each SELECTs local relations
 # and UNIONs in Spectrum / late-binding-view externals, using Redshift-only SQL
@@ -160,7 +176,7 @@ _VARCHAR_MAX = re.compile(r"(?i)\b(?:character\s+varying|varchar)\s*\(\s*max\s*\
 # Redshift-specific marker so ordinary catalog queries pass through untouched.
 _CATALOG_MARKER = re.compile(
     r"(?i)\b(?:reldiststyle|attencodingtype|attisdistkey|attsortkeyord"
-    r"|svv_external_\w+|pg_get_late_binding_view_cols)\b"
+    r"|usecatupd|svv_external_\w+|pg_get_late_binding_view_cols)\b"
 )
 _EXTERNAL_BRANCH = re.compile(r"(?i)svv_external_\w+|pg_get_late_binding_view_cols")
 _UNION = re.compile(r"(?i)\bunion\b(?!\s+all\b)")
@@ -171,6 +187,9 @@ _CATALOG_REWRITES = [
     (re.compile(r"(?i)\b\w+\.attsortkeyord\b"), "0"),
     # pre-PG12 pg_attrdef.adsrc, referenced unqualified (not <alias>.adsrc).
     (re.compile(r'(?i)(?<![."\w])adsrc\b'), "NULL::text AS adsrc"),
+    # pg_user.usecatupd, dropped from PG >= 9.5; redtape's user introspection
+    # selects it bare from pg_catalog.pg_user. Answer as a neutral literal.
+    (re.compile(r'(?i)(?<![."\w])usecatupd\b'), "false AS usecatupd"),
     # output-column aliases used in WHERE -> the real columns they alias.
     (re.compile(r"(?i)\band\s+schema\s*=\s*('[^']*')"), r"AND n.nspname = \1"),
     (re.compile(r"(?i)\band\s+table_name\s*=\s*('[^']*')"), r"AND c.relname = \1"),
@@ -214,6 +233,8 @@ def rewrite_sql(sql: str) -> str:
     if listagg is not None:
         s = listagg.rewrite_listagg(s)  # LISTAGG -> string_agg
     s = _VARCHAR_MAX.sub("text", s)
+    s = _CREATEUSER.sub("SUPERUSER", s)
+    s = _PG_GROUP.sub(_PG_GROUP_SUB, s)
     s = _rewrite_catalog(s)
     if not _CREATE_TABLE.search(s):
         return s
@@ -246,7 +267,7 @@ _SORTKEY_COLS = re.compile(
 
 
 def extract_distribution(sql: str) -> list[str]:
-    """The Citus commands a CREATE TABLE's Redshift DDL implies (may be empty).
+    """Return the Citus commands a CREATE TABLE's Redshift DDL implies (may be empty).
 
     ``DISTKEY(col)`` -> ``create_distributed_table``; ``DISTSTYLE ALL`` ->
     ``create_reference_table``; a ``SORTKEY`` on a distributed/reference table adds
@@ -527,6 +548,7 @@ async def _handle(client_reader, client_writer) -> None:
 
 
 async def main() -> None:
+    """Run the proxy: listen for clients and relay each to the engine."""
     server = await asyncio.start_server(_handle, "0.0.0.0", LISTEN_PORT)
     tls = "on" if SSL_CTX is not None else "off"
     print(

@@ -78,10 +78,12 @@ WHERE c.relkind IN ('r', 'p')
 CREATE OR REPLACE VIEW svv_external_schemas AS
 SELECT
     NULL::integer AS esoid,
-    NULL::name    AS schemaname,
-    NULL::name    AS databasename,
-    NULL::text    AS esoptions,
-    NULL::oid     AS esowner
+    NULL::name AS schemaname,
+    NULL::name AS databasename,
+    NULL::text AS esoptions,
+    NULL::oid AS esowner,
+    -- external-schema kind; NULL => local (redtape reads it)
+    NULL::smallint AS eskind
 WHERE false;
 
 CREATE OR REPLACE VIEW svv_external_tables AS
@@ -113,3 +115,33 @@ CREATE OR REPLACE FUNCTION format_encoding(integer)
 -- supply the column list (as sqlalchemy-redshift's reflection does).
 CREATE OR REPLACE FUNCTION pg_get_late_binding_view_cols()
     RETURNS SETOF record LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$;
+
+-- Access-management compat: the below let Redshift access tools (e.g. redtape,
+-- which manages users/groups/grants as code) introspect on oblako unchanged.
+
+-- LIKE_ESCAPE: Redshift rewrites a LIKE pattern's custom escape char to the
+-- engine's backslash escape, e.g. like_escape('pg!_temp!_%', '!') -> 'pg\_temp\_%'.
+-- redtape's table introspection uses it to flag temp schemas.
+CREATE OR REPLACE FUNCTION like_escape(pattern text, escape_char text)
+    RETURNS text LANGUAGE sql IMMUTABLE AS $$
+    SELECT replace(replace(replace(
+             pattern, escape_char || '_', E'\\_'),
+             escape_char || '%', E'\\%'),
+             escape_char || escape_char, escape_char);
+$$;
+
+-- PG_GET_SHARED_REDSHIFT_SCHEMAS / PG_GET_ALL_EXTERNAL_SCHEMAS: Redshift data-
+-- sharing and external (Spectrum) schema catalogs. oblako has neither, so both
+-- are empty. RETURNS SETOF record, so callers supply the column list (redtape's
+-- schema introspection UNION-ALLs these in). Mirrors pg_get_late_binding_view_cols.
+CREATE OR REPLACE FUNCTION pg_get_shared_redshift_schemas()
+    RETURNS SETOF record LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$;
+
+CREATE OR REPLACE FUNCTION pg_get_all_external_schemas()
+    RETURNS SETOF record LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$;
+
+-- Own the public schema by the admin user. PostgreSQL 15+ owns public by the
+-- pg_database_owner predefined role, but Redshift has no such role: schemas are
+-- owned by real users, and tools that map a schema's owner to a user (redtape)
+-- fail on an owner that isn't in pg_user. CURRENT_USER is the bootstrap admin.
+ALTER SCHEMA public OWNER TO CURRENT_USER;
