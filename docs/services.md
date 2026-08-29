@@ -104,10 +104,20 @@ privileges declaratively run against the engine too.
 PostgreSQL lacks (`pg_user.usecatupd`, `svv_external_schemas.eskind`, `like_escape`,
 the data-sharing / external-schema set-functions) and owns `public` by a real user
 (PostgreSQL 15+ owns it by `pg_database_owner`, a role Redshift has no concept of, so
-a tool mapping a schema's owner to a user would find nobody). So `redtape export`
-reads oblako's users, groups, and grants, and `redtape run` applies `CREATE
-USER`/`GROUP`, `GRANT`/`REVOKE`, and `ALTER GROUP` against the real Postgres roles
-underneath, unchanged.
+a tool mapping a schema's owner to a user would find nobody).
+
+It also renders ACL strings the Redshift way. Redshift prefixes a group grantee,
+`group analysts=r/bi_analyst`; PostgreSQL unified roles and groups in 8.1 and writes
+the identical grant `analysts=r/bi_analyst`. That one is what makes the diff
+*converge*: a tool parsing the string would otherwise file the group as a user, read
+the group as holding nothing, and re-plan the same `GRANT`s on every pass.
+
+So `redtape export` reads oblako's users, groups, and grants, and `redtape run` plans
+`CREATE USER`/`GROUP`, `GRANT`/`REVOKE`, and `ALTER GROUP` against the real Postgres
+roles underneath, unchanged, and plans nothing once the cluster matches the spec.
+The catalog compat is installed in every database, not just the one `POSTGRES_DB`
+names, because a tool managing a cluster walks `pg_database` and reconnects per
+entry.
 
 ```{figure} _static/diagrams/access.svg
 :alt: redtape spec to redshift-local (svv_*, pg_user/group) to Postgres roles
