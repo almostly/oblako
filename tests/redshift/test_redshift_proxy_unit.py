@@ -266,3 +266,25 @@ def test_pg_group_filters_predefined_roles():
     assert "!~ '^pg_'" in out
     assert "pg_catalog.pg_group" in out  # the real table is still the source
     assert out.count("pg_catalog.pg_group") == 1  # replacement is not re-scanned
+
+
+def test_acl_array_to_string_becomes_redshift_acl():
+    """redtape's three ACL reads are pointed at redshift_acl (adds "group ")."""
+    for expr in (
+        "SELECT array_to_string(pgc.relacl, ','::text)::TEXT AS table_acl",
+        "SELECT array_to_string(pgn.nspacl, (',')::text)::TEXT AS schema_acl",
+        "SELECT array_to_string(pgd.datacl, (',')::text)::TEXT AS database_acl",
+    ):
+        out = rewrite_sql(expr)
+        assert "redshift_acl(" in out
+        assert "array_to_string" not in out
+        assert out.endswith(expr[expr.index("acl,") + 3 :])  # arguments untouched
+
+
+def test_acl_rewrite_leaves_other_array_to_string_alone():
+    """array_to_string over a non-ACL array is an ordinary call, not rewritten."""
+    for expr in (
+        "SELECT array_to_string(ARRAY['a','b'], ',')",
+        "SELECT array_to_string(t.tags, ',') FROM t",
+    ):
+        assert rewrite_sql(expr) == expr

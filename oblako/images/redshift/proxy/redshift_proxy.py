@@ -155,6 +155,20 @@ _PG_GROUP_SUB = (
     "WHERE groname !~ '^pg_') AS pg_group"
 )
 
+# ACL strings: Redshift prefixes a group grantee (`group analysts=r/bi_analyst`),
+# PostgreSQL does not (`analysts=r/bi_analyst`), because roles and groups are
+# unified. Access tools parse the string, so without the prefix a group grant reads
+# as a user grant and their plans never converge. redtape reads all three ACL
+# arrays through array_to_string(<alias>.{rel,nsp,dat}acl, <sep>); point those at
+# redshift_acl(), which takes the same two arguments and adds the prefix (see
+# initdb.d/05_catalog_views.sql). Only the function name is replaced, so the
+# arguments and any surrounding cast are left as written. Ungated: matching an
+# array_to_string over an *acl column is specific enough on its own, and redtape's
+# tables query carries none of the catalog markers below.
+_ACL_TO_STRING = re.compile(
+    r'(?i)\barray_to_string\s*\(\s*(?=[\w".]*\b(?:rel|nsp|dat)acl\b)'
+)
+
 # Redshift reflection drivers (sqlalchemy-redshift, and thus Alembic) run three
 # fixed catalog queries against a forked pg_catalog. Each SELECTs local relations
 # and UNIONs in Spectrum / late-binding-view externals, using Redshift-only SQL
@@ -217,7 +231,8 @@ def rewrite_sql(sql: str) -> str:
 
     ``VARCHAR(MAX)`` -> ``text`` (any statement); Redshift-only pg_catalog columns
     reflection drivers read are answered with neutral literals (see
-    ``_rewrite_catalog``); Redshift physical-DDL storage clauses (DISTSTYLE/
+    ``_rewrite_catalog``); ACL arrays are rendered with Redshift's ``group ``
+    prefix (see ``_ACL_TO_STRING``); Redshift physical-DDL storage clauses (DISTSTYLE/
     DISTKEY/SORTKEY/ENCODE/BACKUP) are stripped from CREATE TABLE; ``COPY``/
     ``UNLOAD`` to/from ``s3://`` are rewritten into oblako_* S3 bridge calls (see
     ``copy_unload``). Everything else is left untouched.
@@ -235,6 +250,7 @@ def rewrite_sql(sql: str) -> str:
     s = _VARCHAR_MAX.sub("text", s)
     s = _CREATEUSER.sub("SUPERUSER", s)
     s = _PG_GROUP.sub(_PG_GROUP_SUB, s)
+    s = _ACL_TO_STRING.sub("redshift_acl(", s)
     s = _rewrite_catalog(s)
     if not _CREATE_TABLE.search(s):
         return s
