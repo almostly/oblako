@@ -140,6 +140,40 @@ CREATE OR REPLACE FUNCTION pg_get_shared_redshift_schemas()
 CREATE OR REPLACE FUNCTION pg_get_all_external_schemas()
     RETURNS SETOF record LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$;
 
+-- REDSHIFT_ACL: render an ACL array the way Redshift does, not PostgreSQL. Both
+-- store the same aclitem, but Redshift keeps users and groups apart and prefixes
+-- a group grantee: `group analysts=r/bi_analyst`. PostgreSQL unified roles and
+-- groups in 8.1, so the identical grant reads back `analysts=r/bi_analyst`. Access
+-- tools that parse the ACL string (redtape) then file the group as a user, see the
+-- group holding nothing, and re-plan the same GRANTs on every run: the apply never
+-- converges. Prefixing group grantees here makes the parse agree with Redshift.
+--
+-- A grantee is a group when it is a role that cannot log in, minus PostgreSQL's
+-- predefined pg_* roles: the same predicate pg_group is defined by, and the same
+-- set the proxy leaves visible there, so the two answers to "what is a group" stay
+-- consistent. Spelt against pg_roles rather than pg_group because the proxy
+-- rewrites pg_catalog.pg_group into a subquery, which would corrupt this body if
+-- the file were ever re-applied through the proxy (the tests do exactly that).
+-- The grantee is matched unquoted but emitted verbatim, so a quoted name
+-- ("IAM:admin") survives intact, and an empty grantee (PUBLIC) matches nothing.
+--
+-- Signature mirrors array_to_string(acl, sep), which is what the proxy rewrites.
+CREATE OR REPLACE FUNCTION redshift_acl(acl aclitem[], sep text)
+    RETURNS text LANGUAGE sql STABLE AS $$
+    SELECT CASE WHEN acl IS NULL THEN NULL ELSE coalesce((
+        SELECT string_agg(
+                 CASE WHEN r.rolname IS NULL THEN e.item
+                      ELSE 'group ' || e.item END,
+                 sep ORDER BY e.ord)
+        FROM (SELECT u.entry::text AS item, u.ord
+              FROM unnest(acl) WITH ORDINALITY AS u(entry, ord)) e
+        LEFT JOIN pg_catalog.pg_roles r
+               ON r.rolname = btrim(split_part(e.item, '=', 1), '"')
+              AND NOT r.rolcanlogin
+              AND r.rolname !~ '^pg_'
+    ), '') END;
+$$;
+
 -- Own the public schema by the admin user. PostgreSQL 15+ owns public by the
 -- pg_database_owner predefined role, but Redshift has no such role: schemas are
 -- owned by real users, and tools that map a schema's owner to a user (redtape)

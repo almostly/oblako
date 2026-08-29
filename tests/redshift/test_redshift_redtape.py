@@ -7,16 +7,18 @@ redtape's `export`/`run` work against oblako's redshift-local unchanged.
 
 Requires the engine (docker compose up redshift). Applies the shipped
 `05_catalog_views.sql` (idempotent), then exercises the compat layer through the
-proxy on 5439.
+proxy, on 5439 unless OBLAKO_TEST_RS_PORT points it at an isolated stack.
 """
 
+import os
 from pathlib import Path
 
 import psycopg2
 import pytest
 
+RS_PORT = int(os.environ.get("OBLAKO_TEST_RS_PORT", "5439"))
 RS_CONFIG = dict(
-    host="localhost", port=5439, user="oblako", password="oblako", dbname="oblako"
+    host="localhost", port=RS_PORT, user="oblako", password="oblako", dbname="oblako"
 )
 SQL = (
     Path(__file__).parents[2] / "oblako/images/redshift/initdb.d/05_catalog_views.sql"
@@ -102,3 +104,100 @@ def test_public_schema_owned_by_a_real_user(cursor):
         "ON n.nspowner = u.usesysid WHERE n.nspname = 'public')"
     )
     assert cursor.fetchone()[0] is True
+
+
+# redtape's exact ACL reads (connectors.py:34, :68). The proxy points these at
+# redshift_acl(), which renders a group grantee the way Redshift does.
+REDTAPE_SCHEMA_ACL_Q = (
+    "SELECT array_to_string(pgn.nspacl, (',')::text)::TEXT AS schema_acl "
+    "FROM pg_namespace pgn WHERE pgn.nspname = 'redtape_sales'"
+)
+REDTAPE_TABLE_ACL_Q = (
+    "SELECT array_to_string(pgc.relacl, ','::text)::TEXT AS table_acl "
+    "FROM pg_class pgc WHERE pgc.relname = 'redtape_orders'"
+)
+
+
+def parse_acl_holder(acl_str):
+    """redtape's ACL-holder branch (connectors.py:283-293), verbatim in behaviour.
+
+    Returns (holder_name, holder_type) for a single `grantee=privs/grantor` entry.
+    """
+    acl_str, _, _ = acl_str.partition("/")
+    user_or_group, _, _actions = acl_str.partition("=")
+    if not user_or_group:
+        return "PUBLIC", "PUBLIC"
+    if user_or_group.startswith("group"):
+        return user_or_group.split(" ")[1], "group"
+    return user_or_group, "user"
+
+
+@pytest.fixture
+def group_grant(cursor):
+    """A group and a user each granted on one schema + table, dropped afterwards."""
+    cursor.execute("DROP SCHEMA IF EXISTS redtape_sales CASCADE")
+    cursor.execute("DROP GROUP IF EXISTS redtape_analysts")
+    cursor.execute("DROP USER IF EXISTS redtape_bi")
+    cursor.execute("CREATE GROUP redtape_analysts")
+    cursor.execute("CREATE USER redtape_bi PASSWORD 'Analyst_1'")
+    cursor.execute("CREATE SCHEMA redtape_sales")
+    cursor.execute("CREATE TABLE redtape_sales.redtape_orders (id int)")
+    cursor.execute("GRANT USAGE ON SCHEMA redtape_sales TO GROUP redtape_analysts")
+    cursor.execute(
+        "GRANT SELECT ON redtape_sales.redtape_orders TO GROUP redtape_analysts"
+    )
+    cursor.execute("GRANT SELECT ON redtape_sales.redtape_orders TO redtape_bi")
+    yield cursor
+    cursor.execute("DROP SCHEMA IF EXISTS redtape_sales CASCADE")
+    cursor.execute("DROP GROUP IF EXISTS redtape_analysts")
+    cursor.execute("DROP USER IF EXISTS redtape_bi")
+
+
+def test_group_grant_acl_uses_redshift_group_prefix(group_grant):
+    """Group grantees read back prefixed, as Redshift renders them, not bare."""
+    for query in (REDTAPE_SCHEMA_ACL_Q, REDTAPE_TABLE_ACL_Q):
+        group_grant.execute(query)
+        acl = group_grant.fetchone()[0]
+        assert "group redtape_analysts=" in acl
+
+
+def test_user_grant_acl_has_no_group_prefix(group_grant):
+    """A user grantee stays bare, so only real groups pick up the prefix."""
+    group_grant.execute(REDTAPE_TABLE_ACL_Q)
+    entries = group_grant.fetchone()[0].split(",")
+    user = [e for e in entries if e.startswith("redtape_bi=")]
+    assert user and not any(e.startswith("group redtape_bi=") for e in entries)
+
+
+def test_acl_parses_as_a_group_not_a_user(group_grant):
+    """The loop redtape actually runs: grant to a group, re-read, still a group.
+
+    Both reads, because redtape diffs schema privileges through a query of its own,
+    and a group USAGE grant on a schema renders bare in PostgreSQL exactly as a
+    table grant does. Without the prefix these return ("redtape_analysts", "user"),
+    the group reads as holding nothing, and redtape re-plans the same GRANT forever.
+    """
+    for query in (REDTAPE_SCHEMA_ACL_Q, REDTAPE_TABLE_ACL_Q):
+        group_grant.execute(query)
+        holders = dict(
+            parse_acl_holder(e) for e in group_grant.fetchone()[0].split(",")
+        )
+        assert holders["redtape_analysts"] == "group"
+    assert holders["redtape_bi"] == "user"  # the user grant is on the table only
+
+
+def test_compat_layer_reaches_the_postgres_database():
+    """Tools that walk pg_database and reconnect (redtape export) hit `postgres`.
+
+    initdb creates it before the init scripts run, so template1 does not reach it;
+    06 seeds it directly. Without this, the ACL read fails there.
+    """
+    conn = psycopg2.connect(**{**RS_CONFIG, "dbname": "postgres"})
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT to_regprocedure('public.redshift_acl(aclitem[],text)') IS NOT NULL,"
+            " to_regclass('public.svv_external_schemas') IS NOT NULL"
+        )
+        assert cur.fetchone() == (True, True)
+    conn.close()
