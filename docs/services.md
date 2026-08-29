@@ -97,6 +97,26 @@ proxy answers them. `get_columns`, table autoload, `has_table`, and thus **Alemb
 autogenerate** work against the engine (the driver is a client dependency, nothing
 is added to the image).
 
+**Access management as code.** Redshift tools that manage users, groups, and
+privileges declaratively run against the engine too.
+[redtape](https://github.com/tomasfarias/redtape) (MIT) introspects a forked
+`pg_catalog` plus Redshift-only views and functions; the image answers the pieces
+PostgreSQL lacks (`pg_user.usecatupd`, `svv_external_schemas.eskind`, `like_escape`,
+the data-sharing / external-schema set-functions) and owns `public` by a real user
+(PostgreSQL 15+ owns it by `pg_database_owner`, a role Redshift has no concept of, so
+a tool mapping a schema's owner to a user would find nobody). So `redtape export`
+reads oblako's users, groups, and grants, and `redtape run` applies `CREATE
+USER`/`GROUP`, `GRANT`/`REVOKE`, and `ALTER GROUP` against the real Postgres roles
+underneath, unchanged.
+
+```{figure} _static/diagrams/access.svg
+:alt: redtape spec to redshift-local (svv_*, pg_user/group) to Postgres roles
+:width: 100%
+
+Access management as code: a real Redshift access tool reads and applies against
+redshift-local, which answers it with the Redshift catalog over real Postgres roles.
+```
+
 ```python
 from oblako.services import RedshiftService
 con = RedshiftService().connect()   # psycopg2 to the engine on 5439

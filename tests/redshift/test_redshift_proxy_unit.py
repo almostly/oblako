@@ -5,8 +5,7 @@ import pathlib
 import struct
 
 _PATH = (
-    pathlib.Path(__file__).parents[2]
-    / "oblako/images/redshift/proxy/redshift_proxy.py"
+    pathlib.Path(__file__).parents[2] / "oblako/images/redshift/proxy/redshift_proxy.py"
 )
 _spec = importlib.util.spec_from_file_location("redshift_proxy", _PATH)
 _mod = importlib.util.module_from_spec(_spec)
@@ -36,22 +35,26 @@ def test_strips_all_physical_ddl():
 
 
 def test_backup_clause_stripped():
-    assert "BACKUP" not in rewrite_sql(
-        "CREATE TABLE t (a int) DISTSTYLE ALL BACKUP NO"
-    ).upper()
+    assert (
+        "BACKUP"
+        not in rewrite_sql("CREATE TABLE t (a int) DISTSTYLE ALL BACKUP NO").upper()
+    )
 
 
 def test_temp_and_unlogged_tables_handled():
     # dbt and others create temp tables; those must be stripped too
-    assert "DISTSTYLE" not in rewrite_sql(
-        "CREATE TEMP TABLE t (a int) DISTSTYLE EVEN"
-    ).upper()
-    assert "SORTKEY" not in rewrite_sql(
-        "CREATE TEMPORARY TABLE t (a int) SORTKEY (a)"
-    ).upper()
-    assert "DISTKEY" not in rewrite_sql(
-        "CREATE UNLOGGED TABLE t (a int) DISTKEY (a)"
-    ).upper()
+    assert (
+        "DISTSTYLE"
+        not in rewrite_sql("CREATE TEMP TABLE t (a int) DISTSTYLE EVEN").upper()
+    )
+    assert (
+        "SORTKEY"
+        not in rewrite_sql("CREATE TEMPORARY TABLE t (a int) SORTKEY (a)").upper()
+    )
+    assert (
+        "DISTKEY"
+        not in rewrite_sql("CREATE UNLOGGED TABLE t (a int) DISTKEY (a)").upper()
+    )
 
 
 def test_non_ddl_untouched():
@@ -100,7 +103,7 @@ def test_reldiststyle_case_rewritten():
 def test_catalog_rewrite_is_gated():
     # no Redshift-only marker -> ordinary catalog queries pass through untouched,
     # including the quoted "adsrc" output alias in a Spectrum UNION branch
-    sql = "SELECT n.nspname, null as \"adsrc\" FROM pg_catalog.pg_namespace n"
+    sql = 'SELECT n.nspname, null as "adsrc" FROM pg_catalog.pg_namespace n'
     assert rewrite_sql(sql) == sql
 
 
@@ -108,7 +111,7 @@ def test_where_alias_predicates_translated():
     # output-column aliases used in WHERE become the real columns they alias, so
     # has_table's existence filter keeps working (not just dropped)
     sql = (
-        "SELECT n.nspname as \"schema\", c.relname as \"table_name\" "
+        'SELECT n.nspname as "schema", c.relname as "table_name" '
         "FROM pg_catalog.pg_class c "
         "JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace "
         "WHERE c.reldiststyle = 0 AND n.nspname !~ '^pg_' "
@@ -213,8 +216,53 @@ def test_server_version_parameter_status_rewritten():
         assert out[5:] == b"server_version\x008.0.2\x00"
         # a different ParameterStatus is passed through untouched
         enc = b"server_encoding\x00UTF8\x00"
-        assert _mod._rewrite_parameter_status(enc) == b"S" + struct.pack(
-            "!I", len(enc) + 4
-        ) + enc
+        assert (
+            _mod._rewrite_parameter_status(enc)
+            == b"S" + struct.pack("!I", len(enc) + 4) + enc
+        )
     finally:
         _mod.PROXY_SERVER_VERSION = None
+
+
+# --- redtape / access-management compat (see tests/redshift/test_redshift_redtape.py) ---
+
+
+def test_usecatupd_neutralized():
+    """Bare pg_user.usecatupd (dropped from PG >= 9.5) is answered as a literal.
+
+    redtape's user introspection selects it; the column name is preserved.
+    """
+    q = (
+        "SELECT usename, usesysid, usecreatedb, usesuper, usecatupd, valuntil, "
+        "useconfig FROM pg_catalog.pg_user"
+    )
+    out = rewrite_sql(q)
+    assert "false AS usecatupd" in out
+    assert "pg_catalog.pg_user" in out  # the table reference is preserved
+
+
+def test_usecatupd_qualified_is_untouched():
+    """A qualified u.usecatupd is a real join column, not the bare select item."""
+    out = rewrite_sql("SELECT u.usecatupd FROM pg_catalog.pg_user u")
+    assert "false AS usecatupd" not in out
+
+
+def test_createuser_becomes_superuser():
+    """Redshift's one-word CREATEUSER privilege maps to PostgreSQL SUPERUSER."""
+    out = rewrite_sql("CREATE USER admin_u PASSWORD 'x' CREATEUSER;")
+    assert "SUPERUSER" in out.upper()
+    assert "CREATEUSER" not in out.upper()
+
+
+def test_create_user_two_words_survives():
+    """Only the one-word CREATEUSER keyword is rewritten, never "CREATE USER"."""
+    out = rewrite_sql("CREATE USER analytics_ro PASSWORD 'x';")
+    assert "CREATE USER analytics_ro" in out
+
+
+def test_pg_group_filters_predefined_roles():
+    """pg_catalog.pg_group is wrapped in a subquery that excludes PG pg_* roles."""
+    out = rewrite_sql("SELECT groname, grosysid, grolist FROM pg_catalog.pg_group")
+    assert "!~ '^pg_'" in out
+    assert "pg_catalog.pg_group" in out  # the real table is still the source
+    assert out.count("pg_catalog.pg_group") == 1  # replacement is not re-scanned
