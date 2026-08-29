@@ -281,6 +281,16 @@ def test_acl_array_to_string_becomes_redshift_acl():
         assert out.endswith(expr[expr.index("acl,") + 3 :])  # arguments untouched
 
 
+def test_acl_rewrite_consumes_the_pg_catalog_qualifier():
+    """sqlalchemy-redshift qualifies the call; redshift_acl lives in public, not there."""
+    out = rewrite_sql(
+        "SELECT pg_catalog.array_to_string(c.relacl, '\n') AS \"privileges\" "
+        "FROM pg_catalog.pg_class c"
+    )
+    assert "redshift_acl(c.relacl" in out
+    assert "pg_catalog.redshift_acl" not in out
+
+
 def test_acl_rewrite_leaves_other_array_to_string_alone():
     """array_to_string over a non-ACL array is an ordinary call, not rewritten."""
     for expr in (
