@@ -97,6 +97,22 @@ def test_createuser_privilege_accepted(cursor):
     cursor.execute("DROP USER redtape_su_probe")
 
 
+def test_password_disable_creates_a_passwordless_user(cursor):
+    """CREATE/ALTER USER ... PASSWORD DISABLE (Redshift's IAM-only account) works.
+
+    Redshift provisions an account that holds grants but cannot authenticate with a
+    password; PostgreSQL spells that PASSWORD NULL, which the proxy rewrites to.
+    """
+    cursor.execute("DROP USER IF EXISTS redtape_iam_only")
+    cursor.execute("CREATE USER redtape_iam_only PASSWORD DISABLE")
+    cursor.execute(
+        "SELECT passwd IS NULL FROM pg_shadow WHERE usename = 'redtape_iam_only'"
+    )
+    assert cursor.fetchone()[0] is True
+    cursor.execute("ALTER USER redtape_iam_only PASSWORD DISABLE")
+    cursor.execute("DROP USER redtape_iam_only")
+
+
 def test_public_schema_owned_by_a_real_user(cursor):
     """public is owned by a user (not PG15's pg_database_owner) so owner->user maps."""
     cursor.execute(
