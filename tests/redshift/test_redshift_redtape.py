@@ -172,13 +172,18 @@ def test_user_grant_acl_has_no_group_prefix(group_grant):
 def test_acl_parses_as_a_group_not_a_user(group_grant):
     """The loop redtape actually runs: grant to a group, re-read, still a group.
 
-    Without the prefix this returns ("redtape_analysts", "user"), the group reads
-    as holding nothing, and redtape re-plans the same GRANT on every run.
+    Both reads, because redtape diffs schema privileges through a query of its own,
+    and a group USAGE grant on a schema renders bare in PostgreSQL exactly as a
+    table grant does. Without the prefix these return ("redtape_analysts", "user"),
+    the group reads as holding nothing, and redtape re-plans the same GRANT forever.
     """
-    group_grant.execute(REDTAPE_TABLE_ACL_Q)
-    holders = dict(parse_acl_holder(e) for e in group_grant.fetchone()[0].split(","))
-    assert holders["redtape_analysts"] == "group"
-    assert holders["redtape_bi"] == "user"
+    for query in (REDTAPE_SCHEMA_ACL_Q, REDTAPE_TABLE_ACL_Q):
+        group_grant.execute(query)
+        holders = dict(
+            parse_acl_holder(e) for e in group_grant.fetchone()[0].split(",")
+        )
+        assert holders["redtape_analysts"] == "group"
+    assert holders["redtape_bi"] == "user"  # the user grant is on the table only
 
 
 def test_compat_layer_reaches_the_postgres_database():
