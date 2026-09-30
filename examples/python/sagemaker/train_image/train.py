@@ -10,6 +10,7 @@ SageMaker then tars /opt/ml/model into model.tar.gz at the output path.
 import glob
 import json
 import os
+import sys
 
 INPUT = "/opt/ml/input/data/train"
 MODEL = "/opt/ml/model"
@@ -44,4 +45,10 @@ def main():
 
 
 if __name__ == "__main__":
+    # SageMaker local mode also runs housekeeping in this image: on Linux the
+    # container writes root-owned files into the bind-mounted job dir, and the
+    # SDK cleans them up with `<image> chmod -R 777 <dir>`. Run any command other
+    # than `train` as given, so that works.
+    if len(sys.argv) > 1 and sys.argv[1] != "train":
+        os.execvp(sys.argv[1], sys.argv[1:])
     main()

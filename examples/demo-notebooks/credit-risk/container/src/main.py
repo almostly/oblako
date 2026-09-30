@@ -1,5 +1,6 @@
 """SageMaker BYOC entry point: dispatch the `train` / `serve` command SageMaker passes."""
 
+import os
 import sys
 
 if __name__ == "__main__":
@@ -13,4 +14,6 @@ if __name__ == "__main__":
 
         serve.run()
     else:
-        raise SystemExit(f"unknown command: {cmd!r} (expected 'train' or 'serve')")
+        # anything else is a command to run in the image (SageMaker local mode
+        # runs `chmod -R 777 <dir>` here on Linux to clean up root-owned output)
+        os.execvp(cmd, sys.argv[1:])
