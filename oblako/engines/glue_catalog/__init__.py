@@ -16,13 +16,14 @@ import json
 import os
 import threading
 import time
-import urllib.request
 
 import httpx
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+
+from oblako.engines.identity import claim_port, identify, is_engine
 
 DEFAULT_PORT = 8486
 DEFAULT_ICEBERG_URL = "http://localhost:8181"
@@ -181,13 +182,7 @@ app = create_app()
 
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if a glue_catalog server is reachable on the port."""
-    try:
-        with urllib.request.urlopen(
-            f"http://localhost:{port}/", timeout=timeout
-        ) as resp:
-            return resp.status == 200
-    except Exception:  # noqa: BLE001
-        return False
+    return is_engine(port, "glue_catalog", timeout)
 
 
 def start_in_thread(port: int = DEFAULT_PORT) -> str:
@@ -200,8 +195,12 @@ def start_in_thread(port: int = DEFAULT_PORT) -> str:
     with _lock:
         if port in _servers:
             return url
+        claim_port(port, "glue_catalog")
         ucfg = uvicorn.Config(
-            create_app(), host="127.0.0.1", port=port, log_level="warning"
+            identify(create_app(), "glue_catalog"),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
         )
         server = uvicorn.Server(ucfg)
         thread = threading.Thread(target=server.run, daemon=True)

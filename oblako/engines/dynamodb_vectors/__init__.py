@@ -17,10 +17,9 @@ from __future__ import annotations
 import contextlib
 import threading
 import time
-import urllib.error
-import urllib.request
 
 from oblako import ports
+from oblako.engines.identity import claim_port, identify, is_engine
 
 from .app import app, create_app
 from .model import enable_dynamodb_vectors
@@ -42,24 +41,10 @@ _lock = threading.Lock()
 
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if the proxy is accepting requests on the port."""
-    req = urllib.request.Request(
-        f"http://localhost:{port}/",
-        data=b"{}",
-        method="POST",
-        headers={"X-Amz-Target": "DynamoDB_20120810.ListTables"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout):
-            return True
-    except urllib.error.HTTPError:
-        return True  # server responded (even an error) -> it's up
-    except Exception:
-        return False
+    return is_engine(port, "dynamodb_vectors", timeout)
 
 
-def start_in_thread(
-    port: int = DEFAULT_PORT, backend_url: str | None = None
-) -> str:
+def start_in_thread(port: int = DEFAULT_PORT, backend_url: str | None = None) -> str:
     """Start the vector proxy in a daemon thread (idempotent). Returns its URL."""
     import uvicorn
 
@@ -69,9 +54,13 @@ def start_in_thread(
     with _lock:
         if port in _servers:
             return url
+        claim_port(port, "dynamodb_vectors")
         application = create_app(backend_url)
         config = uvicorn.Config(
-            application, host="127.0.0.1", port=port, log_level="warning"
+            identify(application, "dynamodb_vectors"),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
         )
         server = uvicorn.Server(config)
         thread = threading.Thread(target=server.run, daemon=True)

@@ -35,6 +35,7 @@ import urllib.request
 
 import httpx
 from oblako import ports
+from oblako.engines.identity import claim_port, identify, is_engine
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -83,7 +84,7 @@ def _table_arn(bucket: str, namespace: str, name: str) -> str:
 
 
 def _bucket_of(arn: str) -> str:
-    """The bucket name from a table-bucket ARN (or a bare name)."""
+    """Return the bucket name from a table-bucket ARN (or a bare name)."""
     return arn.split(":bucket/", 1)[-1].split("/")[0] if ":bucket/" in arn else arn
 
 
@@ -92,9 +93,13 @@ def _version_token(metadata_location: str) -> str:
 
 
 def _iceberg_schema(metadata: dict) -> dict:
-    """Translate an s3tables Iceberg schema ({fields:[{name,type,required}]}) to an
-    Iceberg REST schema with assigned field ids."""
-    fields = (((metadata or {}).get("iceberg") or {}).get("schema") or {}).get("fields") or []
+    """Translate an s3tables Iceberg schema to an Iceberg REST schema.
+
+    ``{fields: [{name, type, required}]}`` in, with field ids assigned.
+    """
+    fields = (((metadata or {}).get("iceberg") or {}).get("schema") or {}).get(
+        "fields"
+    ) or []
     return {
         "type": "struct",
         "schema-id": 0,
@@ -129,6 +134,7 @@ def _err(code: str, message: str, status: int = 400) -> Response:
 # Operations
 # ---------------------------------------------------------------------------
 def create_table_bucket(body: dict) -> Response:
+    """Handle CreateTableBucket: register a table bucket (an Iceberg namespace root)."""
     name = body["name"]
     with _lock:
         _BUCKETS.setdefault(name, {"arn": _bucket_arn(name), "createdAt": time.time()})
@@ -138,10 +144,16 @@ def create_table_bucket(body: dict) -> Response:
 
 
 def list_table_buckets(_body: dict, _segs, query) -> Response:
+    """ListTableBuckets, filtered by the optional prefix."""
     prefix = query.get("prefix", "")
     with _lock:
         buckets = [
-            {"arn": b["arn"], "name": n, "createdAt": b["createdAt"], "ownerAccountId": _ACCOUNT}
+            {
+                "arn": b["arn"],
+                "name": n,
+                "createdAt": b["createdAt"],
+                "ownerAccountId": _ACCOUNT,
+            }
             for n, b in _BUCKETS.items()
             if n.startswith(prefix)
         ]
@@ -149,25 +161,37 @@ def list_table_buckets(_body: dict, _segs, query) -> Response:
 
 
 def get_table_bucket(arn: str) -> Response:
+    """Handle GetTableBucket by ARN (or bare name)."""
     name = _bucket_of(arn)
     with _lock:
         b = _BUCKETS.get(name)
     if not b:
         return _err("NotFoundException", f"no table bucket {name}", 404)
     return _ok(
-        {"arn": b["arn"], "name": name, "ownerAccountId": _ACCOUNT, "createdAt": b["createdAt"]}
+        {
+            "arn": b["arn"],
+            "name": name,
+            "ownerAccountId": _ACCOUNT,
+            "createdAt": b["createdAt"],
+        }
     )
 
 
 def delete_table_bucket(arn: str) -> Response:
+    """Handle DeleteTableBucket: forget the bucket (idempotent)."""
     with _lock:
         _BUCKETS.pop(_bucket_of(arn), None)
     return _ok()
 
 
 def create_namespace(arn: str, body: dict) -> Response:
+    """Handle CreateNamespace: an Iceberg namespace under the bucket."""
     bucket = _bucket_of(arn)
-    ns = body["namespace"][0] if isinstance(body.get("namespace"), list) else body.get("namespace")
+    ns = (
+        body["namespace"][0]
+        if isinstance(body.get("namespace"), list)
+        else body.get("namespace")
+    )
     _ice("POST", "/v1/namespaces", json={"namespace": [bucket]})  # ensure parent
     r = _ice("POST", "/v1/namespaces", json={"namespace": [bucket, ns]})
     if r.status_code >= 400 and r.status_code != 409:
@@ -176,6 +200,7 @@ def create_namespace(arn: str, body: dict) -> Response:
 
 
 def list_namespaces(arn: str) -> Response:
+    """Handle ListNamespaces in a table bucket."""
     bucket = _bucket_of(arn)
     r = _ice("GET", "/v1/namespaces", params={"parent": bucket})
     levels = r.json().get("namespaces", []) if r.status_code < 400 else []
@@ -184,21 +209,29 @@ def list_namespaces(arn: str) -> Response:
 
 
 def get_namespace(arn: str, ns: str) -> Response:
+    """Handle GetNamespace in a table bucket."""
     bucket = _bucket_of(arn)
     r = _ice("GET", f"/v1/namespaces/{_ns_path(bucket, ns)}")
     if r.status_code >= 400:
         return _err("NotFoundException", f"no namespace {ns}", 404)
     return _ok(
-        {"namespace": [ns], "createdAt": time.time(), "createdBy": _ACCOUNT, "ownerAccountId": _ACCOUNT}
+        {
+            "namespace": [ns],
+            "createdAt": time.time(),
+            "createdBy": _ACCOUNT,
+            "ownerAccountId": _ACCOUNT,
+        }
     )
 
 
 def delete_namespace(arn: str, ns: str) -> Response:
+    """Handle DeleteNamespace from a table bucket."""
     _ice("DELETE", f"/v1/namespaces/{_ns_path(_bucket_of(arn), ns)}")
     return _ok()
 
 
 def create_table(arn: str, ns: str, body: dict) -> Response:
+    """Handle CreateTable: write real Iceberg metadata through the REST catalog."""
     bucket = _bucket_of(arn)
     name = body["name"]
     r = _ice(
@@ -209,18 +242,31 @@ def create_table(arn: str, ns: str, body: dict) -> Response:
     if r.status_code >= 400:
         return _err("BadRequestException", f"iceberg createTable: {r.text}", 400)
     loc = r.json().get("metadata-location", "")
-    return _ok({"tableARN": _table_arn(bucket, ns, name), "versionToken": _version_token(loc)})
+    return _ok(
+        {"tableARN": _table_arn(bucket, ns, name), "versionToken": _version_token(loc)}
+    )
 
 
 def _load_table(bucket: str, ns: str, name: str) -> dict | None:
-    r = _ice("GET", f"/v1/namespaces/{_ns_path(bucket, ns)}/tables/{urllib.parse.quote(name)}")
+    r = _ice(
+        "GET",
+        f"/v1/namespaces/{_ns_path(bucket, ns)}/tables/{urllib.parse.quote(name)}",
+    )
     return r.json() if r.status_code < 400 else None
 
 
 def list_tables(arn: str, query) -> Response:
+    """Handle ListTables in a bucket, optionally within one namespace."""
     bucket = _bucket_of(arn)
     ns = query.get("namespace")
-    namespaces = [ns] if ns else [n["namespace"][0] for n in json.loads(list_namespaces(arn).body)["namespaces"]]
+    namespaces = (
+        [ns]
+        if ns
+        else [
+            n["namespace"][0]
+            for n in json.loads(list_namespaces(arn).body)["namespaces"]
+        ]
+    )
     tables = []
     for name_ns in namespaces:
         r = _ice("GET", f"/v1/namespaces/{_ns_path(bucket, name_ns)}/tables")
@@ -237,6 +283,7 @@ def list_tables(arn: str, query) -> Response:
 
 
 def get_table(bucket: str, ns: str, name: str) -> Response:
+    """Handle GetTable: the table's ARN, format and metadata location."""
     tj = _load_table(bucket, ns, name)
     if tj is None:
         return _err("NotFoundException", f"no table {ns}.{name}", 404)
@@ -264,11 +311,16 @@ def get_table(bucket: str, ns: str, name: str) -> Response:
 
 
 def delete_table(arn: str, ns: str, name: str) -> Response:
-    _ice("DELETE", f"/v1/namespaces/{_ns_path(_bucket_of(arn), ns)}/tables/{urllib.parse.quote(name)}")
+    """Handle DeleteTable: drop the Iceberg table (and purge its data)."""
+    _ice(
+        "DELETE",
+        f"/v1/namespaces/{_ns_path(_bucket_of(arn), ns)}/tables/{urllib.parse.quote(name)}",
+    )
     return _ok()
 
 
 def get_table_metadata_location(arn: str, ns: str, name: str) -> Response:
+    """Handle GetTableMetadataLocation: where the Iceberg metadata lives."""
     bucket = _bucket_of(arn)
     tj = _load_table(bucket, ns, name)
     if tj is None:
@@ -276,7 +328,11 @@ def get_table_metadata_location(arn: str, ns: str, name: str) -> Response:
     loc = tj.get("metadata-location", "")
     warehouse = (tj.get("metadata") or {}).get("location", "")
     return _ok(
-        {"versionToken": _version_token(loc), "metadataLocation": loc, "warehouseLocation": warehouse}
+        {
+            "versionToken": _version_token(loc),
+            "metadataLocation": loc,
+            "warehouseLocation": warehouse,
+        }
     )
 
 
@@ -287,7 +343,11 @@ def get_table_metadata_location(arn: str, ns: str, name: str) -> Response:
 async def _dispatch(request: Request) -> Response:
     method = request.method
     raw = request.scope.get("raw_path") or request.url.path.encode()
-    segs = [urllib.parse.unquote(s) for s in raw.decode("latin-1").split("?")[0].strip("/").split("/") if s]
+    segs = [
+        urllib.parse.unquote(s)
+        for s in raw.decode("latin-1").split("?")[0].strip("/").split("/")
+        if s
+    ]
     query = dict(request.query_params)
     body = {}
     if method in ("POST", "PUT", "PATCH"):
@@ -328,9 +388,13 @@ async def _dispatch(request: Request) -> Response:
             if method == "GET" and len(segs) == 5 and segs[4] == "metadata-location":
                 return get_table_metadata_location(segs[1], segs[2], segs[3])
         elif head == "get-table":
-            return get_table(query["tableBucketARN"].split("bucket/")[-1].split("/")[0]
-                             if "bucket/" in query.get("tableBucketARN", "") else query.get("tableBucketARN", ""),
-                             query["namespace"], query["name"])
+            return get_table(
+                query["tableBucketARN"].split("bucket/")[-1].split("/")[0]
+                if "bucket/" in query.get("tableBucketARN", "")
+                else query.get("tableBucketARN", ""),
+                query["namespace"],
+                query["name"],
+            )
     except KeyError as err:
         return _err("ValidationException", f"missing field {err}")
     except httpx.HTTPError as err:
@@ -342,7 +406,9 @@ async def _dispatch(request: Request) -> Response:
 def create_app() -> Starlette:
     """Create the Starlette app serving the s3tables rest-json protocol."""
     return Starlette(
-        routes=[Route("/{path:path}", _dispatch, methods=["GET", "PUT", "POST", "DELETE"])]
+        routes=[
+            Route("/{path:path}", _dispatch, methods=["GET", "PUT", "POST", "DELETE"])
+        ]
     )
 
 
@@ -351,14 +417,8 @@ _servers: dict[int, object] = {}
 
 
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
-    """True if the s3tables server is reachable on the port."""
-    try:
-        with urllib.request.urlopen(f"http://localhost:{port}/buckets", timeout=timeout):
-            return True
-    except urllib.error.HTTPError:
-        return True
-    except Exception:
-        return False
+    """Return True if the s3tables server is reachable on the port."""
+    return is_engine(port, "s3tables", timeout)
 
 
 def start_in_thread(port: int = DEFAULT_PORT) -> str:
@@ -371,7 +431,13 @@ def start_in_thread(port: int = DEFAULT_PORT) -> str:
     with _lock:
         if port in _servers:
             return url
-        config = uvicorn.Config(create_app(), host="127.0.0.1", port=port, log_level="warning")
+        claim_port(port, "s3tables")
+        config = uvicorn.Config(
+            identify(create_app(), "s3tables"),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
+        )
         server = uvicorn.Server(config)
         threading.Thread(target=server.run, daemon=True).start()
         _servers[port] = server

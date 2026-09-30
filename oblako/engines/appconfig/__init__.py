@@ -20,9 +20,9 @@ from __future__ import annotations
 
 import threading
 import time
-import urllib.request
 
 from oblako import ports
+from oblako.engines.identity import claim_port, identify, is_engine
 from .agent import AppConfigClient
 from .app import app, create_app
 from .engine import AppConfigError, AppConfigStore
@@ -50,13 +50,7 @@ _lock = threading.Lock()
 
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if an AppConfig server is reachable on the port."""
-    try:
-        with urllib.request.urlopen(
-            f"http://localhost:{port}/applications", timeout=timeout
-        ) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+    return is_engine(port, "appconfig", timeout)
 
 
 def start_in_thread(
@@ -71,9 +65,13 @@ def start_in_thread(
     with _lock:
         if port in _servers:
             return url
+        claim_port(port, "appconfig")
         application = create_app(store)
         config = uvicorn.Config(
-            application, host="127.0.0.1", port=port, log_level="warning"
+            identify(application, "appconfig"),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
         )
         server = uvicorn.Server(config)
         threading.Thread(target=server.run, daemon=True).start()

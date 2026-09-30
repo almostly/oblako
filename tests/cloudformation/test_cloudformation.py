@@ -234,7 +234,9 @@ def _serve(store=None):
     _PORT += 1
     import uvicorn
 
-    app = create_app(store)
+    from oblako.engines.identity import identify
+
+    app = identify(create_app(store), "cloudformation")
     config = uvicorn.Config(app, host="127.0.0.1", port=_PORT, log_level="warning")
     server = uvicorn.Server(config)
     import threading

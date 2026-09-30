@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import threading
 import time
-import urllib.request
+
+from oblako.engines.identity import claim_port, identify, is_engine
 
 from .app import app, create_app
 
@@ -28,13 +29,7 @@ _lock = threading.Lock()
 
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if a bedrock-runtime server is reachable on the port."""
-    try:
-        with urllib.request.urlopen(
-            f"http://localhost:{port}/", timeout=timeout
-        ) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+    return is_engine(port, "bedrock_runtime", timeout)
 
 
 def start_in_thread(port: int = DEFAULT_PORT, ollama_url: str | None = None) -> str:
@@ -47,9 +42,13 @@ def start_in_thread(port: int = DEFAULT_PORT, ollama_url: str | None = None) -> 
     with _lock:
         if port in _servers:
             return url
+        claim_port(port, "bedrock_runtime")
         application = create_app(ollama_url=ollama_url)
         config = uvicorn.Config(
-            application, host="127.0.0.1", port=port, log_level="warning"
+            identify(application, "bedrock_runtime"),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
         )
         server = uvicorn.Server(config)
         thread = threading.Thread(target=server.run, daemon=True)

@@ -1,31 +1,37 @@
 """Local Kinesis Data Firehose (DirectPut -> S3) as an in-process engine.
 
-    from oblako.engines.firehose import get_client
-    fh = get_client()
-    fh.create_delivery_stream(
-        DeliveryStreamName="events",
-        ExtendedS3DestinationConfiguration={
-            "RoleARN": "arn:aws:iam::000000000000:role/x",
-            "BucketARN": "arn:aws:s3:::my-bucket",
-            "Prefix": "events/",
-            "BufferingHints": {"IntervalInSeconds": 2, "SizeInMBs": 5},
-        },
-    )
-    fh.put_record(DeliveryStreamName="events", Record={"Data": b'{"a":1}'})
+from oblako.engines.firehose import get_client
+fh = get_client()
+fh.create_delivery_stream(
+    DeliveryStreamName="events",
+    ExtendedS3DestinationConfiguration={
+        "RoleARN": "arn:aws:iam::000000000000:role/x",
+        "BucketARN": "arn:aws:s3:::my-bucket",
+        "Prefix": "events/",
+        "BufferingHints": {"IntervalInSeconds": 2, "SizeInMBs": 5},
+    },
+)
+fh.put_record(DeliveryStreamName="events", Record={"Data": b'{"a":1}'})
 """
 
 from __future__ import annotations
 
 import threading
 import time
-import urllib.error
-import urllib.request
 
 from oblako import ports
+from oblako.engines.identity import claim_port, identify, is_engine
 
 from .app import FirehoseExecutor, app, create_app
 
-__all__ = ["app", "create_app", "FirehoseExecutor", "start_in_thread", "is_running", "get_client"]
+__all__ = [
+    "app",
+    "create_app",
+    "FirehoseExecutor",
+    "start_in_thread",
+    "is_running",
+    "get_client",
+]
 
 DEFAULT_PORT = ports.FIREHOSE
 
@@ -35,19 +41,7 @@ _lock = threading.Lock()
 
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if a firehose server is reachable on the port."""
-    req = urllib.request.Request(
-        f"http://localhost:{port}/",
-        data=b"{}",
-        method="POST",
-        headers={"X-Amz-Target": "Firehose_20150804.ListDeliveryStreams"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout):
-            return True
-    except urllib.error.HTTPError:
-        return True
-    except Exception:
-        return False
+    return is_engine(port, "firehose", timeout)
 
 
 def start_in_thread(port: int = DEFAULT_PORT) -> str:
@@ -60,8 +54,12 @@ def start_in_thread(port: int = DEFAULT_PORT) -> str:
     with _lock:
         if port in _servers:
             return url
+        claim_port(port, "firehose")
         config = uvicorn.Config(
-            create_app(), host="127.0.0.1", port=port, log_level="warning"
+            identify(create_app(), "firehose"),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
         )
         server = uvicorn.Server(config)
         thread = threading.Thread(target=server.run, daemon=True)
