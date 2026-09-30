@@ -45,3 +45,6 @@ oblako-welcome.ipynb
 
 # Jupyter
 .ipynb_checkpoints/
+
+# SageMaker SDK local-mode working dirs (ModelTrainer local_container_root)
+.sm-local/

@@ -133,17 +133,21 @@ with mlflow.start_run():
   )
 }
 
-const SAGEMAKER_CODE = `from sagemaker.local import LocalSession
-from sagemaker.estimator import Estimator
+const SAGEMAKER_CODE = `from sagemaker.train import ModelTrainer
+from sagemaker.train.configs import Compute, InputData
+from sagemaker.train.model_trainer import Mode
 
-session = LocalSession()
-estimator = Estimator(
-    image_uri="my-training-image:latest",
-    instance_type="local",
-    sagemaker_session=session,
-    output_path="s3://my-bucket/models",
+from oblako.engines.sagemaker import use_local_stubs
+
+use_local_stubs()  # no AWS account: skip the SDK's IAM role check
+trainer = ModelTrainer(
+    training_image="my-training-image:latest",
+    training_mode=Mode.LOCAL_CONTAINER,
+    compute=Compute(instance_type="local", instance_count=1),
+    role="arn:aws:iam::000000000000:role/local",
+    local_container_root="/Users/me/sm-local",  # Docker Desktop shares /Users
 )
-estimator.fit({"train": "s3://my-bucket/data/train.csv"})`
+trainer.train(input_data_config=[InputData(channel_name="train", data_source="./data/train")])`
 
 function PythonCode({ code }) {
   const ref = useRef(null)

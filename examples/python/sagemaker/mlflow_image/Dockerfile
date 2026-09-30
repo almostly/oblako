@@ -5,7 +5,8 @@
 # env that switches worlds is MLFLOW_TRACKING_URI: a sqlite path locally, a
 # SageMaker MLflow App ARN on AWS. The training program is the image ENTRYPOINT.
 FROM python:3.11-slim
-RUN pip install --no-cache-dir "mlflow>=2.9,<3"
+# mlflow 2.x imports a pool class SQLAlchemy 2.1 removed
+RUN pip install --no-cache-dir "mlflow>=2.9,<3" "sqlalchemy<2.1"
 COPY train.py /usr/local/bin/train
 RUN chmod +x /usr/local/bin/train
 ENTRYPOINT ["train"]

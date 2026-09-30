@@ -30,8 +30,8 @@ os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-1")
 
 use_local_stubs()  # run with no AWS account
 
-# ensure the buckets exist on S3Proxy: "local" is use_local_stubs' default bucket
-# (where the SDK stages step code); BUCKET holds step-to-step I/O.
+# ensure the bucket exists on S3Proxy: it holds the staged step code and the
+# step-to-step I/O (the session's default_bucket, kept by use_local_stubs).
 _s3 = boto3.client(
     "s3",
     endpoint_url=os.environ["AWS_ENDPOINT_URL_S3"],
@@ -39,9 +39,8 @@ _s3 = boto3.client(
         s3={"addressing_style": "path"}, request_checksum_calculation="when_required"
     ),
 )
-for _b in ("local", BUCKET):
-    if _b not in [b["Name"] for b in _s3.list_buckets()["Buckets"]]:
-        _s3.create_bucket(Bucket=_b)
+if BUCKET not in [b["Name"] for b in _s3.list_buckets()["Buckets"]]:
+    _s3.create_bucket(Bucket=BUCKET)
 
 from sagemaker.core.processing import (  # noqa: E402
     PipelineSession,
@@ -123,14 +122,14 @@ double = ProcessingStep(
     ),
 )
 
-pipeline = Pipeline(
-    name="oblako-demo", steps=[prepare, double], sagemaker_session=sess
-)
+pipeline = Pipeline(name="oblako-demo", steps=[prepare, double], sagemaker_session=sess)
 
 if __name__ == "__main__":
     # v3 routes pipeline.upsert()/start() through sagemaker_client, which local
     # mode lacks; the local session carries these methods itself.
     sess.create_pipeline(pipeline, "oblako local pipeline demo")
     sess.start_pipeline_execution(PipelineName=pipeline.name)
-    result = _s3.get_object(Bucket=BUCKET, Key="io/double/out/doubled.csv")["Body"].read()
+    result = _s3.get_object(Bucket=BUCKET, Key="io/double/out/doubled.csv")[
+        "Body"
+    ].read()
     print("pipeline complete; doubled ->", result.decode().replace("\n", ", "))

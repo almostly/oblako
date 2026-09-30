@@ -392,7 +392,9 @@ class SageMakerService:
             "AWS_DEFAULT_REGION": "us-east-1",
             "AWS_ENDPOINT_URL_S3": f"http://{host}:{P.S3}",
             "AWS_ENDPOINT_URL_DYNAMODB": f"http://{host}:{P.DYNAMODB}",
-            "AWS_ENDPOINT_URL_SAGEMAKER": f"http://{host}:{P.MOTO}",
+            "AWS_ENDPOINT_URL_SAGEMAKER": f"http://{host}:{P.SAGEMAKER}",
+            "AWS_ENDPOINT_URL_SAGEMAKER_RUNTIME": f"http://{host}:{P.SAGEMAKER}",
+            "AWS_ENDPOINT_URL_SAGEMAKER_FEATURESTORE_RUNTIME": f"http://{host}:{P.SAGEMAKER}",
             "AWS_ENDPOINT_URL_CLOUDFORMATION": f"http://{host}:{P.CLOUDFORMATION}",
         }
         container.exec_run(

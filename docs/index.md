@@ -37,7 +37,7 @@ Containers & compute: real containers.
 :alt: AI/ML — SageMaker, Bedrock, DynamoDB vectors, OpenSearch
 :width: 100%
 
-AI / ML: SageMaker local mode, Bedrock via Ollama, vector search.
+AI / ML: SageMaker in local Docker, Bedrock via Ollama, vector search.
 ```
 
 ```{figure} _static/diagrams/data.svg

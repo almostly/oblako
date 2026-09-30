@@ -63,10 +63,10 @@ oblako up
 **Limitations**
 
 - The always-on services run on Apple `container`. The three **per-task compute
-  services**, **Lambda**, **SageMaker local**, and **Glue**, are the exception:
+  services**, **Lambda**, **SageMaker**, and **Glue**, are the exception:
   each one launches *its own* container per job and talks to a Docker daemon
-  directly (moto spawns the Lambda runtime, the SageMaker SDK's local mode shells
-  out to `docker`, and Glue runs the Spark image), so they need a Docker-API
+  directly (moto spawns the Lambda runtime, oblako's SageMaker engine and the SDK's
+  v3 local modes start job and endpoint containers, and Glue runs the Spark image), so they need a Docker-API
   backend (Docker / Podman / Colima). This is an upstream coupling to Docker, not
   an oblako limit, so switch those workloads to a Docker backend.
 - Apple `container` doesn't emulate amd64, so **amd64-only images won't run**:

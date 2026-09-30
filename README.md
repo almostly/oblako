@@ -43,7 +43,7 @@ normal `boto3` client (or native driver):
 | Bedrock (control plane) | oblako server | boto3 `bedrock`: foundation-model catalog + batch model-invocation jobs |
 | Bedrock Knowledge Bases | OpenSearch | Vector search with k-NN |
 | Bedrock AgentCore (Runtime) | bedrock-agentcore SDK | Local agent on the `/invocations` + `/ping` contract |
-| SageMaker | SDK local mode | `instance_type="local"` trains in real Docker |
+| SageMaker | oblako engine + SDK v3 local mode | boto3 `sagemaker` API runs jobs and endpoints in real Docker; `ModelTrainer` / `ModelBuilder` local mode runs with no account |
 | Step Functions | aws-stepfunctions-local | Official AWS Docker image |
 | Lambda | AWS SAM CLI (external) | `sam local invoke`, bring your own SAM CLI |
 | ECS / Fargate | moto + container per task | `run_task`/`create_service` launch real containers; a Fargate+ALB CloudFormation stack deploys and serves locally |

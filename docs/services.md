@@ -233,6 +233,32 @@ a client-only dependency. Three clients all point at the same engine:
 `sagemaker` (control plane), `sagemaker-runtime`, and
 `sagemaker-featurestore-runtime`.
 
+**The SDK v3 local modes.** Client code can also use the SDK's own local modes:
+`ModelTrainer(training_mode=Mode.LOCAL_CONTAINER)`, `ModelBuilder(mode=Mode.LOCAL_CONTAINER)`,
+the `LocalSession` endpoint calls, and a local pipeline session. These still reach
+for AWS at the edges (IAM role validation, the `sagemaker-<region>-<account>`
+default bucket, an ECR pull), so `oblako.engines.sagemaker.use_local_stubs()`
+neutralizes those calls. The demo notebooks under `examples/demo-notebooks/` use
+this path. Things to know:
+
+- v2 modules (`sagemaker.estimator`, `sagemaker.local`, `sagemaker.workflow`,
+  `sagemaker.serializers`, ...) are gone in v3 and raise on import. Training is
+  `sagemaker.train.ModelTrainer`, serving `sagemaker.serve.ModelBuilder` or
+  `sagemaker.core.local.LocalSession`, pipelines `sagemaker.mlops.workflow`.
+- `ModelTrainer`'s `local_container_root` is bind-mounted into the container, so
+  keep it under your home directory: Docker Desktop doesn't share the
+  `/var/folders` temp dir, and a root there mounts empty. The model lands in
+  `<root>/compressed_artifacts/model.tar.gz`.
+- A local pipeline session needs both halves v3 splits across two classes:
+  `class LocalPipelineSession(sagemaker.mlops.local.local_pipeline_session.LocalPipelineSession,
+  sagemaker.core.processing.PipelineSession)`. Register and run it with
+  `session.create_pipeline(...)` / `session.start_pipeline_execution(...)`;
+  `pipeline.upsert()` / `start()` need a real control plane. Every
+  `ProcessingOutput` needs an explicit `s3_uri`.
+- `ModelBuilder.deploy_local()` (SDK 3.17) starts the serving container, then
+  registers it through `LocalSession.create_endpoint`, which starts a second one on
+  the same port and blocks. Call the `LocalSession` endpoint APIs directly instead.
+
 The implemented surface:
 
 - **Training / HPO / processing / transform.** `CreateTrainingJob`,
@@ -256,6 +282,8 @@ The implemented surface:
 **Limitations**
 
 - Requires `pip install 'oblako[sagemaker]'` (v3 SDK, client-only) and Docker.
+- No Pipelines API on the engine yet (`CreatePipeline` / `StartPipelineExecution`):
+  run pipelines through the SDK's local pipeline session (see above).
 - Compute is local Docker containers, not managed instances; `instance_type` is
   cosmetic (`local_gpu` requests all GPUs).
 - The Feature Store online store is in-memory (lost on restart); the offline store
