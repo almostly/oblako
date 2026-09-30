@@ -28,6 +28,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip3 install --no-cache-dir --break-system-packages \
         boto3 pyarrow pydantic sqlglot \
     && rm -rf /root/.cache
+# docker + psycopg run the Redshift ML training agent (proxy/redshift_ml.py): it
+# reads queued CREATE MODELs over the local socket and trains them in a container
+# on the host Docker daemon (via a mounted /var/run/docker.sock).
+RUN pip3 install --no-cache-dir --break-system-packages \
+        docker "psycopg[binary]" \
+    && rm -rf /root/.cache
 
 # The shared_preload extension, compiled in the build stage.
 COPY --from=build /usr/lib/postgresql/16/lib/oblako_redshift.so /usr/lib/postgresql/16/lib/
@@ -60,6 +66,13 @@ COPY proxy/copy_unload.py /usr/local/bin/copy_unload.py
 COPY proxy/super_nav.py /usr/local/bin/super_nav.py
 # LISTAGG -> string_agg rewriting, imported by the proxy.
 COPY proxy/listagg.py /usr/local/bin/listagg.py
+# Bare datepart keywords (DATEADD(month, ...)) -> quoted, imported by the proxy.
+COPY proxy/datepart.py /usr/local/bin/datepart.py
+# Redshift ML: CREATE/SHOW/DROP MODEL rewriting (proxy), the plpython3u entry
+# points (initdb.d/09_redshift_ml.sql) and the training agent, plus the training
+# image's build context the agent builds on first use.
+COPY proxy/redshift_ml.py /usr/local/bin/redshift_ml.py
+COPY ml_train/ /usr/local/share/oblako/ml_train/
 # PIVOT/UNPIVOT -> standard SQL (sqlglot-parsed), imported by the proxy.
 COPY proxy/pivot_unpivot.py /usr/local/bin/pivot_unpivot.py
 COPY entrypoint.sh /usr/local/bin/oblako-entrypoint.sh

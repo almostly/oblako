@@ -1,10 +1,12 @@
 """Live integration test for the Kubernetes container backend.
 
-Skips unless a cluster is reachable (kubectl + a current context). In CI a kind
-cluster provides one; locally `minikube start` does. Runs a real service
-(DynamoDB) as a Deployment+Service and reaches it with boto3 via port-forward.
+Skips unless a local cluster is the current kubectl context. In CI a kind cluster
+provides one; locally `k3d cluster create` or `minikube start` does. Runs a real
+service (DynamoDB) as a Deployment+Service and reaches it with boto3 via
+port-forward.
 """
 
+import os
 import shutil
 import subprocess
 import time
@@ -12,8 +14,28 @@ import time
 import pytest
 
 
+# The test deploys into whatever cluster kubectl points at, so it only runs
+# against a local one: a current context left on a real (e.g. EKS) cluster must
+# not get oblako workloads. OBLAKO_K8S_TEST_ANY_CONTEXT=1 lifts the check.
+LOCAL_CONTEXTS = (
+    "kind-",
+    "k3d-",
+    "minikube",
+    "docker-desktop",
+    "rancher-desktop",
+    "orbstack",
+    "colima",
+)
+
+
 def _cluster_available() -> bool:
     if shutil.which("kubectl") is None:
+        return False
+    context = subprocess.run(
+        ["kubectl", "config", "current-context"], capture_output=True, text=True
+    ).stdout.strip()
+    local = context.startswith(LOCAL_CONTEXTS)
+    if not local and os.environ.get("OBLAKO_K8S_TEST_ANY_CONTEXT") != "1":
         return False
     return (
         subprocess.run(["kubectl", "cluster-info"], capture_output=True).returncode == 0
@@ -21,7 +43,8 @@ def _cluster_available() -> bool:
 
 
 pytestmark = pytest.mark.skipif(
-    not _cluster_available(), reason="no Kubernetes cluster reachable"
+    not _cluster_available(),
+    reason="no local Kubernetes cluster (kind/k3d/minikube/...) is the current context",
 )
 
 

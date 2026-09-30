@@ -22,41 +22,41 @@ test:
 
 # Unit tests only (no services needed)
 test-unit:
-	python -m pytest tests/test_bedrock_adapter.py -v
+	python -m pytest tests/bedrock/test_bedrock_adapter.py -v
 
 # Integration tests (each requires its service running)
 test-s3:
-	python -m pytest tests/test_s3proxy.py -v
+	python -m pytest tests/s3/test_s3proxy.py -v
 
 test-redshift:
-	python -m pytest tests/test_redshift.py -v
+	python -m pytest tests/redshift/test_redshift.py -v
 
 test-redshift-data:
-	python -m pytest tests/test_redshift_data.py -v
+	python -m pytest tests/redshift/test_redshift_data.py -v
 
 test-rds:
-	python -m pytest tests/test_rds.py -v
+	python -m pytest tests/rds/test_rds.py -v
 
 test-rds-data:
-	python -m pytest tests/test_rds_data.py -v
+	python -m pytest tests/rds/test_rds_data.py -v
 
 test-sagemaker:
-	python -m pytest tests/test_sagemaker.py -v   # needs: pip install 'oblako[sagemaker]'
+	python -m pytest tests/sagemaker/ -v   # needs: pip install 'oblako[sagemaker]'
 
 test-redshift-ml:
-	python -m pytest tests/test_redshift_ml.py -v   # needs: pip install 'oblako[sagemaker]'
+	python -m pytest tests/redshift/test_redshift_ml.py -v   # needs Docker + the Redshift engine (oblako up redshift)
 
 test-openrouter:
-	python -m pytest tests/test_bedrock_openrouter_live.py -v   # needs OPENROUTER_API_KEY (live, paid)
+	python -m pytest tests/bedrock/test_bedrock_openrouter_live.py -v   # needs OPENROUTER_API_KEY (live, paid)
 
 test-opensearch:
-	python -m pytest tests/test_opensearch.py -v
+	python -m pytest tests/opensearch/test_opensearch.py -v
 
 test-stepfunctions:
-	python -m pytest tests/test_stepfunctions.py -v
+	python -m pytest tests/stepfunctions/test_stepfunctions.py -v
 
 test-ollama:
-	python -m pytest tests/test_ollama.py -v
+	python -m pytest tests/bedrock/test_ollama.py -v
 
 test-integration:
-	python -m pytest tests/ -v --ignore=tests/test_bedrock_adapter.py
+	python -m pytest tests/ -v --ignore=tests/bedrock/test_bedrock_adapter.py

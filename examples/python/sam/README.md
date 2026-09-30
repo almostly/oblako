@@ -16,7 +16,7 @@ enough to ship the `PythonUvBuilder` (≈ 1.161+) and `uv` on PATH.
 
 ```bash
 # 1. oblako services up (S3Proxy :9000, DynamoDB Local :8001)
-oblako up s3proxy && oblako up dynamodb        # or: make up
+oblako up s3 && oblako up dynamodb             # or: make up
 
 # 2. build the function with uv, then invoke it (needs SAM CLI + Docker)
 sam build -t examples/sam/template.yaml --beta-features      # Running PythonUvBuilder:...

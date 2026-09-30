@@ -5,9 +5,9 @@
 -- datepart *boundaries crossed*, not elapsed time). Pure SQL/plpgsql (no
 -- plpython) so they can also seed template1 for databases created later.
 --
--- Datepart must be a quoted string, e.g. DATEADD('day', 7, ts). Redshift also
--- accepts the bare keyword form DATEADD(day, 7, ts); PostgreSQL can't, so use
--- the quoted form (most SQL generators, incl. dbt, already do).
+-- Datepart is a quoted string here, e.g. DATEADD('day', 7, ts). Redshift also
+-- accepts the bare keyword form DATEADD(day, 7, ts), which PostgreSQL would parse
+-- as a column; the wire proxy quotes it (proxy/datepart.py), so both forms work.
 
 -- Normalize Redshift datepart names/abbreviations to a canonical unit.
 -- Note: per Redshift, 'm' is MINUTE (month is 'mon'/'mons'/'mm').

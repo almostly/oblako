@@ -1,22 +1,21 @@
 """Local Amazon Athena over the Trino engine.
 
-    from oblako.engines.athena import get_client
-    athena = get_client()
-    qid = athena.start_query_execution(
-        QueryString="SELECT 1 AS n",
-        ResultConfiguration={"OutputLocation": "s3://oblako-athena/results/"},
-    )["QueryExecutionId"]
-    # poll get_query_execution until SUCCEEDED, then get_query_results
+from oblako.engines.athena import get_client
+athena = get_client()
+qid = athena.start_query_execution(
+    QueryString="SELECT 1 AS n",
+    ResultConfiguration={"OutputLocation": "s3://oblako-athena/results/"},
+)["QueryExecutionId"]
+# poll get_query_execution until SUCCEEDED, then get_query_results
 """
 
 from __future__ import annotations
 
 import threading
 import time
-import urllib.error
-import urllib.request
 
 from oblako import ports
+from oblako.engines.identity import claim_port, identify, is_engine
 
 from .app import AthenaExecutor, app, create_app
 
@@ -37,19 +36,7 @@ _lock = threading.Lock()
 
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if an athena server is reachable on the port."""
-    req = urllib.request.Request(
-        f"http://localhost:{port}/",
-        data=b"{}",
-        method="POST",
-        headers={"X-Amz-Target": "AmazonAthena.GetWorkGroup"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout):
-            return True
-    except urllib.error.HTTPError:
-        return True
-    except Exception:
-        return False
+    return is_engine(port, "athena", timeout)
 
 
 def start_in_thread(port: int = DEFAULT_PORT) -> str:
@@ -62,8 +49,12 @@ def start_in_thread(port: int = DEFAULT_PORT) -> str:
     with _lock:
         if port in _servers:
             return url
+        claim_port(port, "athena")
         config = uvicorn.Config(
-            create_app(), host="127.0.0.1", port=port, log_level="warning"
+            identify(create_app(), "athena"),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
         )
         server = uvicorn.Server(config)
         thread = threading.Thread(target=server.run, daemon=True)

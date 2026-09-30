@@ -18,10 +18,9 @@ from __future__ import annotations
 
 import threading
 import time
-import urllib.error
-import urllib.request
 
 from oblako import ports
+from oblako.engines.identity import claim_port, identify, is_engine
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -50,7 +49,11 @@ def deregister(task_id: str) -> None:
 def _container(task_id: str, container: str):
     with _lock:
         entry = _TASKS.get(task_id)
-        return dict(entry["containers"][container]) if entry and container in entry["containers"] else None
+        return (
+            dict(entry["containers"][container])
+            if entry and container in entry["containers"]
+            else None
+        )
 
 
 def _task(task_id: str):
@@ -97,15 +100,7 @@ app = create_app()
 
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if the metadata server is reachable on the port."""
-    try:
-        with urllib.request.urlopen(
-            f"http://localhost:{port}/none/none", timeout=timeout
-        ):
-            return True
-    except urllib.error.HTTPError:
-        return True  # 404 = server is up
-    except Exception:
-        return False
+    return is_engine(port, "ecs_metadata", timeout)
 
 
 def start_in_thread(port: int = DEFAULT_PORT) -> str:
@@ -118,8 +113,12 @@ def start_in_thread(port: int = DEFAULT_PORT) -> str:
     with _lock:
         if port in _servers:
             return url
+        claim_port(port, "ecs_metadata")
         config = uvicorn.Config(
-            create_app(), host="127.0.0.1", port=port, log_level="warning"
+            identify(create_app(), "ecs_metadata"),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
         )
         server = uvicorn.Server(config)
         threading.Thread(target=server.run, daemon=True).start()

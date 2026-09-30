@@ -26,10 +26,10 @@ This page lists what each one provides and where it diverges from AWS.
 | **S3 Vectors** | `s3vectors`: vector buckets → indexes (dimension + distance metric) → `PutVectors` / `QueryVectors` (k-NN) with Mongo-style metadata filters. Fed by Bedrock embeddings. | Brute-force k-NN (cosine / euclidean), not ANN; vectors are in-memory (not persisted across restart). |
 | **DynamoDB** | Amazon's DynamoDB Local, with a proxy that adds native **vector search**: `VectorIndexes` on `CreateTable`/`UpdateTable` + `SearchVectors` (k-NN). | Single local instance; no Streams→Lambda wiring. `SearchVectors` is brute-force KNN (full scan), not ANN; the vector index isn't persisted across restart. |
 | **Kinesis** | Kinesis Data Streams via kinesalite (`saidsef/aws-kinesis-local`). | Streams only; no Managed Flink. (Firehose is a separate service, see Analytics.) |
-| **Redshift** | PostgreSQL 16 impersonating Redshift; `redshift-connector`/dbt connect natively. A bundled proxy tolerates physical DDL (`DISTKEY`/`SORTKEY`/`ENCODE`, `varchar(max)`), terminates TLS, and bridges `COPY`/`UNLOAD` to/from `s3://` (Parquet, CSV, and delimited text) so awswrangler, dbt, and Feast load/unload for real. `SUPER` (jsonb-backed) with PartiQL navigation (`data.a.b`, `data['a'][0]`), `LISTAGG` (→ `string_agg`), `PIVOT`/`UNPIVOT` (→ standard SQL), and native JSON functions are supported. | Row-store, not columnar; late-binding views unsupported; Python UDFs are Python 3; the S3 bridge covers Parquet/CSV/text (not JSON/AVRO/ORC); SUPER dot-navigation yields text (numeric compares need a cast); PIVOT/UNPIVOT need a subquery source (a bare table has no schema in the proxy). |
+| **Redshift** | PostgreSQL 16 impersonating Redshift; `redshift-connector`/dbt connect natively. A bundled proxy tolerates physical DDL (`DISTKEY`/`SORTKEY`/`ENCODE`, `varchar(max)`), terminates TLS, and bridges `COPY`/`UNLOAD` to/from `s3://` (Parquet, CSV, and delimited text) so awswrangler, dbt, and Feast load/unload for real. `SUPER` (jsonb-backed) with PartiQL navigation (`data.a.b`, `data['a'][0]`), `LISTAGG` (→ `string_agg`), `PIVOT`/`UNPIVOT` (→ standard SQL), unquoted dateparts (`DATEADD(month, 1, d)`), and native JSON functions are supported. | Row-store, not columnar; late-binding views unsupported; Python UDFs are Python 3; the S3 bridge covers Parquet/CSV/text (not JSON/AVRO/ORC); SUPER dot-navigation yields text (numeric compares need a cast); PIVOT/UNPIVOT need a subquery source (a bare table has no schema in the proxy). |
 | **Redshift (control plane)** | `redshift` clusters/nodes/endpoints/snapshots via moto. | Metadata only, the cluster endpoint isn't the queryable engine. |
 | **Redshift Data API** | `redshift-data`; SQL executes for real against the engine (through the same proxy, so its `COPY`/`UNLOAD` reach S3 too). Feast's Redshift offline store works end to end. | Statement results buffered in memory. |
-| **Redshift ML** | `CREATE MODEL` trains in a SageMaker local container; predict UDF runs in-DB. | Needs `oblako[sagemaker]` + Docker; pure-Python predict UDF. |
+| **Redshift ML** | `CREATE MODEL` / `SHOW MODEL` / `DROP MODEL` from any client (psycopg, DBeaver, dbt, the Data API), asynchronous like Redshift: the model trains in a container and `svv_ml_model_info` moves from `TRAINING` to `Model is Ready`; the prediction function runs in-DB. | Needs Docker (the engine mounts `/var/run/docker.sock`); numeric features only (`PREPROCESSORS 'none'`); pure-Python prediction function. |
 | **RDS / Aurora** | moto control plane + a real PostgreSQL engine. | Engine is PostgreSQL regardless of the requested engine type. |
 | **RDS Data API** | `rds-data`: synchronous SQL + transactions against the engine. | PostgreSQL semantics. |
 
@@ -196,13 +196,52 @@ version to clients instead (`OBLAKO_PROXY_SERVER_VERSION`). amd64 only (Citus
 ships no arm64 image), so on Apple Silicon it runs under emulation. This is a
 distinct product track from the single-node simulator, aimed at self-hosting.
 
+**Redshift ML.** `CREATE MODEL`, `SHOW MODEL [ALL]` and `DROP MODEL [IF EXISTS]`
+work from any client, because the wire proxy turns them into calls to functions
+in the engine. As on Redshift, `CREATE MODEL` is asynchronous: it validates the
+statement and returns, the model is listed in `svv_ml_model_info` as `TRAINING`,
+and an agent in the container trains it in a separate container on the host
+Docker daemon (through the mounted `/var/run/docker.sock`), then publishes the
+prediction function and moves `model_state` to `Model is Ready` (or to the failure
+reason).
+
+```sql
+CREATE MODEL sandbox.credit
+FROM (SELECT f1::float8 AS f_a, f2::float8 AS f_b, target::int AS target
+      FROM sandbox.tape WHERE sample = 'train')
+TARGET target FUNCTION credit_predict IAM_ROLE default
+AUTO OFF MODEL_TYPE xgboost OBJECTIVE 'binary:logistic' PREPROCESSORS 'none'
+HYPERPARAMETERS DEFAULT EXCEPT (num_round '150', max_depth '5', eta '0.1')
+SETTINGS (S3_BUCKET 'ml-bucket', MAX_RUNTIME 1800);
+
+SELECT model_name, model_state FROM svv_ml_model_info;  -- TRAINING -> Model is Ready
+SHOW MODEL sandbox.credit;
+SELECT sandbox.credit_predict(f1::float8, f2::float8) FROM sandbox.tape;
+```
+
+- `MODEL_TYPE` `XGBOOST`, `MLP` or `LINEAR_LEARNER`, or none for Autopilot, which
+  trains all three and keeps the best on a holdout; regression, binary and
+  multiclass classification. `FROM` takes a table or a subquery; names may be
+  schema-qualified, and the function lands in the model's schema.
+- `AUTO OFF` is checked the way Redshift checks it: it needs `MODEL_TYPE
+  XGBOOST`, `OBJECTIVE`, `HYPERPARAMETERS` and `PREPROCESSORS`, and at least 500
+  training rows. XGBoost hyperparameters (`num_round`, `max_depth`, `eta`,
+  `subsample`, `colsample_bytree`, `min_child_weight`, ...) are passed through.
+- The prediction function returns the class label for classification (as Redshift
+  does for `binary:logistic`). `OBJECTIVE 'reg:logistic'` returns the probability,
+  which is what AUC and decile tables need. Autopilot classification models also
+  get `<function>_probabilities`, returning `{"probabilities": [...], "labels":
+  [...]}` as `SUPER`.
+- Features must be numeric (cast them in the `SELECT`); `PREPROCESSORS` other
+  than `'none'` are rejected. The model lives in the database it was created in.
+
 **Limitations**
 
 - Redshift physical DDL (`DISTSTYLE`/`DISTKEY`/`SORTKEY`/`ENCODE`) is **accepted
   and ignored** (the bundled wire proxy strips it before the parser), and
   `varchar(max)` is rewritten to `text`, so awswrangler `to_sql`, dbt physical
   configs, and dlt's Redshift destination all work. It has no storage effect on
-  the PostgreSQL engine. Late-binding views and `SUPER`/`VARBYTE` are still
+  the PostgreSQL engine. Late-binding views and `VARBYTE` are still
   unsupported.
 - It's a row-store PostgreSQL, not columnar: no Redshift-style column compression
   / zone maps / sort-key ordering. Query **results** are faithful; storage and
@@ -233,6 +272,32 @@ a client-only dependency. Three clients all point at the same engine:
 `sagemaker` (control plane), `sagemaker-runtime`, and
 `sagemaker-featurestore-runtime`.
 
+**The SDK v3 local modes.** Client code can also use the SDK's own local modes:
+`ModelTrainer(training_mode=Mode.LOCAL_CONTAINER)`, `ModelBuilder(mode=Mode.LOCAL_CONTAINER)`,
+the `LocalSession` endpoint calls, and a local pipeline session. These still reach
+for AWS at the edges (IAM role validation, the `sagemaker-<region>-<account>`
+default bucket, an ECR pull), so `oblako.engines.sagemaker.use_local_stubs()`
+neutralizes those calls. The demo notebooks under `examples/demo-notebooks/` use
+this path. Things to know:
+
+- v2 modules (`sagemaker.estimator`, `sagemaker.local`, `sagemaker.workflow`,
+  `sagemaker.serializers`, ...) are gone in v3 and raise on import. Training is
+  `sagemaker.train.ModelTrainer`, serving `sagemaker.serve.ModelBuilder` or
+  `sagemaker.core.local.LocalSession`, pipelines `sagemaker.mlops.workflow`.
+- `ModelTrainer`'s `local_container_root` is bind-mounted into the container, so
+  keep it under your home directory: Docker Desktop doesn't share the
+  `/var/folders` temp dir, and a root there mounts empty. The model lands in
+  `<root>/compressed_artifacts/model.tar.gz`.
+- A local pipeline session needs both halves v3 splits across two classes:
+  `class LocalPipelineSession(sagemaker.mlops.local.local_pipeline_session.LocalPipelineSession,
+  sagemaker.core.processing.PipelineSession)`. Register and run it with
+  `session.create_pipeline(...)` / `session.start_pipeline_execution(...)`;
+  `pipeline.upsert()` / `start()` need a real control plane. Every
+  `ProcessingOutput` needs an explicit `s3_uri`.
+- `ModelBuilder.deploy_local()` (SDK 3.17) starts the serving container, then
+  registers it through `LocalSession.create_endpoint`, which starts a second one on
+  the same port and blocks. Call the `LocalSession` endpoint APIs directly instead.
+
 The implemented surface:
 
 - **Training / HPO / processing / transform.** `CreateTrainingJob`,
@@ -256,6 +321,8 @@ The implemented surface:
 **Limitations**
 
 - Requires `pip install 'oblako[sagemaker]'` (v3 SDK, client-only) and Docker.
+- No Pipelines API on the engine yet (`CreatePipeline` / `StartPipelineExecution`):
+  run pipelines through the SDK's local pipeline session (see above).
 - Compute is local Docker containers, not managed instances; `instance_type` is
   cosmetic (`local_gpu` requests all GPUs).
 - The Feature Store online store is in-memory (lost on restart); the offline store

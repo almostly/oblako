@@ -159,7 +159,10 @@ def cmd_redshift_data(args):
     port = args.port or ports.REDSHIFT_DATA
     print(f"Starting Redshift Data API on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('redshift-data', endpoint_url=...)")
-    uvicorn.run("oblako.engines.redshift_data.app:app", host="0.0.0.0", port=port)
+    from oblako.engines.redshift_data.app import app
+    from oblako.engines.identity import identify
+
+    uvicorn.run(identify(app, "redshift_data"), host="0.0.0.0", port=port)
 
 
 def cmd_bedrock_runtime(args):
@@ -169,7 +172,10 @@ def cmd_bedrock_runtime(args):
     port = args.port or ports.BEDROCK_RUNTIME
     print(f"Starting Bedrock Runtime on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('bedrock-runtime', endpoint_url=...)")
-    uvicorn.run("oblako.engines.bedrock_runtime.app:app", host="0.0.0.0", port=port)
+    from oblako.engines.bedrock_runtime.app import app
+    from oblako.engines.identity import identify
+
+    uvicorn.run(identify(app, "bedrock_runtime"), host="0.0.0.0", port=port)
 
 
 def cmd_rds_data(args):
@@ -179,7 +185,10 @@ def cmd_rds_data(args):
     port = args.port or ports.RDS_DATA
     print(f"Starting RDS Data API on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('rds-data', endpoint_url=...)")
-    uvicorn.run("oblako.engines.rds_data.app:app", host="0.0.0.0", port=port)
+    from oblako.engines.rds_data.app import app
+    from oblako.engines.identity import identify
+
+    uvicorn.run(identify(app, "rds_data"), host="0.0.0.0", port=port)
 
 
 # CloudFormation
@@ -198,7 +207,10 @@ def cmd_cloudformation(args):
     print(
         "supported resources: S3::Bucket, DynamoDB::Table, Redshift::Cluster, RDS::DBInstance"
     )
-    uvicorn.run("oblako.engines.cloudformation.app:app", host="0.0.0.0", port=port)
+    from oblako.engines.cloudformation.app import app
+    from oblako.engines.identity import identify
+
+    uvicorn.run(identify(app, "cloudformation"), host="0.0.0.0", port=port)
 
 
 # -----------------------------------------------------------------------------------------------

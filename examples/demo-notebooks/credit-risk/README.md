@@ -27,7 +27,7 @@ One bring-your-own-container that both **trains** (`<image> train`) and **serves
 
 ```bash
 pip install 'oblako[sagemaker,notebook]'
-oblako up s3proxy        # S3Proxy on :9000 (model store + pipeline artifacts)
+oblako up s3             # S3Proxy on :9000 (model store + pipeline artifacts)
 # Docker running
 
 oblako notebook          # opens JupyterLab; these notebooks are in the workspace
@@ -35,7 +35,9 @@ oblako notebook          # opens JupyterLab; these notebooks are in the workspac
 jupyter nbconvert --to notebook --execute 01_byoc_training.ipynb
 ```
 
-The only swaps from AWS are local: S3 → oblako's **S3Proxy**, and
-`instance_type="local"` instead of `ml.*`. No ECR (the image is built locally),
-no IAM. Everything else — `Estimator`, `estimator.deploy`, `Pipeline`,
-`ProcessingStep`, `TrainingStep` — is the real SageMaker SDK.
+The only swaps from AWS are local: S3 → oblako's **S3Proxy**,
+`Mode.LOCAL_CONTAINER` / `instance_type="local"` instead of `ml.*`, and
+`use_local_stubs()` in place of IAM and ECR (the image is built locally).
+Everything else is the real SageMaker SDK v3: `ModelTrainer` for training, the
+`LocalSession` endpoint APIs for serving, and `sagemaker.mlops` `Pipeline`,
+`ProcessingStep` and `TrainingStep` for the pipeline.

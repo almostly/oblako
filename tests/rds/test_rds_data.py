@@ -31,7 +31,7 @@ def data():
     executor = RdsDataExecutor(
         host="localhost", port=5432, user="oblako", password="oblako", database="oblako"
     )
-    url = start_in_thread(port=8016, executor=executor)
+    url = start_in_thread(port=8018, executor=executor)
     return boto3.client("rds-data", endpoint_url=url, **CREDS)
 
 

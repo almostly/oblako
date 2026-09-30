@@ -35,7 +35,8 @@ oblako prefers running the real thing over emulating it:
 - **RDS / Aurora** → a real PostgreSQL engine behind moto's control plane
 - **Step Functions** → Amazon's `aws-stepfunctions-local`
 - **Bedrock** → Ollama (or OpenRouter for real frontier models)
-- **SageMaker** → the SDK's local mode (real Docker training containers)
+- **SageMaker** → oblako's own engine, running jobs and endpoints in real Docker
+  containers (plus account-free stubs for the SDK v3 local modes)
 
 Control planes that have no local engine (cluster/instance metadata for
 Redshift, RDS, IAM, EC2, Lambda) are served by **moto**, so `describe_*` calls
@@ -54,7 +55,7 @@ Containers & compute: real containers (ECS, Fargate, EKS, ECR, Lambda, Step Func
 :alt: AI/ML — SageMaker, Bedrock, DynamoDB vectors, OpenSearch
 :width: 100%
 
-AI / ML: SageMaker local mode, Bedrock via Ollama, DynamoDB vector search, OpenSearch.
+AI / ML: SageMaker in local Docker, Bedrock via Ollama, DynamoDB vector search, OpenSearch.
 ```
 
 ```{figure} _static/diagrams/data.svg

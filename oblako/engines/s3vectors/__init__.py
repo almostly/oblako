@@ -28,10 +28,9 @@ import json
 import math
 import threading
 import time
-import urllib.error
-import urllib.request
 
 from oblako import ports
+from oblako.engines.identity import claim_port, identify, is_engine
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -156,6 +155,7 @@ def _err(code: str, message: str, status: int = 400) -> Response:
 # Operations
 # ---------------------------------------------------------------------------
 def op_CreateVectorBucket(p: dict) -> Response:
+    """Handle CreateVectorBucket: register an empty vector bucket."""
     name = p["vectorBucketName"]
     with _lock:
         _BUCKETS.setdefault(name, {"arn": _bucket_arn(name), "created": time.time()})
@@ -163,6 +163,7 @@ def op_CreateVectorBucket(p: dict) -> Response:
 
 
 def op_ListVectorBuckets(p: dict) -> Response:
+    """Handle ListVectorBuckets."""
     with _lock:
         buckets = [
             {"vectorBucketName": n, "vectorBucketArn": b["arn"]}
@@ -172,15 +173,28 @@ def op_ListVectorBuckets(p: dict) -> Response:
 
 
 def op_GetVectorBucket(p: dict) -> Response:
-    name = p.get("vectorBucketName") or p.get("vectorBucketArn", "").split("bucket/")[-1]
+    """Handle GetVectorBucket by name or ARN."""
+    name = (
+        p.get("vectorBucketName") or p.get("vectorBucketArn", "").split("bucket/")[-1]
+    )
     with _lock:
         if name not in _BUCKETS:
             return _err("NotFoundException", f"no vector bucket {name}", 404)
-    return _ok({"vectorBucket": {"vectorBucketName": name, "vectorBucketArn": _bucket_arn(name)}})
+    return _ok(
+        {
+            "vectorBucket": {
+                "vectorBucketName": name,
+                "vectorBucketArn": _bucket_arn(name),
+            }
+        }
+    )
 
 
 def op_DeleteVectorBucket(p: dict) -> Response:
-    name = p.get("vectorBucketName") or p.get("vectorBucketArn", "").split("bucket/")[-1]
+    """Handle DeleteVectorBucket by name or ARN."""
+    name = (
+        p.get("vectorBucketName") or p.get("vectorBucketArn", "").split("bucket/")[-1]
+    )
     with _lock:
         _BUCKETS.pop(name, None)
         for key in [k for k in _INDEXES if k[0] == name]:
@@ -189,7 +203,10 @@ def op_DeleteVectorBucket(p: dict) -> Response:
 
 
 def op_CreateIndex(p: dict) -> Response:
-    bucket = p.get("vectorBucketName") or p.get("vectorBucketArn", "").split("bucket/")[-1]
+    """Handle CreateIndex: a vector index with a dimension and distance metric."""
+    bucket = (
+        p.get("vectorBucketName") or p.get("vectorBucketArn", "").split("bucket/")[-1]
+    )
     index = p["indexName"]
     with _lock:
         if bucket not in _BUCKETS:
@@ -205,7 +222,10 @@ def op_CreateIndex(p: dict) -> Response:
 
 
 def op_ListIndexes(p: dict) -> Response:
-    bucket = p.get("vectorBucketName") or p.get("vectorBucketArn", "").split("bucket/")[-1]
+    """Handle ListIndexes in a vector bucket."""
+    bucket = (
+        p.get("vectorBucketName") or p.get("vectorBucketArn", "").split("bucket/")[-1]
+    )
     prefix = p.get("prefix") or ""
     with _lock:
         indexes = [
@@ -221,6 +241,7 @@ def op_ListIndexes(p: dict) -> Response:
 
 
 def op_GetIndex(p: dict) -> Response:
+    """Handle GetIndex by bucket + name or index ARN."""
     ref = _resolve_index(p)
     with _lock:
         idx = _INDEXES.get(ref) if ref else None
@@ -241,6 +262,7 @@ def op_GetIndex(p: dict) -> Response:
 
 
 def op_DeleteIndex(p: dict) -> Response:
+    """Handle DeleteIndex and its vectors."""
     ref = _resolve_index(p)
     with _lock:
         if ref:
@@ -249,6 +271,7 @@ def op_DeleteIndex(p: dict) -> Response:
 
 
 def op_PutVectors(p: dict) -> Response:
+    """Handle PutVectors: insert or replace vectors (key, data, metadata)."""
     ref = _resolve_index(p)
     with _lock:
         idx = _INDEXES.get(ref) if ref else None
@@ -270,6 +293,7 @@ def op_PutVectors(p: dict) -> Response:
 
 
 def op_GetVectors(p: dict) -> Response:
+    """Handle GetVectors by key, optionally with data and metadata."""
     ref = _resolve_index(p)
     with _lock:
         idx = _INDEXES.get(ref) if ref else None
@@ -291,6 +315,7 @@ def op_GetVectors(p: dict) -> Response:
 
 
 def op_ListVectors(p: dict) -> Response:
+    """Handle ListVectors in an index."""
     ref = _resolve_index(p)
     with _lock:
         idx = _INDEXES.get(ref) if ref else None
@@ -309,6 +334,7 @@ def op_ListVectors(p: dict) -> Response:
 
 
 def op_DeleteVectors(p: dict) -> Response:
+    """Handle DeleteVectors by key."""
     ref = _resolve_index(p)
     with _lock:
         idx = _INDEXES.get(ref) if ref else None
@@ -320,6 +346,7 @@ def op_DeleteVectors(p: dict) -> Response:
 
 
 def op_QueryVectors(p: dict) -> Response:
+    """Handle QueryVectors: brute-force k-NN, with an optional metadata filter."""
     ref = _resolve_index(p)
     with _lock:
         idx = _INDEXES.get(ref) if ref else None
@@ -349,8 +376,12 @@ def op_QueryVectors(p: dict) -> Response:
 
 # Ops accepted and no-op'd for local use (policy / tags / encryption).
 _NOOP = {
-    "PutVectorBucketPolicy", "GetVectorBucketPolicy", "DeleteVectorBucketPolicy",
-    "TagResource", "UntagResource", "ListTagsForResource",
+    "PutVectorBucketPolicy",
+    "GetVectorBucketPolicy",
+    "DeleteVectorBucketPolicy",
+    "TagResource",
+    "UntagResource",
+    "ListTagsForResource",
 }
 _HANDLERS = {name[3:]: fn for name, fn in globals().items() if name.startswith("op_")}
 
@@ -386,17 +417,8 @@ _servers: dict[int, object] = {}
 
 
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
-    """True if the s3vectors server is reachable on the port."""
-    try:
-        req = urllib.request.Request(
-            f"http://localhost:{port}/ListVectorBuckets", data=b"{}", method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=timeout):
-            return True
-    except urllib.error.HTTPError:
-        return True  # any HTTP response means the server is up
-    except Exception:
-        return False
+    """Return True if the s3vectors server is reachable on the port."""
+    return is_engine(port, "s3vectors", timeout)
 
 
 def start_in_thread(port: int = DEFAULT_PORT) -> str:
@@ -409,8 +431,12 @@ def start_in_thread(port: int = DEFAULT_PORT) -> str:
     with _lock:
         if port in _servers:
             return url
+        claim_port(port, "s3vectors")
         config = uvicorn.Config(
-            create_app(), host="127.0.0.1", port=port, log_level="warning"
+            identify(create_app(), "s3vectors"),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
         )
         server = uvicorn.Server(config)
         threading.Thread(target=server.run, daemon=True).start()

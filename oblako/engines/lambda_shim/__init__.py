@@ -17,12 +17,13 @@ from __future__ import annotations
 import json
 import threading
 import time
-import urllib.request
 
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+
+from oblako.engines.identity import claim_port, identify, is_engine
 
 DEFAULT_PORT = 3001
 
@@ -108,13 +109,7 @@ app = create_app()
 
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if a lambda shim is reachable on the port."""
-    try:
-        with urllib.request.urlopen(
-            f"http://localhost:{port}/", timeout=timeout
-        ) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+    return is_engine(port, "lambda_shim", timeout)
 
 
 def start_in_thread(port: int = DEFAULT_PORT) -> str:
@@ -127,8 +122,12 @@ def start_in_thread(port: int = DEFAULT_PORT) -> str:
     with _lock:
         if port in _servers:
             return url
+        claim_port(port, "lambda_shim")
         config = uvicorn.Config(
-            create_app(), host="0.0.0.0", port=port, log_level="warning"
+            identify(create_app(), "lambda_shim"),
+            host="0.0.0.0",
+            port=port,
+            log_level="warning",
         )
         server = uvicorn.Server(config)
         thread = threading.Thread(target=server.run, daemon=True)

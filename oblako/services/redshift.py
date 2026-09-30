@@ -113,7 +113,13 @@ class RedshiftService(Service):
                 "oblako-redshift-data": {
                     "bind": "/var/lib/postgresql/data",
                     "mode": "rw",
-                }
+                },
+                # Redshift ML: the in-container agent trains CREATE MODELs in a
+                # container on the host Docker daemon (as moto does for Lambda).
+                "/var/run/docker.sock": {
+                    "bind": "/var/run/docker.sock",
+                    "mode": "rw",
+                },
             },
             # So the in-engine COPY/UNLOAD bridge can reach S3Proxy on the host
             # via host.docker.internal (Docker needs the explicit host-gateway

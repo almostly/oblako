@@ -14,7 +14,8 @@ from __future__ import annotations
 
 import threading
 import time
-import urllib.request
+
+from oblako.engines.identity import claim_port, identify, is_engine
 
 from .app import app, create_app
 from .executor import RedshiftDataExecutor
@@ -29,17 +30,7 @@ _lock = threading.Lock()
 
 def is_running(port: int = DEFAULT_PORT, timeout: float = 0.5) -> bool:
     """Return True if a redshift-data server is reachable on the port."""
-    req = urllib.request.Request(
-        f"http://localhost:{port}/",
-        data=b"{}",
-        method="POST",
-        headers={"X-Amz-Target": "RedshiftData.ListStatements"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+    return is_engine(port, "redshift_data", timeout)
 
 
 def start_in_thread(
@@ -59,9 +50,13 @@ def start_in_thread(
     with _lock:
         if port in _servers:
             return url
+        claim_port(port, "redshift_data")
         application = create_app(executor)
         config = uvicorn.Config(
-            application, host="127.0.0.1", port=port, log_level="warning"
+            identify(application, "redshift_data"),
+            host="127.0.0.1",
+            port=port,
+            log_level="warning",
         )
         server = uvicorn.Server(config)
         thread = threading.Thread(target=server.run, daemon=True)

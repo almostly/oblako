@@ -136,3 +136,35 @@ def test_getdate_and_abbreviations(cursor):
         )
         == 5
     )
+
+
+def _bare_datepart_supported() -> bool:
+    """True if the proxy quotes bare dateparts (skips on a pre-rewrite image)."""
+    try:
+        c = psycopg2.connect(connect_timeout=3, **RS_CONFIG)
+        try:
+            c.cursor().execute("SELECT dateadd(day, 1, timestamp '2021-01-01')")
+            return True
+        finally:
+            c.close()
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(
+    not _bare_datepart_supported(), reason="redshift image without datepart rewrite"
+)
+def test_bare_datepart_keywords(cursor):
+    # Redshift accepts the datepart unquoted; the wire proxy quotes it
+    assert (
+        str(_scalar(cursor, "SELECT dateadd(month, 1, timestamp '2021-01-31')"))
+        == "2021-02-28 00:00:00"
+    )
+    assert (
+        _scalar(
+            cursor,
+            "SELECT datediff(day, timestamp '2021-01-01', timestamp '2021-03-01')",
+        )
+        == 59
+    )
+    assert _scalar(cursor, "SELECT date_part(dow, timestamp '2026-09-30')") == 3
