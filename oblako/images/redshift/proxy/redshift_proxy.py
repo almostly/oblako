@@ -69,6 +69,12 @@ try:
 except Exception:  # noqa: BLE001 - any import failure disables the feature
     listagg = None
 
+# Bare datepart keywords (DATEADD(month, ...)) -> quoted. Pure-stdlib; optional.
+try:
+    import datepart
+except Exception:  # any import failure disables the feature
+    datepart = None
+
 # PIVOT/UNPIVOT -> standard SQL (needs sqlglot as a parser). Optional.
 try:
     import pivot_unpivot
@@ -249,7 +255,8 @@ def rewrite_sql(sql: str) -> str:
     """Rewrite Redshift-only SQL PostgreSQL can't parse.
 
     ``VARCHAR(MAX)`` -> ``text`` and ``PASSWORD DISABLE`` -> ``PASSWORD NULL``
-    (any statement); Redshift-only pg_catalog columns
+    (any statement); bare datepart keywords (``DATEADD(month, ...)``) are quoted
+    (see ``datepart``); Redshift-only pg_catalog columns
     reflection drivers read are answered with neutral literals (see
     ``_rewrite_catalog``); ACL arrays are rendered with Redshift's ``group ``
     prefix (see ``_ACL_TO_STRING``); Redshift physical-DDL storage clauses (DISTSTYLE/
@@ -267,6 +274,8 @@ def rewrite_sql(sql: str) -> str:
         s = super_nav.rewrite_super_paths(s)  # dot-navigation -> jsonb path
     if listagg is not None:
         s = listagg.rewrite_listagg(s)  # LISTAGG -> string_agg
+    if datepart is not None:
+        s = datepart.rewrite_dateparts(s)  # DATEADD(month, ..) -> ('month', ..)
     s = _VARCHAR_MAX.sub("text", s)
     s = _CREATEUSER.sub("SUPERUSER", s)
     s = _PASSWORD_DISABLE.sub("PASSWORD NULL", s)

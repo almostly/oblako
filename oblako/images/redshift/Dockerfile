@@ -60,6 +60,8 @@ COPY proxy/copy_unload.py /usr/local/bin/copy_unload.py
 COPY proxy/super_nav.py /usr/local/bin/super_nav.py
 # LISTAGG -> string_agg rewriting, imported by the proxy.
 COPY proxy/listagg.py /usr/local/bin/listagg.py
+# Bare datepart keywords (DATEADD(month, ...)) -> quoted, imported by the proxy.
+COPY proxy/datepart.py /usr/local/bin/datepart.py
 # PIVOT/UNPIVOT -> standard SQL (sqlglot-parsed), imported by the proxy.
 COPY proxy/pivot_unpivot.py /usr/local/bin/pivot_unpivot.py
 COPY entrypoint.sh /usr/local/bin/oblako-entrypoint.sh

@@ -7,6 +7,8 @@ Control plane (RDS instances + Aurora clusters) via boto3 'rds' against moto;
 data plane (real SQL) via psycopg2 against the postgres engine.
 """
 
+import os
+
 import boto3
 import psycopg2
 import pytest
@@ -16,8 +18,10 @@ from oblako.services import RdsService
 CREDS = dict(
     region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"
 )
+# override with OBLAKO_TEST_PG_PORT when 5432 is taken by another Postgres
+PG_PORT = int(os.environ.get("OBLAKO_TEST_PG_PORT", "5432"))
 PG = dict(
-    host="localhost", port=5432, user="oblako", password="oblako", dbname="oblako"
+    host="localhost", port=PG_PORT, user="oblako", password="oblako", dbname="oblako"
 )
 
 
@@ -110,6 +114,25 @@ def test_connect_and_crud(cursor):
     )
     cursor.execute("SELECT name FROM rds_test ORDER BY id")
     assert [r[0] for r in cursor.fetchall()] == ["alice", "bob"]
+
+
+def test_connect_and_crud_with_psycopg3(cursor):
+    # psycopg 3 binds parameters server-side and can pipeline (psycopg2 can't)
+    psycopg = pytest.importorskip("psycopg")
+    from psycopg.types.json import Jsonb
+
+    with psycopg.connect(autocommit=True, **PG) as conn:
+        conn.cursor().executemany(
+            "INSERT INTO rds_test VALUES (%s, %s)", [(1, "alice"), (2, "bob")]
+        )
+        with conn.pipeline():
+            names = [
+                conn.execute("SELECT name FROM rds_test WHERE id = %s", (i,))
+                for i in (1, 2)
+            ]
+        assert [c.fetchone()[0] for c in names] == ["alice", "bob"]
+        doc = conn.execute("SELECT %s::jsonb ->> 'k'", (Jsonb({"k": "v"}),)).fetchone()
+        assert doc == ("v",)
 
 
 # -- seed helper -----------------------------------------------------------
