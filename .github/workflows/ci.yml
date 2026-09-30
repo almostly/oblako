@@ -32,6 +32,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The sagemaker extra pulls in torch + CUDA wheels (via sagemaker-serve),
+      # several GB, and the tests then build training images; without room the
+      # image builds fail in pip. The runner image ships toolchains this job
+      # never uses, so drop them first.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          docker image prune -af
+          df -h /
+
       - name: Install uv
         uses: astral-sh/setup-uv@v5
         with:
@@ -45,12 +57,12 @@ jobs:
         run: docker build -t public.ecr.aws/oblako/redshift-local:16 oblako/images/redshift
 
       # Start the oblako services and wait for readiness (up to 180s each, for
-      # image pulls + DB/JVM init — OpenSearch is the slow one). Heavier tiers —
-      # Ollama/Bedrock and SageMaker local — are still not run here (see
-      # NEXT_STEPS): they need large model downloads / extra build steps.
+      # image pulls + DB/JVM init; OpenSearch is the slow one). Ollama/Bedrock
+      # is not run here: it needs large model downloads. The sagemaker extra
+      # (the v3 SDK) lets the SageMaker SDK tests drive its local modes.
       - name: Start services
         run: >
-          uv run --python 3.12 --extra dev python -c "from oblako.services import Oblako as O; import sys;
+          uv run --python 3.12 --extra dev --extra sagemaker python -c "from oblako.services import Oblako as O; import sys;
           o = O(); svcs = [o.s3, o.dynamodb, o.moto, o.stepfunctions, o.redshift, o.rds, o.opensearch];
           [s.start() for s in svcs];
           r = {s.name: s.wait_ready(timeout=180) for s in svcs};
@@ -60,8 +72,12 @@ jobs:
       # Functions tests use Pass-only state machines (no Lambda).
       - name: Integration tests
         run: >
-          uv run --python 3.12 --extra dev python -m pytest -v
+          uv run --python 3.12 --extra dev --extra sagemaker python -m pytest -v
           -m integration
+
+      - name: Disk usage after tests
+        if: always()
+        run: df -h /
 
   redshift-cluster:
     name: redshift MPP cluster (Citus)
