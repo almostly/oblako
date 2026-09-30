@@ -75,6 +75,12 @@ try:
 except Exception:  # any import failure disables the feature
     datepart = None
 
+# CREATE/SHOW/DROP MODEL -> Redshift ML functions. Pure-stdlib; optional.
+try:
+    import redshift_ml
+except Exception:  # any import failure disables the feature
+    redshift_ml = None
+
 # PIVOT/UNPIVOT -> standard SQL (needs sqlglot as a parser). Optional.
 try:
     import pivot_unpivot
@@ -255,7 +261,8 @@ def rewrite_sql(sql: str) -> str:
     """Rewrite Redshift-only SQL PostgreSQL can't parse.
 
     ``VARCHAR(MAX)`` -> ``text`` and ``PASSWORD DISABLE`` -> ``PASSWORD NULL``
-    (any statement); bare datepart keywords (``DATEADD(month, ...)``) are quoted
+    (any statement); Redshift ML's CREATE/SHOW/DROP MODEL become calls to the
+    in-engine Redshift ML functions (see ``redshift_ml``); bare datepart keywords (``DATEADD(month, ...)``) are quoted
     (see ``datepart``); Redshift-only pg_catalog columns
     reflection drivers read are answered with neutral literals (see
     ``_rewrite_catalog``); ACL arrays are rendered with Redshift's ``group ``
@@ -282,6 +289,8 @@ def rewrite_sql(sql: str) -> str:
     s = _PG_GROUP.sub(_PG_GROUP_SUB, s)
     s = _ACL_TO_STRING.sub("redshift_acl(", s)
     s = _rewrite_catalog(s)
+    if redshift_ml is not None:
+        s = redshift_ml.rewrite_ml(s)  # CREATE/SHOW/DROP MODEL -> oblako_ml_* calls
     if not _CREATE_TABLE.search(s):
         return s
     for pat in _STRIPPERS:

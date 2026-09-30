@@ -44,7 +44,7 @@ test-sagemaker:
 	python -m pytest tests/sagemaker/ -v   # needs: pip install 'oblako[sagemaker]'
 
 test-redshift-ml:
-	python -m pytest tests/redshift/test_redshift_ml.py -v   # needs: pip install 'oblako[sagemaker]'
+	python -m pytest tests/redshift/test_redshift_ml.py -v   # needs Docker + the Redshift engine (oblako up redshift)
 
 test-openrouter:
 	python -m pytest tests/bedrock/test_bedrock_openrouter_live.py -v   # needs OPENROUTER_API_KEY (live, paid)

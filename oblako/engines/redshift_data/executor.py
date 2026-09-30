@@ -151,29 +151,6 @@ class RedshiftDataExecutor:
         }
         start = datetime.datetime.now()
         try:
-            from oblako.engines import redshift_ml
-
-            if redshift_ml.is_create_model(sql):
-                # Redshift ML: train via SageMaker local + create an in-DB predict UDF.
-                summary = redshift_ml.create_model(
-                    redshift_ml.parse_create_model(sql),
-                    host=self.host,
-                    port=self.port,
-                    user=self.user,
-                    password=self.password,
-                    database=database or self.database,
-                )
-                statement["ModelSummary"] = summary
-                statement["ResultRows"] = 0
-                statement["Status"] = "FINISHED"
-                statement["UpdatedAt"] = datetime.datetime.now(datetime.timezone.utc)
-                statement["Duration"] = int(
-                    (datetime.datetime.now() - start).total_seconds() * 1e9
-                )
-                with self._lock:
-                    self._statements[stmt_id] = statement
-                return stmt_id
-
             bound_sql, params = self._bind_params(sql, parameters)
             conn = self._connect(database)
             try:
@@ -197,7 +174,7 @@ class RedshiftDataExecutor:
         except psycopg2.Error as err:
             statement["Status"] = "FAILED"
             statement["Error"] = str(err).strip()
-        except Exception as err:  # noqa: BLE001 - CREATE MODEL parse/training errors
+        except Exception as err:  # noqa: BLE001 - parameter binding, connection errors
             statement["Status"] = "FAILED"
             statement["Error"] = str(err).strip()
         statement["UpdatedAt"] = datetime.datetime.now(datetime.timezone.utc)

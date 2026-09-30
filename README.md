@@ -53,7 +53,7 @@ normal `boto3` client (or native driver):
 | Redshift (engine) | oblako image (PostgreSQL 16) | impersonates Redshift: redshift-connector natively, system tables, `SET query_group`, UDFs |
 | Redshift (management API) | moto | boto3 `redshift` control plane: clusters, nodes, endpoints |
 | Redshift Data API | oblako server | boto3 `redshift-data`, real SQL against the engine |
-| Redshift ML | SageMaker local + plpython3u | `CREATE MODEL` trains in a container; predict UDF runs in-DB |
+| Redshift ML | Training container + plpython3u | `CREATE MODEL` from any SQL client, trained asynchronously in a container; prediction function runs in-DB |
 | RDS / Aurora | moto + PostgreSQL/MySQL | boto3 `rds` control plane + a real engine |
 | RDS Data API | oblako server | boto3 `rds-data`: synchronous SQL + transactions |
 | CloudFormation | oblako server | boto3 `cloudformation` (+ `aws cloudformation deploy` / `sam deploy`) → **real** oblako resources |

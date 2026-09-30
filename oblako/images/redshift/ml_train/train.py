@@ -108,19 +108,54 @@ def _flatten_tree(node, out):
             "c": node["split_condition"],
             "y": node["yes"],
             "n": node["no"],
+            "m": node.get("missing", node["no"]),
         }
         for child in node["children"]:
             _flatten_tree(child, out)
     return out
 
 
+# CREATE MODEL HYPERPARAMETERS (SageMaker XGBoost names) -> xgboost kwargs
+_XGB_FLOAT = {
+    "eta": "learning_rate",
+    "subsample": "subsample",
+    "colsample_bytree": "colsample_bytree",
+    "colsample_bylevel": "colsample_bylevel",
+    "colsample_bynode": "colsample_bynode",
+    "min_child_weight": "min_child_weight",
+    "gamma": "gamma",
+    "lambda": "reg_lambda",
+    "alpha": "reg_alpha",
+    "max_delta_step": "max_delta_step",
+    "scale_pos_weight": "scale_pos_weight",
+}
+
+
+def _xgb_kwargs(hp):
+    """n_estimators/max_depth plus every recognised tuning hyperparameter."""
+    kw = dict(
+        n_estimators=int(hp.get("num_round", 100)),
+        max_depth=int(hp.get("max_depth", 6)),
+    )
+    for name, kwarg in _XGB_FLOAT.items():
+        if name in hp:
+            kw[kwarg] = float(hp[name])
+    if "eval_metric" in hp:
+        kw["eval_metric"] = hp["eval_metric"]
+    return kw
+
+
+def _regression_objective(hp):
+    """Return the XGBoost regression objective (reg:logistic predicts a probability)."""
+    objective = hp.get("objective", "reg:squarederror")
+    return objective if objective.startswith("reg:") else "reg:squarederror"
+
+
 def train_xgboost(X, y, classify, multiclass, hp):
     """Train an XGBoost model and return it as a plain-JSON-serializable dict."""
     import xgboost as xgb
 
-    num_round = int(hp.get("num_round", 100))
-    max_depth = int(hp.get("max_depth", 6))
-    common = dict(n_estimators=num_round, max_depth=max_depth)
+    common = _xgb_kwargs(hp)
     if multiclass:
         classes = sorted(set(y))
         yi = [classes.index(v) for v in y]  # xgboost needs labels in [0, num_class)
@@ -135,14 +170,13 @@ def train_xgboost(X, y, classify, multiclass, hp):
             "num_class": len(classes),
             "trees": trees,
         }
-    if classify:
-        model = xgb.XGBClassifier(objective="binary:logistic", base_score=0.5, **common)
-    else:
-        model = xgb.XGBRegressor(objective="reg:squarederror", base_score=0.5, **common)
+    objective = "binary:logistic" if classify else _regression_objective(hp)
+    cls = xgb.XGBClassifier if classify else xgb.XGBRegressor
+    model = cls(objective=objective, base_score=0.5, **common)
     model.fit(X, y)
     dumps = model.get_booster().get_dump(dump_format="json")
     trees = [_flatten_tree(json.loads(d), {}) for d in dumps]
-    return {"trees": trees, "base_score": 0.5}
+    return {"trees": trees, "base_score": 0.5, "objective": objective}
 
 
 # Autopilot: holdout validation score so the caller can pick the best type
@@ -174,14 +208,11 @@ def _fit_scorer(model_type, X, y, classify, multiclass, hp):
     # XGBOOST
     import xgboost as xgb
 
-    nr, md = int(hp.get("num_round", 100)), int(hp.get("max_depth", 6))
+    common = _xgb_kwargs(hp)
     if multiclass:
         classes = sorted(set(y))
         clf = xgb.XGBClassifier(
-            objective="multi:softprob",
-            num_class=len(classes),
-            n_estimators=nr,
-            max_depth=md,
+            objective="multi:softprob", num_class=len(classes), **common
         ).fit(X, [classes.index(v) for v in y])
 
         class _Wrapped:
@@ -191,10 +222,10 @@ def _fit_scorer(model_type, X, y, classify, multiclass, hp):
         return _Wrapped()
     if classify:
         return xgb.XGBClassifier(
-            objective="binary:logistic", base_score=0.5, n_estimators=nr, max_depth=md
+            objective="binary:logistic", base_score=0.5, **common
         ).fit(X, y)
     return xgb.XGBRegressor(
-        objective="reg:squarederror", base_score=0.5, n_estimators=nr, max_depth=md
+        objective=_regression_objective(hp), base_score=0.5, **common
     ).fit(X, y)
 
 
@@ -216,6 +247,7 @@ def _val_score(model_type, X, y, classify, multiclass, hp):
     pred = list(est.predict(Xva))
     if classify:
         return sum(1.0 for p, t in zip(pred, yva) if float(p) == float(t)) / len(yva)
+    pred = [float(p) for p in pred]  # xgboost predicts numpy float32 (not JSON)
     import statistics
 
     mean = statistics.fmean(yva)
@@ -245,6 +277,7 @@ def main():
     else:
         raise SystemExit(f"unsupported MODEL_TYPE: {model_type}")
 
+    # a holdout score: Autopilot picks the best type by it, SHOW MODEL reports it
     if hp.get("autopilot") == "true":
         export["val_score"] = _val_score(model_type, X, y, classify, multiclass, hp)
 

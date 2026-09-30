@@ -39,6 +39,8 @@ services:
       OBLAKO_S3_ENDPOINT: http://s3proxy:80
     volumes:
       - redshift_data:/var/lib/postgresql/data
+      # Redshift ML: CREATE MODEL trains in a container on the host Docker daemon
+      - /var/run/docker.sock:/var/run/docker.sock
 
   # Redshift MPP cluster (opt-in `cluster` profile): the same Redshift-compatible
   # engine on Citus, so tables shard across worker nodes for real multi-node

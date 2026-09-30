@@ -139,7 +139,7 @@ def test_redshift_ml_parse_create_model():
 
     sql = (
         "CREATE MODEL m FROM (SELECT a, b, y FROM t) TARGET y FUNCTION predict_y "
-        "AUTO OFF MODEL_TYPE xgboost OBJECTIVE 'binary:logistic' "
+        "AUTO OFF MODEL_TYPE xgboost OBJECTIVE 'binary:logistic' PREPROCESSORS 'none' "
         "HYPERPARAMETERS DEFAULT EXCEPT (NUM_ROUND '50', MAX_DEPTH '4')"
     )
     assert is_create_model(sql)
@@ -148,7 +148,7 @@ def test_redshift_ml_parse_create_model():
     assert spec["problem_type"] == "binary_classification"  # derived from OBJECTIVE
     assert spec["target"] == "y" and spec["function"] == "predict_y"
     assert spec["select"] == "SELECT a, b, y FROM t"
-    assert spec["num_round"] == 50 and spec["max_depth"] == 4
+    assert spec["hyperparameters"] == {"num_round": "50", "max_depth": "4"}
 
     mlp = parse_create_model(
         "CREATE MODEL m FROM (SELECT a, y FROM t) TARGET y "

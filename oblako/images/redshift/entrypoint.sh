@@ -38,6 +38,18 @@ fi
   exec python3 /usr/local/bin/redshift_proxy.py
 ) &
 
+# Redshift ML training agent: trains queued CREATE MODELs in containers on the
+# host Docker daemon. Only when the socket is mounted; without it CREATE MODEL
+# fails with a clear message instead of queueing a model nothing will train.
+if [ -S /var/run/docker.sock ]; then
+  (
+    until pg_isready -h 127.0.0.1 -p "$OBLAKO_PG_PORT" -q 2>/dev/null; do
+      sleep 0.5
+    done
+    exec python3 /usr/local/bin/redshift_ml.py agent
+  ) &
+fi
+
 # Hand off to the stock postgres entrypoint (initdb, auth, etc.); PostgreSQL
 # listens on the internal port so only the proxy fronts it.
 exec docker-entrypoint.sh postgres -p "$OBLAKO_PG_PORT"
