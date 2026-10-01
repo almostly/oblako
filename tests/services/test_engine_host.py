@@ -45,6 +45,11 @@ def test_up_serves_plain_boto3_until_down(engine):
         b["vectorBucketName"] for b in client.list_vector_buckets()["vectorBuckets"]
     ]
     assert "host-test" in names
+    # the engine answers a moment before it logs its banner, so allow for it
+    for _ in range(50):
+        if "serving on" in host.logfile(name).read_text():
+            break
+        time.sleep(0.1)
     assert "serving on" in host.logfile(name).read_text()
 
     assert host.stop(name) is True
