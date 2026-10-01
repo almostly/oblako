@@ -224,3 +224,179 @@ def test_inventory_configuration_and_report(s3, bucket):
         for obj in s3.list_objects_v2(Bucket=dest).get("Contents", []):
             s3.delete_object(Bucket=dest, Key=obj["Key"])
         s3.delete_bucket(Bucket=dest)
+
+
+# -----------------------------------------------------------------------------
+# Bucket policy, event notifications, temporary credentials
+# -----------------------------------------------------------------------------
+MOTO = os.environ.get("OBLAKO_TEST_MOTO_ENDPOINT", "http://localhost:5500")
+CREDS = dict(
+    region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"
+)
+
+
+def test_bucket_policy_is_stored_and_returned(s3, bucket):
+    with pytest.raises(s3.exceptions.ClientError, match="NoSuchBucketPolicy"):
+        s3.get_bucket_policy(Bucket=bucket)
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "PublicRead",
+                "Effect": "Allow",
+                "Principal": "*",
+                "Action": "s3:GetObject",
+                "Resource": f"arn:aws:s3:::{bucket}/curated/*",
+            }
+        ],
+    }
+    s3.put_bucket_policy(Bucket=bucket, Policy=json.dumps(policy))
+    assert json.loads(s3.get_bucket_policy(Bucket=bucket)["Policy"]) == policy
+    assert s3.get_bucket_policy_status(Bucket=bucket)["PolicyStatus"]["IsPublic"]
+    with pytest.raises(s3.exceptions.ClientError, match="MalformedPolicy"):
+        s3.put_bucket_policy(Bucket=bucket, Policy="not json")
+    s3.delete_bucket_policy(Bucket=bucket)
+    with pytest.raises(s3.exceptions.ClientError, match="NoSuchBucketPolicy"):
+        s3.get_bucket_policy(Bucket=bucket)
+
+
+def test_notifications_to_sqs_honor_filters(s3, bucket):
+    sqs = boto3.client("sqs", endpoint_url=MOTO, **CREDS)
+    queue = sqs.create_queue(QueueName=f"{bucket}-events")["QueueUrl"]
+    try:
+        arn = sqs.get_queue_attributes(QueueUrl=queue, AttributeNames=["QueueArn"])[
+            "Attributes"
+        ]["QueueArn"]
+        s3.put_bucket_notification_configuration(
+            Bucket=bucket,
+            NotificationConfiguration={
+                "QueueConfigurations": [
+                    {
+                        "QueueArn": arn,
+                        "Events": ["s3:ObjectCreated:*", "s3:ObjectRemoved:*"],
+                        "Filter": {
+                            "Key": {
+                                "FilterRules": [
+                                    {"Name": "prefix", "Value": "raw/"},
+                                    {"Name": "suffix", "Value": ".csv"},
+                                ]
+                            }
+                        },
+                    }
+                ]
+            },
+        )
+        got = s3.get_bucket_notification_configuration(Bucket=bucket)
+        assert got["QueueConfigurations"][0]["QueueArn"] == arn
+        s3.put_object(Bucket=bucket, Key="raw/orders.csv", Body=b"id\n1\n")
+        s3.put_object(Bucket=bucket, Key="raw/notes.txt", Body=b"suffix: no event")
+        s3.put_object(Bucket=bucket, Key="curated/x.csv", Body=b"prefix: no event")
+        s3.delete_object(Bucket=bucket, Key="raw/orders.csv")
+        events = []
+        deadline = time.time() + 30
+        while len(events) < 2 and time.time() < deadline:
+            for msg in sqs.receive_message(
+                QueueUrl=queue, MaxNumberOfMessages=10, WaitTimeSeconds=1
+            ).get("Messages", []):
+                rec = json.loads(msg["Body"])["Records"][0]
+                events.append((rec["eventName"], rec["s3"]["object"]["key"]))
+        assert sorted(events) == [
+            ("ObjectCreated:Put", "raw/orders.csv"),
+            ("ObjectRemoved:Delete", "raw/orders.csv"),
+        ]
+    finally:
+        sqs.delete_queue(QueueUrl=queue)
+
+
+def test_temporary_credentials_are_accepted(bucket):
+    # boto3 sends x-amz-security-token with session credentials (Lambda, SSO,
+    # assumed roles); S3Proxy rejects it, so the front drops it
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=S3_ENDPOINT,
+        aws_session_token="session-token",
+        config=Config(
+            request_checksum_calculation="when_required",
+            response_checksum_validation="when_required",
+        ),
+        **CREDS,
+    )
+    s3.put_object(Bucket=bucket, Key="t.txt", Body=b"x", Tagging="a=b")
+    assert s3.get_object(Bucket=bucket, Key="t.txt")["Body"].read() == b"x"
+
+
+LAMBDA_CODE = """
+import boto3, os, urllib.parse
+def handler(event, context):
+    s3 = boto3.client("s3", endpoint_url=os.environ["AWS_ENDPOINT_URL_S3"])
+    for r in event["Records"]:
+        b = r["s3"]["bucket"]["name"]
+        k = urllib.parse.unquote_plus(r["s3"]["object"]["key"])
+        body = s3.get_object(Bucket=b, Key=k)["Body"].read()
+        s3.put_object(Bucket=b, Key="curated/" + k.split("/", 1)[1], Body=body.upper())
+"""
+
+
+def test_object_created_invokes_a_lambda_that_writes_back(s3, bucket):
+    # the event-driven pipeline: a CSV lands in raw/, the notification invokes the
+    # Lambda (in moto, plain boto3 inside), and the result appears in curated/
+    import io
+    import zipfile
+
+    try:
+        import docker
+
+        docker.from_env().ping()
+    except Exception:
+        pytest.skip("Docker not available for moto's Lambda runtime")
+    lam = boto3.client("lambda", endpoint_url=MOTO, **CREDS)
+    iam = boto3.client("iam", endpoint_url=MOTO, **CREDS)
+    name = f"{bucket}-fn"
+    role = iam.create_role(
+        RoleName=name,
+        AssumeRolePolicyDocument=json.dumps({"Version": "2012-10-17", "Statement": []}),
+    )["Role"]["Arn"]
+    zipped = io.BytesIO()
+    with zipfile.ZipFile(zipped, "w") as zf:
+        zf.writestr("handler.py", LAMBDA_CODE)
+    fn = lam.create_function(
+        FunctionName=name,
+        Runtime="python3.12",
+        Role=role,
+        Handler="handler.handler",
+        Code={"ZipFile": zipped.getvalue()},
+        Timeout=60,
+        Environment={
+            "Variables": {"AWS_ENDPOINT_URL_S3": "http://host.docker.internal:9000"}
+        },
+    )["FunctionArn"]
+    try:
+        s3.put_bucket_notification_configuration(
+            Bucket=bucket,
+            NotificationConfiguration={
+                "LambdaFunctionConfigurations": [
+                    {
+                        "LambdaFunctionArn": fn,
+                        "Events": ["s3:ObjectCreated:*"],
+                        "Filter": {
+                            "Key": {
+                                "FilterRules": [{"Name": "prefix", "Value": "raw/"}]
+                            }
+                        },
+                    }
+                ]
+            },
+        )
+        s3.put_object(Bucket=bucket, Key="raw/products.csv", Body=b"id,price\n1,9.5\n")
+        deadline = time.time() + 300  # first run may pull the Lambda runtime image
+        while time.time() < deadline:
+            found = s3.list_objects_v2(Bucket=bucket, Prefix="curated/").get("Contents")
+            if found:
+                break
+            time.sleep(1)
+        assert s3.get_object(Bucket=bucket, Key="curated/products.csv")[
+            "Body"
+        ].read() == (b"ID,PRICE\n1,9.5\n")
+    finally:
+        lam.delete_function(FunctionName=name)
+        iam.delete_role(RoleName=name)
