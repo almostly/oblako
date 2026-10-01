@@ -37,10 +37,10 @@ This page lists what each one provides and where it diverges from AWS.
 
 | Service | Description | Limitations |
 |---|---|---|
-| **Athena** | The real boto3 `athena` API (`StartQueryExecution`, `GetQueryExecution`, `GetQueryResults`, `StopQueryExecution`) executed via **Trino**, with results written to the S3 `OutputLocation`. | Trino SQL dialect, not Athena/Presto-exact; `StopQueryExecution` is best-effort (Trino runs to completion); no workgroups/federation. |
+| **Athena** | The real boto3 `athena` API (`StartQueryExecution`, `GetQueryExecution`, `GetQueryResults`, `StopQueryExecution`, workgroups) executed via **Trino**, with results written to the S3 `OutputLocation`. `AwsDataCatalog` is the **Glue Data Catalog**, so awswrangler's `read_sql_query` works as is, CTAS included. See "Glue Data Catalog and Athena" below. | Trino SQL dialect, not Athena/Presto-exact; `StopQueryExecution` is best-effort (Trino runs to completion); no federation, `UNLOAD` or Athena's Hive DDL. |
 | **Firehose** | `firehose` delivery streams: `DirectPut` and `KinesisStreamAsSource` sources, buffered and flushed to **S3** or **Redshift** (S3 staging + `COPY`). | Only S3 and Redshift destinations; buffering floors aren't enforced. |
 | **Glue (jobs)** | PySpark jobs in the official `amazon/aws-glue-libs:5` image (per-job container). | ~5 GB image; sequential workflows only (no full DAGs/crawlers). |
-| **Glue Data Catalog** | boto3 `glue` client bridged to the Iceberg REST catalog. | Catalog operations over Iceberg; not the full Glue catalog surface. |
+| **Glue Data Catalog** | boto3 `glue` databases, tables, partitions and column statistics: Parquet / CSV / JSON tables (awswrangler, Athena CTAS) and Iceberg tables (PyIceberg's Glue catalog), the latter in the same **Iceberg REST catalog** as S3 Tables. Trino's metastore for Athena. | No crawlers, connections or Lake Formation; Glue can't write Iceberg metadata itself (`OpenTableFormatInput`). |
 
 ## Orchestration & compute
 
@@ -251,13 +251,61 @@ SELECT sandbox.credit_predict(f1::float8, f2::float8) FROM sandbox.tape;
 - It's a PostgreSQL engine underneath, no columnar storage, distribution, or
   the Redshift query planner.
 
+## Glue Data Catalog and Athena
+
+The Glue engine (`oblako up glue`, :8486) is the catalog Athena, Trino and the
+`glue` client share. It keeps two kinds of table:
+
+- **Parquet, CSV and JSON tables** under an S3 location, with their partitions
+  and column statistics, in SQLite (`~/.oblako/glue/catalog.db`). This is what
+  `wr.s3.to_parquet(..., database=, table=)` creates, and what Athena CTAS
+  writes.
+- **Iceberg tables**, kept in the Iceberg REST catalog that S3 Tables, Spark and
+  Trino's `iceberg` catalog use. PyIceberg's Glue catalog
+  (`load_catalog(type="glue", **{"glue.endpoint": ...})`) works unchanged:
+  `CreateTable` registers its metadata file, and each commit's `UpdateTable`
+  moves the table to the new file, refused if another writer got there first.
+  Tables created through the REST catalog show up in Glue too.
+
+Each database is also a REST namespace. Trino's `awsdatacatalog` catalog is the
+Hive connector with this engine as its Glue metastore, and Iceberg tables in it
+are redirected to the `iceberg` catalog. Athena's `AwsDataCatalog` maps to it,
+so a query sees both kinds of table. Start them with `oblako up iceberg` and
+`oblako up trino` (which starts the Glue engine too).
+
+Athena:
+
+- **Workgroups.** `get` / `list` / `create` / `update` / `delete_work_group`,
+  kept in `~/.oblako/athena/workgroups.json`. Queries without an
+  `OutputLocation` use the workgroup's, and `EnforceWorkGroupConfiguration`
+  overrides theirs, as on AWS. Locally `primary` comes configured with
+  `s3://oblako-athena-results/`, created on first use.
+- **CTAS.** `CREATE TABLE ... WITH (...) AS SELECT` creates a Glue table. Its
+  data goes under `external_location`, or `<output>/tables/<query id>/` without
+  one. Athena's properties are translated for Trino (`write_compression`,
+  `field_delimiter`), and with `table_type = 'ICEBERG'` the table is created
+  in the `iceberg` catalog. The query's `DataManifestLocation` lists the files
+  written, which is how awswrangler's default `ctas_approach=True` reads results.
+
+**Limitations**
+
+- `GetPartitions` filters support Glue's documented subset (`=`, `<>`, `<`,
+  `>`, `BETWEEN`, `IN`, `LIKE`, `IS NULL`, `AND` / `OR` / `NOT`). Anything else
+  is refused with `InvalidInputException`.
+- No crawlers, connections, user-defined functions, table versions or Lake
+  Formation. Glue can't create Iceberg metadata itself (`OpenTableFormatInput`),
+  so create Iceberg tables with PyIceberg, Spark or Trino.
+- Athena runs Trino's SQL dialect: Athena's Hive DDL (`CREATE EXTERNAL TABLE ...
+  ROW FORMAT`, `MSCK REPAIR TABLE`) and `UNLOAD` aren't translated. Query
+  results report no scanned bytes.
+
 ## S3
 
 S3 API backed by S3Proxy over the local filesystem. S3Proxy doesn't implement
 tagging, Inventory, bucket policies or event notifications, so `oblako up s3`
 puts a stock nginx on :9000 in front of it: every request goes straight to
 S3Proxy (on :9001), except those calls, which an oblako engine answers. nginx
-also sends the engine a bodiless copy of each write, for notifications.
+also logs each completed write to a file the engine follows, for notifications.
 
 - **Tagging.** `put_object(..., Tagging="k=v")`, `put_object_tagging` /
   `get_object_tagging` / `delete_object_tagging`, tags on multipart uploads and
@@ -278,9 +326,10 @@ also sends the engine a bodiless copy of each write, for notifications.
   and `ObjectRemoved:Delete` events are delivered as S3 event records once the
   write lands, so an upload to `raw/` can invoke a Lambda that writes to
   `curated/`.
-- **Temporary credentials.** boto3 sends `x-amz-security-token` with session
-  credentials (inside Lambda, with SSO or an assumed role); S3Proxy rejects it,
-  so the front drops it.
+- **Headers S3Proxy rejects.** boto3 sends `x-amz-security-token` with
+  session credentials (inside Lambda, with SSO or an assumed role), and newer
+  AWS SDKs ask listings for `x-amz-optional-object-attributes` (Trino, Spark).
+  S3Proxy answers either with `NotImplemented`, so the front drops both.
 
 **Limitations**
 
@@ -290,7 +339,7 @@ also sends the engine a bodiless copy of each write, for notifications.
 - Tags are stored and returned, but nothing acts on them: S3Proxy has no
   lifecycle rules or tag-based access control. Bucket policies likewise aren't
   enforced. Batch deletes (`DeleteObjects`) don't produce events: their keys
-  are in the request body, which isn't mirrored. Inventory doesn't produce ORC,
+  are in the request body, which isn't logged. Inventory doesn't produce ORC,
   and Parquet reports need `pyarrow`.
 - These additions need the front, which `oblako up s3` starts on a
   Docker-API backend (Docker, Podman, Colima). On Kubernetes or Apple
