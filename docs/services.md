@@ -21,7 +21,7 @@ This page lists what each one provides and where it diverges from AWS.
 
 | Service | Description | Limitations |
 |---|---|---|
-| **S3** | S3 API over the local filesystem (S3Proxy). | No flexible-checksum / `aws-chunked`; oblako sets checksum calc `when_required`. |
+| **S3** | S3 API over the local filesystem (S3Proxy), plus object / bucket tagging and S3 Inventory. | No flexible-checksum / `aws-chunked`; oblako sets checksum calc `when_required`. Tagging and Inventory need `oblako up s3` on a Docker-API backend. |
 | **S3 Tables** | `s3tables` control plane (table buckets, namespaces, tables, `GetTableMetadataLocation`) mapped onto the local **Iceberg REST catalog**; `CreateTable` writes real Iceberg metadata, so the tables are queryable by Athena / Trino / pyiceberg. | Single-warehouse catalog: a table bucket + namespace map to a `[bucket, namespace]` Iceberg namespace prefix; managed maintenance (compaction, snapshot expiry) is not modelled. |
 | **S3 Vectors** | `s3vectors`: vector buckets → indexes (dimension + distance metric) → `PutVectors` / `QueryVectors` (k-NN) with Mongo-style metadata filters. Fed by Bedrock embeddings. | Brute-force k-NN (cosine / euclidean), not ANN; vectors are in-memory (not persisted across restart). |
 | **DynamoDB** | Amazon's DynamoDB Local, with a proxy that adds native **vector search**: `VectorIndexes` on `CreateTable`/`UpdateTable` + `SearchVectors` (k-NN). | Single local instance; no Streams→Lambda wiring. `SearchVectors` is brute-force KNN (full scan), not ANN; the vector index isn't persisted across restart. |
@@ -253,13 +253,36 @@ SELECT sandbox.credit_predict(f1::float8, f2::float8) FROM sandbox.tape;
 
 ## S3
 
-S3 API backed by S3Proxy over the local filesystem.
+S3 API backed by S3Proxy over the local filesystem. S3Proxy doesn't implement
+tagging or Inventory, so `oblako up s3` puts a stock nginx on :9000 in front of
+it: every request goes straight to S3Proxy (on :9001), except tagging and
+Inventory calls, which an oblako engine answers.
+
+- **Tagging.** `put_object(..., Tagging="k=v")`, `put_object_tagging` /
+  `get_object_tagging` / `delete_object_tagging`, tags on multipart uploads and
+  copies (`TaggingDirective` `COPY` or `REPLACE`), and bucket tagging. Tags
+  belong to an object version, as on S3: overwrite the object and its tags go.
+  S3's limits apply (10 tags per object, key 128 / value 256 characters).
+- **Inventory.** `put` / `get` / `list` / `delete_bucket_inventory_configuration`.
+  S3 takes up to 48 hours for the first report; oblako writes it when the
+  configuration is saved, then daily (`OBLAKO_S3_INVENTORY_INTERVAL` seconds):
+  a CSV (gzipped) or Parquet data file plus `manifest.json` under
+  `<prefix>/<source>/<id>/` in the destination bucket.
 
 **Limitations**
 
 - S3Proxy doesn't implement the AWS SDK v2 default flexible checksums
   (`x-amz-checksum-*` over `aws-chunked`); oblako sets checksum calculation to
   `when_required` so uploads work.
+- Tags are stored and returned, but nothing acts on them: S3Proxy has no
+  lifecycle rules or tag-based access control. Inventory doesn't produce ORC,
+  and Parquet reports need `pyarrow`.
+- Tagging and Inventory need the front, which `oblako up s3` starts on a
+  Docker-API backend (Docker, Podman, Colima). On Kubernetes or Apple
+  `container`, plain `docker compose up`, or with `OBLAKO_S3_EXTENSIONS=0`,
+  S3Proxy serves :9000 directly and those calls return `NotImplemented`.
+- Large downloads through the front run at several hundred MB/s rather than
+  S3Proxy's direct speed; small requests show no measurable difference.
 
 ## SageMaker
 

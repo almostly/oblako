@@ -41,6 +41,8 @@ ENGINES: dict[str, tuple[str, int]] = {
     "bedrock-runtime": ("bedrock_runtime", ports.BEDROCK_RUNTIME),
     "cloudformation": ("cloudformation", ports.CLOUDFORMATION),
     "ecs-metadata": ("ecs_metadata", ports.ECS_METADATA),
+    # tagging + Inventory behind :9000; `oblako up s3` starts it with S3Proxy
+    "s3-ext": ("s3_ext", ports.S3_EXT),
 }
 
 

@@ -13,7 +13,8 @@ depend on.
 """
 
 # Object stores / streaming
-S3 = 9000  # S3Proxy
+S3 = 9000  # S3 endpoint: nginx, routing to S3Proxy and the S3 extensions engine
+S3_BACKEND = 9001  # S3Proxy itself, behind the :9000 front
 DYNAMODB = (
     8001  # DynamoDB Local (host; 8000 inside the container — 8000 is the dashboard)
 )
@@ -36,8 +37,13 @@ FIREHOSE = 8008  # kinesis Data Firehose (DirectPut -> S3), local delivery loop
 ATHENA = 8009  # athena boto3 API executed via the Trino engine, results to S3
 EVENTBRIDGE = 8010  # eventbridge proxy over moto that actually fires rule targets
 ECS_METADATA = 8011  # ECS task metadata endpoint (ECS_CONTAINER_METADATA_URI) for tasks
-S3_VECTORS = 8012  # S3 Vectors (s3vectors): vector buckets + indexes + k-NN QueryVectors
-S3_TABLES = 8013  # S3 Tables (s3tables): control plane mapped onto the Iceberg REST catalog
+S3_VECTORS = (
+    8012  # S3 Vectors (s3vectors): vector buckets + indexes + k-NN QueryVectors
+)
+S3_TABLES = (
+    8013  # S3 Tables (s3tables): control plane mapped onto the Iceberg REST catalog
+)
+S3_EXT = 8020  # S3 tagging + Inventory (S3Proxy lacks them), reached through :9000
 
 # Engines / data plane
 OLLAMA = 11434  # Bedrock runtime is backed by Ollama
