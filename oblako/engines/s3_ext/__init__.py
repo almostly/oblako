@@ -1,4 +1,4 @@
-"""S3 features S3Proxy doesn't implement: object / bucket tagging and Inventory.
+"""S3 features S3Proxy doesn't implement: tagging, Inventory, policy, notifications.
 
 oblako's S3 is S3Proxy behind a stock nginx on :9000 (see
 ``oblako.services.s3proxy``). nginx passes every request straight to S3Proxy,
@@ -7,6 +7,10 @@ except the ones this engine answers:
 - ``?tagging`` on an object or a bucket: Get/Put/DeleteObjectTagging and
   Get/Put/DeleteBucketTagging
 - ``?inventory`` on a bucket: Put/Get/List/DeleteBucketInventoryConfiguration
+- ``?policy`` / ``?policyStatus`` on a bucket: the bucket policy, stored and
+  returned (not enforced; S3Proxy has no IAM)
+- ``?notification`` on a bucket: event notifications to Lambda / SQS / SNS /
+  EventBridge, fired for the writes nginx logs (see ``notifications``)
 - requests carrying ``x-amz-tagging`` (PutObject / CreateMultipartUpload with
   ``Tagging=``) or ``x-amz-copy-source`` (CopyObject, which copies or replaces
   tags): forwarded to S3Proxy without the tagging header, then the tags are
@@ -81,6 +85,10 @@ class Store:
                     bucket TEXT PRIMARY KEY, tags TEXT);
                 CREATE TABLE IF NOT EXISTS inventory (
                     bucket TEXT, id TEXT, config TEXT, PRIMARY KEY (bucket, id));
+                CREATE TABLE IF NOT EXISTS bucket_policy (
+                    bucket TEXT PRIMARY KEY, policy TEXT);
+                CREATE TABLE IF NOT EXISTS notification (
+                    bucket TEXT PRIMARY KEY, config TEXT);
                 """
             )
 
@@ -166,6 +174,29 @@ class Store:
         self._q(
             "INSERT OR REPLACE INTO inventory VALUES (?, ?, ?)", (bucket, id_, config)
         )
+
+    def bucket_policy(self, bucket: str) -> str | None:
+        """Return a bucket's policy document, or None."""
+        rows = self._q("SELECT policy FROM bucket_policy WHERE bucket = ?", (bucket,))
+        return rows[0][0] if rows else None
+
+    def set_bucket_policy(self, bucket: str, policy: str | None) -> None:
+        """Replace (or with None, remove) a bucket's policy."""
+        if policy is None:
+            self._q("DELETE FROM bucket_policy WHERE bucket = ?", (bucket,))
+        else:
+            self._q(
+                "INSERT OR REPLACE INTO bucket_policy VALUES (?, ?)", (bucket, policy)
+            )
+
+    def notification(self, bucket: str) -> str | None:
+        """Return a bucket's notification configuration XML, or None."""
+        rows = self._q("SELECT config FROM notification WHERE bucket = ?", (bucket,))
+        return rows[0][0] if rows else None
+
+    def set_notification(self, bucket: str, config: str) -> None:
+        """Replace a bucket's notification configuration."""
+        self._q("INSERT OR REPLACE INTO notification VALUES (?, ?)", (bucket, config))
 
     def delete_inventory(self, bucket: str, id_: str) -> int:
         """Delete an inventory configuration; return how many rows went."""
@@ -285,9 +316,28 @@ _HOP = {
 }
 
 
+def is_public(policy: str) -> bool:
+    """Return True if a policy allows anyone, unconditionally (as S3 judges it)."""
+    statements = json.loads(policy).get("Statement", [])
+    if isinstance(statements, dict):
+        statements = [statements]
+    for st in statements:
+        principal = st.get("Principal")
+        anyone = principal == "*" or (
+            isinstance(principal, dict) and "*" in _as_list(principal.get("AWS"))
+        )
+        if st.get("Effect") == "Allow" and anyone and not st.get("Condition"):
+            return True
+    return False
+
+
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else [value]
+
+
 def create_app(store: Store | None = None) -> Starlette:
-    """Build the ASGI app answering S3 tagging and inventory requests."""
-    from . import inventory
+    """Build the ASGI app answering S3 tagging, inventory, policy, notifications."""
+    from . import inventory, notifications
 
     store = store or Store()
 
@@ -440,6 +490,61 @@ def create_app(store: Store | None = None) -> Starlette:
             return Response(status_code=204)
         return _error(405, "MethodNotAllowed", "The specified method is not allowed.")
 
+    async def bucket_policy(request, client, bucket, status_only: bool):
+        if (await head(client, f"/{bucket}")).status_code != 200:
+            return _error(
+                404, "NoSuchBucket", "The specified bucket does not exist", bucket
+            )
+        if request.method == "GET":
+            policy = store.bucket_policy(bucket)
+            if policy is None:
+                return _error(
+                    404,
+                    "NoSuchBucketPolicy",
+                    "The bucket policy does not exist",
+                    bucket,
+                )
+            if status_only:
+                public = "true" if is_public(policy) else "false"
+                return _xml(
+                    f'<PolicyStatus xmlns="{NS}"><IsPublic>{public}</IsPublic>'
+                    "</PolicyStatus>"
+                )
+            return Response(policy, media_type="application/json")
+        if request.method == "PUT" and not status_only:
+            body = (await request.body()).decode()
+            try:
+                doc = json.loads(body)
+                if not isinstance(doc, dict) or "Statement" not in doc:
+                    raise ValueError
+            except ValueError:
+                return _error(400, "MalformedPolicy", "Policies must be valid JSON")
+            store.set_bucket_policy(bucket, body)
+            return Response(status_code=204)
+        if request.method == "DELETE" and not status_only:
+            store.set_bucket_policy(bucket, None)
+            return Response(status_code=204)
+        return _error(405, "MethodNotAllowed", "The specified method is not allowed.")
+
+    async def bucket_notification(request, client, bucket):
+        if (await head(client, f"/{bucket}")).status_code != 200:
+            return _error(
+                404, "NoSuchBucket", "The specified bucket does not exist", bucket
+            )
+        if request.method == "GET":
+            return _xml(
+                store.notification(bucket)
+                or f'<NotificationConfiguration xmlns="{NS}"/>'
+            )
+        if request.method == "PUT":
+            try:
+                config = notifications.normalize(await request.body())
+            except (ET.ParseError, ValueError) as err:
+                return _error(400, "MalformedXML", str(err) or "Invalid configuration")
+            store.set_notification(bucket, config)
+            return Response(status_code=200)
+        return _error(405, "MethodNotAllowed", "The specified method is not allowed.")
+
     async def write_with_tags(request, client, bucket, key):
         """Forward a tagged PutObject / CreateMultipartUpload / CopyObject, record tags."""
         q = request.query_params
@@ -487,6 +592,10 @@ def create_app(store: Store | None = None) -> Starlette:
                 return await bucket_tagging(request, client, bucket)
             if "inventory" in q and not key:
                 return await bucket_inventory(request, client, bucket)
+            if ("policy" in q or "policyStatus" in q) and not key:
+                return await bucket_policy(request, client, bucket, "policyStatus" in q)
+            if "notification" in q and not key:
+                return await bucket_notification(request, client, bucket)
             if key and (
                 "x-amz-tagging" in request.headers
                 or "x-amz-copy-source" in request.headers
@@ -503,7 +612,24 @@ def create_app(store: Store | None = None) -> Starlette:
     )
     app.state.store = store
     inventory.start_scheduler(store)
+    _start_event_follower(store)
     return app
+
+
+_follower_started = False
+
+
+def _start_event_follower(store: Store) -> None:
+    """Follow nginx's write log once per process (see ``notifications``)."""
+    global _follower_started
+    if _follower_started:
+        return
+    _follower_started = True
+    from . import notifications
+
+    threading.Thread(
+        target=notifications.follow_log, args=(store, backend_url()), daemon=True
+    ).start()
 
 
 _servers: dict[int, object] = {}

@@ -5,7 +5,8 @@ Inventory. On a Docker-API backend, ``oblako up s3`` therefore runs three parts
 behind the one S3 endpoint (:9000):
 
 - a stock nginx on :9000 that passes every request straight to S3Proxy,
-  except tagging / Inventory requests (see ``_nginx_conf``). nginx rather than
+  except tagging / Inventory / bucket policy / notification requests, and
+  logs completed writes for event notifications (see ``_nginx_conf``). nginx rather than
   Caddy because Go's HTTP stack rewrites header names to Title-Case, which
   boto3 then surfaces as metadata keys (``Source-Job`` instead of ``source-job``);
 - S3Proxy itself, on :9001 (``ports.S3_BACKEND``);
@@ -35,13 +36,18 @@ FRONT_DIR = Path.home() / ".oblako" / "s3-front"
 
 
 def _nginx_conf(backend_port: int, ext_port: int) -> str:
-    """Route tagging / Inventory to the extensions engine, the rest to S3Proxy.
+    """Route S3Proxy's gaps to the extensions engine, everything else to S3Proxy.
 
-    ``?tagging`` / ``?inventory`` match as a query parameter name (any value,
-    incl. none), so a listing with ``prefix=tagging`` still goes to S3Proxy.
-    Bodies stream in both directions (no buffering, no size limit).
+    ``?tagging`` / ``?inventory`` / ``?policy`` / ``?notification`` match as a
+    query parameter name (any value, incl. none), so a listing with
+    ``prefix=tagging`` still goes to S3Proxy. Bodies stream in both directions
+    (no buffering, no size limit). Completed writes are logged as JSON lines,
+    which the engine follows to fire event notifications.
     """
-    up = "host.docker.internal"
+    # @HOST@ is filled in at container start with host.docker.internal's IPv4
+    # address (see _FRONT_COMMAND): Docker Desktop also maps it to an IPv6 one
+    # the host isn't reachable on, and nginx would alternate between the two
+    up = "@HOST@"
     return f"""worker_processes auto;
 events {{ worker_connections 1024; }}
 http {{
@@ -52,10 +58,21 @@ http {{
     proxy_read_timeout 3600s;
     proxy_send_timeout 3600s;
     ignore_invalid_headers off;
+    access_log off;
+    # completed writes, one JSON line each, for event notifications
+    map $request_method $s3_write {{
+        PUT 1;
+        POST 1;
+        DELETE 1;
+        default 0;
+    }}
+    log_format s3_writes escape=json '{{"method":"$request_method",'
+        '"uri":"$request_uri","status":"$status","etag":"$upstream_http_etag",'
+        '"length":"$content_length","copy":"$http_x_amz_copy_source"}}';
     upstream s3proxy {{ server {up}:{backend_port}; keepalive 32; }}
     upstream s3ext {{ server {up}:{ext_port}; keepalive 8; }}
     map $args $ext_query {{
-        "~(^|&)(tagging|inventory)(=|&|$)" 1;
+        "~(^|&)(tagging|inventory|policy|policyStatus|notification)(=|&|$)" 1;
         default 0;
     }}
     map "$ext_query:$http_x_amz_tagging:$http_x_amz_copy_source" $s3_upstream {{
@@ -65,13 +82,27 @@ http {{
     server {{
         listen 80;
         location / {{
+            access_log /var/log/oblako/writes.log s3_writes if=$s3_write;
             proxy_set_header Host $http_host;
             proxy_set_header Connection "";
+            # S3Proxy rejects this (NotImplemented) and runs without auth anyway;
+            # boto3 sends it with temporary credentials: Lambda, SSO, roles
+            proxy_set_header X-Amz-Security-Token "";
             proxy_pass http://$s3_upstream;
         }}
     }}
 }}
 """
+
+
+_FRONT_COMMAND = [
+    "sh",
+    "-c",
+    "HOST=$(getent ahostsv4 host.docker.internal | awk 'NR==1{print $1}'); "
+    'sed "s/@HOST@/${HOST:-host.docker.internal}/g" '
+    "/etc/nginx/oblako.conf.template > /etc/nginx/nginx.conf "
+    "&& exec nginx -g 'daemon off;'",
+]
 
 
 class S3ProxyService(Service):
@@ -118,11 +149,14 @@ class S3ProxyService(Service):
             ports=[PortMapping(container_port=80, host_port=host_port)],
             volumes={
                 str(FRONT_DIR / "nginx.conf"): {
-                    "bind": "/etc/nginx/nginx.conf",
+                    "bind": "/etc/nginx/oblako.conf.template",
                     "mode": "ro",
-                }
+                },
+                # completed writes, followed by the engine for notifications
+                str(FRONT_DIR / "log"): {"bind": "/var/log/oblako", "mode": "rw"},
             },
             extra_hosts={"host.docker.internal": "host-gateway"},
+            command=_FRONT_COMMAND,
             backend=backend,
         )
 
@@ -153,7 +187,7 @@ class S3ProxyService(Service):
         from oblako.engines import host
 
         host.start("s3-ext")
-        FRONT_DIR.mkdir(parents=True, exist_ok=True)
+        (FRONT_DIR / "log").mkdir(parents=True, exist_ok=True)
         (FRONT_DIR / "nginx.conf").write_text(
             _nginx_conf(self.backend_port, ports.S3_EXT)
         )

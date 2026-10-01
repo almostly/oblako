@@ -21,7 +21,7 @@ This page lists what each one provides and where it diverges from AWS.
 
 | Service | Description | Limitations |
 |---|---|---|
-| **S3** | S3 API over the local filesystem (S3Proxy), plus object / bucket tagging and S3 Inventory. | No flexible-checksum / `aws-chunked`; oblako sets checksum calc `when_required`. Tagging and Inventory need `oblako up s3` on a Docker-API backend. |
+| **S3** | S3 API over the local filesystem (S3Proxy), plus object / bucket tagging, S3 Inventory, bucket policies and event notifications (to Lambda, SQS, SNS, EventBridge). | No flexible-checksum / `aws-chunked`; oblako sets checksum calc `when_required`. Tagging, Inventory, policies and notifications need `oblako up s3` on a Docker-API backend; policies are stored, not enforced. |
 | **S3 Tables** | `s3tables` control plane (table buckets, namespaces, tables, `GetTableMetadataLocation`) mapped onto the local **Iceberg REST catalog**; `CreateTable` writes real Iceberg metadata, so the tables are queryable by Athena / Trino / pyiceberg. | Single-warehouse catalog: a table bucket + namespace map to a `[bucket, namespace]` Iceberg namespace prefix; managed maintenance (compaction, snapshot expiry) is not modelled. |
 | **S3 Vectors** | `s3vectors`: vector buckets → indexes (dimension + distance metric) → `PutVectors` / `QueryVectors` (k-NN) with Mongo-style metadata filters. Fed by Bedrock embeddings. | Brute-force k-NN (cosine / euclidean), not ANN; vectors are in-memory (not persisted across restart). |
 | **DynamoDB** | Amazon's DynamoDB Local, with a proxy that adds native **vector search**: `VectorIndexes` on `CreateTable`/`UpdateTable` + `SearchVectors` (k-NN). | Single local instance; no Streams→Lambda wiring. `SearchVectors` is brute-force KNN (full scan), not ANN; the vector index isn't persisted across restart. |
@@ -254,9 +254,10 @@ SELECT sandbox.credit_predict(f1::float8, f2::float8) FROM sandbox.tape;
 ## S3
 
 S3 API backed by S3Proxy over the local filesystem. S3Proxy doesn't implement
-tagging or Inventory, so `oblako up s3` puts a stock nginx on :9000 in front of
-it: every request goes straight to S3Proxy (on :9001), except tagging and
-Inventory calls, which an oblako engine answers.
+tagging, Inventory, bucket policies or event notifications, so `oblako up s3`
+puts a stock nginx on :9000 in front of it: every request goes straight to
+S3Proxy (on :9001), except those calls, which an oblako engine answers. nginx
+also sends the engine a bodiless copy of each write, for notifications.
 
 - **Tagging.** `put_object(..., Tagging="k=v")`, `put_object_tagging` /
   `get_object_tagging` / `delete_object_tagging`, tags on multipart uploads and
@@ -268,6 +269,18 @@ Inventory calls, which an oblako engine answers.
   configuration is saved, then daily (`OBLAKO_S3_INVENTORY_INTERVAL` seconds):
   a CSV (gzipped) or Parquet data file plus `manifest.json` under
   `<prefix>/<source>/<id>/` in the destination bucket.
+- **Bucket policy.** `put` / `get` / `delete_bucket_policy` and
+  `get_bucket_policy_status` (public when anyone is allowed unconditionally).
+  Stored and returned only: S3Proxy has no IAM, so nothing is enforced.
+- **Event notifications.** `put` / `get_bucket_notification_configuration`
+  with Lambda, SQS and SNS destinations (in moto, :5500) and EventBridge, with
+  prefix / suffix filters. `ObjectCreated` (Put, Copy, CompleteMultipartUpload)
+  and `ObjectRemoved:Delete` events are delivered as S3 event records once the
+  write lands, so an upload to `raw/` can invoke a Lambda that writes to
+  `curated/`.
+- **Temporary credentials.** boto3 sends `x-amz-security-token` with session
+  credentials (inside Lambda, with SSO or an assumed role); S3Proxy rejects it,
+  so the front drops it.
 
 **Limitations**
 
@@ -275,9 +288,11 @@ Inventory calls, which an oblako engine answers.
   (`x-amz-checksum-*` over `aws-chunked`); oblako sets checksum calculation to
   `when_required` so uploads work.
 - Tags are stored and returned, but nothing acts on them: S3Proxy has no
-  lifecycle rules or tag-based access control. Inventory doesn't produce ORC,
+  lifecycle rules or tag-based access control. Bucket policies likewise aren't
+  enforced. Batch deletes (`DeleteObjects`) don't produce events: their keys
+  are in the request body, which isn't mirrored. Inventory doesn't produce ORC,
   and Parquet reports need `pyarrow`.
-- Tagging and Inventory need the front, which `oblako up s3` starts on a
+- These additions need the front, which `oblako up s3` starts on a
   Docker-API backend (Docker, Podman, Colima). On Kubernetes or Apple
   `container`, plain `docker compose up`, or with `OBLAKO_S3_EXTENSIONS=0`,
   S3Proxy serves :9000 directly and those calls return `NotImplemented`.
