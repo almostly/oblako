@@ -88,6 +88,9 @@ http {{
             # S3Proxy rejects this (NotImplemented) and runs without auth anyway;
             # boto3 sends it with temporary credentials: Lambda, SSO, roles
             proxy_set_header X-Amz-Security-Token "";
+            # newer AWS SDKs ask ListObjectsV2 for RestoreStatus with this;
+            # S3Proxy 501s it (Trino, Spark/Glue S3A); unset, S3 omits the field
+            proxy_set_header X-Amz-Optional-Object-Attributes "";
             proxy_pass http://$s3_upstream;
         }}
     }}

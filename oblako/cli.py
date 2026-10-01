@@ -14,6 +14,7 @@ Usage:
 """
 
 import argparse
+import importlib.util
 import sys
 
 from oblako import ports
@@ -161,9 +162,7 @@ def cmd_dashboard(args):
 # Notebook
 def cmd_notebook(args):
     """Launch JupyterLab pre-wired so unmodified boto3 hits oblako's local services."""
-    try:
-        import jupyterlab  # noqa: F401
-    except ImportError:
+    if importlib.util.find_spec("jupyterlab") is None:
         print(
             "JupyterLab isn't installed. Install the extra: pip install 'oblako[notebook]'"
         )
@@ -323,6 +322,8 @@ def _get_service(oblako: Oblako, name: str):
         "s3": oblako.s3,
         "dynamodb": oblako.dynamodb,
         "stepfunctions": oblako.stepfunctions,
+        "iceberg": oblako.iceberg,  # the Iceberg REST catalog (S3 Tables, Glue)
+        "trino": oblako.trino,  # Athena's engine; starts the Glue engine too
     }
     if name not in services:
         print(f"Unknown service: {name}")

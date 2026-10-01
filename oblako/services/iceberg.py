@@ -66,6 +66,33 @@ class IcebergCatalogService(Service):
         self.host_port = host_port
         self.warehouse = warehouse
 
+    def start(self) -> None:
+        """Start the catalog and create its warehouse bucket if it's missing."""
+        super().start()
+        self.ensure_warehouse()
+
+    def ensure_warehouse(self) -> None:
+        """Create the warehouse bucket on S3, where every table's files go.
+
+        The REST catalog places a namespace's tables under the warehouse, and
+        writes there fail with NoSuchBucket until the bucket exists. Needs S3
+        running; without it this only says so.
+        """
+        from botocore.exceptions import BotoCoreError, ClientError
+
+        from .s3proxy import S3ProxyService
+
+        bucket = self.warehouse.removeprefix("s3://").split("/", 1)[0]
+        s3 = S3ProxyService().get_client()
+        try:
+            s3.head_bucket(Bucket=bucket)
+        except ClientError:
+            s3.create_bucket(Bucket=bucket)
+        except BotoCoreError as err:
+            print(
+                f"iceberg: S3 isn't reachable, create s3://{bucket} once it is ({err})"
+            )
+
     @property
     def endpoint_url(self) -> str:
         """REST catalog endpoint that pyiceberg / Spark Iceberg connect to."""

@@ -178,6 +178,7 @@ def test_front_logs_writes_and_strips_the_session_token():
     assert "access_log /var/log/oblako/writes.log s3_writes if=$s3_write;" in conf
     assert '"status":"$status"' in conf and '"etag":"$upstream_http_etag"' in conf
     assert 'proxy_set_header X-Amz-Security-Token "";' in conf
+    assert 'proxy_set_header X-Amz-Optional-Object-Attributes "";' in conf
     assert "policy|policyStatus|notification" in conf
 
 

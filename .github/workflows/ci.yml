@@ -57,13 +57,14 @@ jobs:
         run: docker build -t public.ecr.aws/oblako/redshift-local:16 oblako/images/redshift
 
       # Start the oblako services and wait for readiness (up to 180s each, for
-      # image pulls + DB/JVM init; OpenSearch is the slow one). Ollama/Bedrock
+      # image pulls + DB/JVM init; OpenSearch is the slow one). Trino also starts
+      # the Glue engine, its awsdatacatalog metastore. Ollama/Bedrock
       # is not run here: it needs large model downloads. The sagemaker extra
       # (the v3 SDK) lets the SageMaker SDK tests drive its local modes.
       - name: Start services
         run: >
           uv run --python 3.12 --extra dev --extra sagemaker python -c "from oblako.services import Oblako as O; import sys;
-          o = O(); svcs = [o.s3, o.dynamodb, o.moto, o.stepfunctions, o.redshift, o.rds, o.opensearch];
+          o = O(); svcs = [o.s3, o.dynamodb, o.moto, o.stepfunctions, o.redshift, o.rds, o.opensearch, o.iceberg, o.trino];
           [s.start() for s in svcs];
           r = {s.name: s.wait_ready(timeout=180) for s in svcs};
           print('ready:', r); sys.exit(0 if all(r.values()) else 1)"

@@ -46,6 +46,8 @@ _INTEGRATION_FILES = {
     "tests/redshift/test_redshift_cluster.py",
     "tests/stepfunctions/test_stepfunctions.py",
     "tests/services/test_ec2.py",
+    "tests/services/test_athena.py",
+    "tests/services/test_glue_athena.py",
 }
 
 _KUBERNETES_FILES = {
