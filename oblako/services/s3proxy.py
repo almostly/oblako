@@ -15,7 +15,10 @@ class S3ProxyService(Service):
         """Initialize the S3Proxy service on the given host port."""
         super().__init__(
             name="s3proxy",
-            image="andrewgaul/s3proxy:latest",
+            # Pinned: an existing :latest is never re-pulled, so it goes stale.
+            # 4.1.x stops URL-encoding the ListObjectsV2 continuation token,
+            # which made paginating >1,000 keys containing "=" loop forever.
+            image="andrewgaul/s3proxy:s3proxy-4.1.1",
             ports=[PortMapping(container_port=80, host_port=host_port)],
             environment={
                 "JCLOUDS_FILESYSTEM_BASEDIR": "/data",
