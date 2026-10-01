@@ -112,7 +112,7 @@ services:
       - "5500:5000"
 
   s3proxy:
-    image: andrewgaul/s3proxy:latest
+    image: andrewgaul/s3proxy:s3proxy-4.1.1  # pinned: see oblako/services/s3proxy.py
     ports:
       - "9000:80"
     environment:
