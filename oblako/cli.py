@@ -2,6 +2,7 @@
 
 Usage:
     oblako up                  Start all services
+    oblako up <service>        Start one service, e.g. s3 or s3vectors
     oblako down                Stop all services
     oblako status              Show service status
     oblako dashboard           Start web dashboard (http://localhost:8000)
@@ -16,6 +17,7 @@ import argparse
 import sys
 
 from oblako import ports
+from oblako.engines import host
 from oblako.services.platform import Oblako
 
 
@@ -35,6 +37,16 @@ def _check_docker():
 # -----------------------------------------------------------------------------------------------
 def cmd_up(args):
     """Start all services, or a single named service."""
+    if args.service in host.ENGINES:  # an in-process engine: no container
+        try:
+            url = host.start(args.service)
+        except RuntimeError as err:
+            print(f"Error: {err}")
+            sys.exit(1)
+        print(
+            f"{args.service} is running on {url} (logs: {host.logfile(args.service)})"
+        )
+        return
     _check_docker()
     oblako = Oblako()
     if args.service:
@@ -52,6 +64,14 @@ def cmd_up(args):
 
 def cmd_down(args):
     """Stop all services, or a single named service."""
+    if args.service in host.ENGINES:
+        stopped = host.stop(args.service)
+        print(
+            f"{args.service} stopped"
+            if stopped
+            else f"{args.service} was not started by oblako up"
+        )
+        return
     _check_docker()
     oblako = Oblako()
     if args.service:
@@ -65,12 +85,21 @@ def cmd_status(args):
     """Print the status of all user-facing services."""
     _check_docker()
     oblako = Oblako()
-    for name, state in oblako.status().items():
+    statuses = oblako.status()
+    for name in host.ENGINES:  # in-process engines; sagemaker also has a count
+        state, extra = host.status(name), statuses.get(name)
+        statuses[name] = f"{state} ({extra})" if extra and extra != "idle" else state
+    for name, state in statuses.items():
         print(f"  {name}: {state}")
 
 
 def cmd_logs(args):
-    """Print recent container logs for a named service."""
+    """Print recent logs for a named service."""
+    if args.service in host.ENGINES:
+        log = host.logfile(args.service)
+        lines = log.read_text(errors="replace").splitlines() if log.exists() else []
+        print("\n".join(lines[-args.tail :]))
+        return
     _check_docker()
     oblako = Oblako()
     svc = _get_service(oblako, args.service)
@@ -297,7 +326,7 @@ def _get_service(oblako: Oblako, name: str):
     }
     if name not in services:
         print(f"Unknown service: {name}")
-        print(f"Available: {', '.join(services)}")
+        print(f"Available: {', '.join([*services, *host.ENGINES])}")
         sys.exit(1)
     return services[name]
 

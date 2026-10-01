@@ -81,7 +81,7 @@ for you).
 
 | Command | Description |
 |---|---|
-| `oblako up [service]` | Start all services (or a specific one) |
+| `oblako up [service]` | Start all services, or one (a container service like `s3`, or an API engine like `s3vectors`) |
 | `oblako down [service]` | Stop all services (or a specific one) |
 | `oblako status` | Show service status |
 | `oblako dashboard [-p PORT]` | Start the web dashboard (default: 8000) |

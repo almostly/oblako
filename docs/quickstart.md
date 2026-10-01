@@ -63,11 +63,26 @@ oblako down stepfunctions   # stop one service
 Service names: `bedrock`, `opensearch`, `redshift`, `rds`, `moto`, `s3`,
 `dynamodb`, `stepfunctions` (`ollama` aliases `bedrock`; `aurora` aliases `rds`).
 
+The API engines that oblako runs in Python rather than in a container start the
+same way, each on its canonical port, so plain boto3 or the AWS CLI can reach
+them without any oblako code in the client: `s3vectors`, `s3tables`, `athena`,
+`firehose`, `eventbridge`, `appconfig`, `sagemaker`, `glue`,
+`dynamodb-vectors`, `redshift-data`, `rds-data`, `bedrock-runtime`,
+`cloudformation`, `ecs-metadata`.
+
+```bash
+oblako up s3vectors         # S3 Vectors on :8012, in the background
+oblako logs s3vectors       # its log (~/.oblako/logs/s3vectors.log)
+oblako down s3vectors
+```
+
+(Code that uses oblako's Python API starts these engines on demand.)
+
 ## CLI reference
 
 | Command | Description |
 |---|---|
-| `oblako up [service]` | Start all services (or a specific one) |
+| `oblako up [service]` | Start all services, or one (a container service like `s3`, or an API engine like `s3vectors`) |
 | `oblako down [service]` | Stop all services (or a specific one) |
 | `oblako status` | Show service status |
 | `oblako dashboard [-p PORT]` | Start the web dashboard (default: 8000) |
