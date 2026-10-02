@@ -1,13 +1,14 @@
 """Integration test: Kinesis Data Firehose delivers records to S3.
 
-Requires S3Proxy (no Docker for the engine itself). A DirectPut delivery stream
-with an S3 destination buffers PutRecord/PutRecordBatch data and stages it as S3
-objects on the buffering interval — unmodified boto3 ``firehose``. Override
-OBLAKO_TEST_S3_ENDPOINT to point at an isolated S3Proxy.
+Requires S3Proxy (no Docker for the engine itself); the Kinesis-source test needs
+moto, the Redshift one oblako's Redshift, the Parquet one pyarrow and the Glue
+engine. Unmodified boto3 ``firehose``. Override OBLAKO_TEST_S3_ENDPOINT /
+OBLAKO_TEST_RS_PORT to point at isolated services.
 """
 
 import json
 import os
+import re
 import time
 
 import boto3
@@ -16,7 +17,8 @@ from botocore.config import Config
 
 S3_ENDPOINT = os.environ.get("OBLAKO_TEST_S3_ENDPOINT", "http://localhost:9000")
 BUCKET = "firehose-ci"
-ROLE = "arn:aws:iam::000000000000:role/firehose"
+ROLE = "arn:aws:iam::123456789012:role/firehose"
+RS_PORT = int(os.environ.get("OBLAKO_TEST_RS_PORT", "5439"))
 
 
 def _s3():
@@ -31,6 +33,12 @@ def _s3():
             request_checksum_calculation="when_required",
         ),
     )
+
+
+def _empty(s3, prefix):
+    """Remove what earlier runs left under a prefix."""
+    for obj in s3.list_objects_v2(Bucket=BUCKET, Prefix=prefix).get("Contents", []):
+        s3.delete_object(Bucket=BUCKET, Key=obj["Key"])
 
 
 def test_firehose_delivers_records_to_s3():
@@ -48,6 +56,7 @@ def test_firehose_delivers_records_to_s3():
     except s3.exceptions.ClientError:
         pass
 
+    _empty(s3, "events/")
     fh = get_client()
     stream = "events"
     fh.create_delivery_stream(
@@ -97,9 +106,12 @@ def test_firehose_delivers_records_to_s3():
         assert {1, 2, 3} <= {r["id"] for r in records}
         assert {10, 20, 30} <= {r["amt"] for r in records}
 
-        # the key follows the Firehose prefix/YYYY/MM/DD/HH/name-ts-uuid layout
-        assert objects[0]["Key"].startswith("events/")
-        assert f"/{stream}-" in objects[0]["Key"]
+        # <prefix>yyyy/MM/dd/HH/<name>-<version>-yyyy-MM-dd-HH-mm-ss-<uuid>
+        assert re.fullmatch(
+            r"events/\d{4}/\d{2}/\d{2}/\d{2}/events-1-"
+            r"\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}-[0-9a-f-]{36}",
+            objects[0]["Key"],
+        ), objects[0]["Key"]
     finally:
         fh.delete_delivery_stream(DeliveryStreamName=stream)
 
@@ -145,18 +157,15 @@ def test_firehose_kinesis_stream_as_source():
     except s3.exceptions.ClientError:
         pass
 
+    _empty(s3, "k/")
     source = "txns"
     try:
         kinesis.delete_stream(StreamName=source)
     except Exception:
         pass
     kinesis.create_stream(StreamName=source, ShardCount=1)
-    for i in range(3):
-        kinesis.put_record(
-            StreamName=source,
-            Data=(json.dumps({"id": i}) + "\n").encode(),
-            PartitionKey=str(i),
-        )
+    # put before the delivery stream exists: Firehose starts at LATEST, so skipped
+    kinesis.put_record(StreamName=source, Data=b'{"id": -1}\n', PartitionKey="early")
     source_arn = kinesis.describe_stream(StreamName=source)["StreamDescription"][
         "StreamARN"
     ]
@@ -176,6 +185,12 @@ def test_firehose_kinesis_stream_as_source():
             "BufferingHints": {"IntervalInSeconds": 1, "SizeInMBs": 5},
         },
     )
+    for i in range(3):
+        kinesis.put_record(
+            StreamName=source,
+            Data=(json.dumps({"id": i}) + "\n").encode(),
+            PartitionKey=str(i),
+        )
     try:
         objects = []
         for _ in range(30):
@@ -199,89 +214,196 @@ def test_firehose_kinesis_stream_as_source():
 
 
 def test_firehose_redshift_destination():
+    """Firehose stages each batch to S3 and loads it with its COPY, CopyOptions included."""
     try:
         _s3().list_buckets()
-        import docker
-
-        docker_client = docker.from_env()
-        docker_client.ping()
     except Exception:
-        pytest.skip("Docker or S3Proxy not available")
+        pytest.skip("S3Proxy not available")
     import psycopg
 
     os.environ["AWS_ENDPOINT_URL_S3"] = S3_ENDPOINT
     from oblako.engines.firehose import get_client
 
-    dsn = "postgresql://postgres:firehosepw@localhost:5433/warehouse"
-    docker_client.containers.run(
-        "postgres:16-alpine",
-        detach=True,
-        remove=True,
-        name="oblako-fh-pg",
-        environment={"POSTGRES_PASSWORD": "firehosepw", "POSTGRES_DB": "warehouse"},
-        ports={"5432/tcp": 5433},
+    dsn = f"postgresql://oblako:oblako@localhost:{RS_PORT}/oblako"
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("DROP TABLE IF EXISTS fh_txns")
+            conn.execute("CREATE TABLE fh_txns (id int, amt numeric(10, 2))")
+    except psycopg.OperationalError:
+        pytest.skip("oblako Redshift not available")
+
+    s3 = _s3()
+    try:
+        s3.create_bucket(Bucket=BUCKET)
+    except s3.exceptions.ClientError:
+        pass
+
+    _empty(s3, "rs/")
+    fh = get_client()
+    fh.create_delivery_stream(
+        DeliveryStreamName="to-redshift",
+        DeliveryStreamType="DirectPut",
+        RedshiftDestinationConfiguration={
+            "RoleARN": ROLE,
+            "ClusterJDBCURL": f"jdbc:redshift://localhost:{RS_PORT}/oblako",
+            "Username": "oblako",
+            "Password": "oblako",
+            "CopyCommand": {
+                "DataTableName": "fh_txns",
+                "DataTableColumns": "id,amt",
+                "CopyOptions": "JSON 'auto' GZIP",
+            },
+            "S3Configuration": {
+                "RoleARN": ROLE,
+                "BucketARN": f"arn:aws:s3:::{BUCKET}",
+                "Prefix": "rs/",
+                "CompressionFormat": "GZIP",
+                "BufferingHints": {"IntervalInSeconds": 1, "SizeInMBs": 5},
+            },
+        },
     )
     try:
-        for _ in range(60):
-            try:
-                with psycopg.connect(dsn) as conn:
-                    conn.execute("SELECT 1")
+        for rid, amt in ((1, 10), (2, 20), (3, 30)):
+            fh.put_record(
+                DeliveryStreamName="to-redshift",
+                Record={"Data": json.dumps({"id": rid, "amt": amt}).encode()},
+            )
+
+        rows = []
+        for _ in range(40):
+            with psycopg.connect(dsn) as conn:
+                rows = conn.execute(
+                    "SELECT id, amt FROM fh_txns ORDER BY id"
+                ).fetchall()
+            if len(rows) == 3:
                 break
-            except Exception:
-                time.sleep(0.5)
-        else:
-            pytest.skip("postgres did not become ready")
+            time.sleep(0.5)
+        assert [(r[0], int(r[1])) for r in rows] == [(1, 10), (2, 20), (3, 30)]
 
-        with psycopg.connect(dsn) as conn:
-            conn.execute("CREATE TABLE txns (id int, amt numeric)")
-
-        s3 = _s3()
-        try:
-            s3.create_bucket(Bucket=BUCKET)
-        except s3.exceptions.ClientError:
-            pass
-
-        fh = get_client()
-        fh.create_delivery_stream(
-            DeliveryStreamName="to-redshift",
-            DeliveryStreamType="DirectPut",
-            RedshiftDestinationConfiguration={
-                "RoleARN": ROLE,
-                "ClusterJDBCURL": "jdbc:redshift://localhost:5433/warehouse",
-                "Username": "postgres",
-                "Password": "firehosepw",
-                "CopyCommand": {"DataTableName": "txns"},
-                "S3Configuration": {
-                    "RoleARN": ROLE,
-                    "BucketARN": f"arn:aws:s3:::{BUCKET}",
-                    "Prefix": "rs/",
-                    "BufferingHints": {"IntervalInSeconds": 1, "SizeInMBs": 5},
-                },
-            },
-        )
-        try:
-            for rid, amt in ((1, 10), (2, 20), (3, 30)):
-                fh.put_record(
-                    DeliveryStreamName="to-redshift",
-                    Record={"Data": (json.dumps({"id": rid, "amt": amt}) + "\n").encode()},
-                )
-
-            rows = []
-            for _ in range(40):
-                with psycopg.connect(dsn) as conn:
-                    rows = conn.execute("SELECT id, amt FROM txns ORDER BY id").fetchall()
-                if len(rows) == 3:
-                    break
-                time.sleep(0.5)
-            assert [(r[0], int(r[1])) for r in rows] == [(1, 10), (2, 20), (3, 30)]
-
-            # the batch was also staged to S3 before the COPY
-            staged = s3.list_objects_v2(Bucket=BUCKET, Prefix="rs/").get("Contents", [])
-            assert staged
-        finally:
-            fh.delete_delivery_stream(DeliveryStreamName="to-redshift")
+        # the batch was staged to S3, gzipped, before the COPY
+        staged = s3.list_objects_v2(Bucket=BUCKET, Prefix="rs/").get("Contents", [])
+        assert staged and staged[0]["Key"].endswith(".gz")
     finally:
-        try:
-            docker_client.containers.get("oblako-fh-pg").remove(force=True)
-        except Exception:
-            pass
+        fh.delete_delivery_stream(DeliveryStreamName="to-redshift")
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute("DROP TABLE IF EXISTS fh_txns")
+
+
+def test_firehose_converts_json_to_parquet():
+    """Record format conversion: JSON to Parquet with a Glue table's schema."""
+    try:
+        _s3().list_buckets()
+    except Exception:
+        pytest.skip("S3Proxy not available")
+    pa = pytest.importorskip("pyarrow")
+    import io
+
+    import pyarrow.parquet as pq
+
+    from oblako.engines import glue_catalog
+
+    os.environ["AWS_ENDPOINT_URL_S3"] = S3_ENDPOINT
+    os.environ["AWS_ENDPOINT_URL_GLUE"] = glue_catalog.start_in_thread()
+    from oblako.engines.firehose import get_client
+
+    glue = boto3.client(
+        "glue",
+        region_name="us-east-1",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    try:
+        glue.create_database(DatabaseInput={"Name": "fh_db"})
+    except glue.exceptions.AlreadyExistsException:
+        pass
+    try:
+        glue.delete_table(DatabaseName="fh_db", Name="orders")
+    except glue.exceptions.EntityNotFoundException:
+        pass
+    glue.create_table(
+        DatabaseName="fh_db",
+        TableInput={
+            "Name": "orders",
+            "StorageDescriptor": {
+                "Columns": [
+                    {"Name": "id", "Type": "bigint"},
+                    {"Name": "total", "Type": "decimal(10,2)"},
+                    {"Name": "placed_at", "Type": "timestamp"},
+                    {"Name": "note", "Type": "string"},
+                ],
+                "Location": f"s3://{BUCKET}/orders/",
+            },
+            "TableType": "EXTERNAL_TABLE",
+        },
+    )
+    s3 = _s3()
+    try:
+        s3.create_bucket(Bucket=BUCKET)
+    except s3.exceptions.ClientError:
+        pass
+
+    _empty(s3, "orders/")
+    _empty(s3, "errors/")
+    fh = get_client()
+    fh.create_delivery_stream(
+        DeliveryStreamName="to-parquet",
+        DeliveryStreamType="DirectPut",
+        ExtendedS3DestinationConfiguration={
+            "RoleARN": ROLE,
+            "BucketARN": f"arn:aws:s3:::{BUCKET}",
+            "Prefix": "orders/dt=!{timestamp:yyyy-MM-dd}/",
+            "ErrorOutputPrefix": "errors/!{firehose:error-output-type}/",
+            "BufferingHints": {"IntervalInSeconds": 1, "SizeInMBs": 64},
+            "DataFormatConversionConfiguration": {
+                "Enabled": True,
+                "SchemaConfiguration": {
+                    "DatabaseName": "fh_db",
+                    "TableName": "orders",
+                    "RoleARN": ROLE,
+                },
+                "InputFormatConfiguration": {"Deserializer": {"OpenXJsonSerDe": {}}},
+                "OutputFormatConfiguration": {"Serializer": {"ParquetSerDe": {}}},
+            },
+        },
+    )
+    try:
+        records = [
+            {"ID": 1, "total": "12.50", "placed_at": "2026-10-01T09:00:00Z"},
+            {"id": 2, "total": 7, "placed_at": 1790000000000, "note": "gift"},
+            {"id": "not a number", "total": 1, "placed_at": "2026-10-01T09:00:00Z"},
+        ]
+        fh.put_record_batch(
+            DeliveryStreamName="to-parquet",
+            Records=[{"Data": json.dumps(r).encode()} for r in records],
+        )
+        objects = []
+        for _ in range(30):
+            objects = s3.list_objects_v2(Bucket=BUCKET, Prefix="orders/dt=").get(
+                "Contents", []
+            )
+            if objects:
+                break
+            time.sleep(0.5)
+        assert objects and objects[0]["Key"].endswith(".parquet")
+        body = s3.get_object(Bucket=BUCKET, Key=objects[0]["Key"])["Body"].read()
+        table = pq.read_table(io.BytesIO(body))
+        assert table.schema.field("id").type == pa.int64()
+        assert table.schema.field("total").type == pa.decimal128(10, 2)
+        assert table.column("id").to_pylist() == [1, 2]  # keys match case-insensitively
+        assert table.column("note").to_pylist() == [None, "gift"]
+
+        errors = s3.list_objects_v2(
+            Bucket=BUCKET, Prefix="errors/format-conversion-failed/"
+        ).get("Contents", [])
+        assert errors
+        failed = s3.get_object(Bucket=BUCKET, Key=errors[0]["Key"])["Body"].read()
+        assert (
+            json.loads(failed)["lastErrorCode"] == "DataFormatConversion.MalformedData"
+        )
+    finally:
+        fh.delete_delivery_stream(DeliveryStreamName="to-parquet")
+        for prefix in ("orders/", "errors/"):
+            for obj in s3.list_objects_v2(Bucket=BUCKET, Prefix=prefix).get(
+                "Contents", []
+            ):
+                s3.delete_object(Bucket=BUCKET, Key=obj["Key"])
