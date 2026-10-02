@@ -95,7 +95,8 @@ services:
 
   # RDS / Aurora data-plane engine (control plane is moto's 'rds' API).
   rds:
-    image: postgres:16
+    # PostgreSQL 16 with pgvector, pinned; see oblako/services/rds.py.
+    image: pgvector/pgvector@sha256:40d828eda66737aaacb934387a337babf1455ebd56e9bdd13fc08e211257c972
     ports:
       - "5432:5432"
     environment:

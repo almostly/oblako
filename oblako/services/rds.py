@@ -14,13 +14,35 @@ The control-plane cluster/instance objects are moto metadata pointing at the one
 local engine — real SQL behavior, simulated topology.
 """
 
+import importlib
+from typing import TypedDict
+
 from oblako import ports
 from oblako import config
 from .base import Service, PortMapping
 
-_ENGINES = {
+# PostgreSQL 16 with pgvector, as RDS and Aurora PostgreSQL offer it
+# (CREATE EXTENSION vector): pgvector 0.8.7 on postgres:16, pinned by digest
+# (multi-arch). The trixie variant on purpose: postgres:16 is built on Debian
+# trixie, and data volumes it created would hit a collation (glibc) version
+# mismatch on the bookworm variant.
+POSTGRES_IMAGE = (
+    "pgvector/pgvector"
+    "@sha256:40d828eda66737aaacb934387a337babf1455ebd56e9bdd13fc08e211257c972"
+)
+
+
+class _EngineSpec(TypedDict):
+    image: str
+    container_port: int
+    default_host_port: int
+    data_dir: str
+    volume: str
+
+
+_ENGINES: dict[str, _EngineSpec] = {
     "postgres": {
-        "image": "postgres:16",
+        "image": POSTGRES_IMAGE,
         "container_port": 5432,
         "default_host_port": 5432,
         "data_dir": "/var/lib/postgresql/data",
@@ -56,7 +78,7 @@ class RdsService(Service):
                 f"engine must be one of {sorted(_ENGINES)}, got {engine!r}"
             )
         spec = _ENGINES[engine]
-        host_port = host_port or spec["default_host_port"]
+        port: int = host_port or spec["default_host_port"]
         if engine == "postgres":
             environment = {
                 "POSTGRES_USER": user,
@@ -73,14 +95,12 @@ class RdsService(Service):
         super().__init__(
             name="rds",
             image=spec["image"],
-            ports=[
-                PortMapping(container_port=spec["container_port"], host_port=host_port)
-            ],
+            ports=[PortMapping(container_port=spec["container_port"], host_port=port)],
             environment=environment,
             volumes={spec["volume"]: {"bind": spec["data_dir"], "mode": "rw"}},
         )
         self.engine = engine
-        self.host_port = host_port
+        self.host_port = port
         self.user = user
         self.password = password
         self.database = database
@@ -92,7 +112,8 @@ class RdsService(Service):
         """Return a DB connection to the engine (psycopg2 for postgres, pymysql for mysql)."""
         if self.engine == "mysql":
             try:
-                import pymysql
+                # optional extra (oblako[mysql]), imported only when asked for
+                pymysql = importlib.import_module("pymysql")
             except ImportError as e:
                 raise ImportError(
                     "The MySQL engine needs pymysql: pip install 'oblako[mysql]'"
