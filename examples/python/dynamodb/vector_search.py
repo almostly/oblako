@@ -1,9 +1,8 @@
 """DynamoDB native vector search on oblako, fed by Bedrock embeddings.
 
-DynamoDB's native vector search (SearchVectors + VectorIndexes) runs locally: an
-oblako proxy in front of DynamoDB Local captures the vector index and answers
-SearchVectors as brute-force KNN, and the new API is grafted onto boto3 so an
-unpatched client can call it. The embeddings come from oblako's local Bedrock
+DynamoDB's native vector search (SearchVectors + VectorIndexes, in boto3 from
+1.43.64) runs locally: an oblako proxy in front of DynamoDB Local captures the
+vector index and answers SearchVectors as brute-force KNN. The embeddings come from oblako's local Bedrock
 runtime (Ollama), so the whole embed -> store -> search loop is local.
 
 Run:
@@ -28,7 +27,9 @@ def _embedding_model() -> str:
     for model in OllamaClient().list_models():
         if "embed" in model["name"]:
             return f"ollama.{model['name']}"
-    raise SystemExit("pull an embedding model first, e.g. `ollama pull mxbai-embed-large`")
+    raise SystemExit(
+        "pull an embedding model first, e.g. `ollama pull mxbai-embed-large`"
+    )
 
 
 def embed(adapter: BedrockAdapter, model: str, text: str) -> list[float]:
@@ -77,7 +78,9 @@ def main():
             Item={
                 "id": {"S": doc_id},
                 "text": {"S": text},
-                "embedding": {"L": [{"N": str(v)} for v in embed(adapter, model, text)]},
+                "embedding": {
+                    "L": [{"N": str(v)} for v in embed(adapter, model, text)]
+                },
             },
         )
 
