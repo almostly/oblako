@@ -164,6 +164,7 @@ def test_bucket_namespace_table_and_metadata_location(client):
     # cleanup
     client.delete_table(tableBucketARN=arn, namespace="sales", name="orders")
     client.delete_namespace(tableBucketARN=arn, namespace="sales")
+    client.delete_table_bucket(tableBucketARN=arn)
 
 
 @pytestmark_integration
@@ -171,11 +172,15 @@ def test_get_table_metadata_location_missing_table(client):
     bucket = "lake" + uuid.uuid4().hex[:8]
     arn = client.create_table_bucket(name=bucket)["arn"]
     client.create_namespace(tableBucketARN=arn, namespace=["ns"])
-    with pytest.raises(Exception) as excinfo:  # botocore ClientError (NotFound)
-        client.get_table_metadata_location(
-            tableBucketARN=arn, namespace="ns", name="nope"
-        )
-    assert "not" in str(excinfo.value).lower()
+    try:
+        with pytest.raises(Exception) as excinfo:  # botocore ClientError (NotFound)
+            client.get_table_metadata_location(
+                tableBucketARN=arn, namespace="ns", name="nope"
+            )
+        assert "not" in str(excinfo.value).lower()
+    finally:
+        client.delete_namespace(tableBucketARN=arn, namespace="ns")
+        client.delete_table_bucket(tableBucketARN=arn)
 
 
 # --- the S3 Tables Iceberg REST endpoint (/iceberg) ------------------------
@@ -280,6 +285,7 @@ def test_pyiceberg_through_the_s3tables_endpoint(client, monkeypatch):
     finally:
         catalog.drop_table("web.page_views")
         client.delete_namespace(tableBucketARN=arn, namespace="web")
+        client.delete_table_bucket(tableBucketARN=arn)
 
 
 @pytestmark_integration
