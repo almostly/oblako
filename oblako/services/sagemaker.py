@@ -6,9 +6,14 @@ import contextlib
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import docker
+import docker.types
 from docker.errors import NotFound
+
+if TYPE_CHECKING:
+    from .mlflow import MlflowService
 
 # A "Studio domain" notebook instance runs a Jupyter-capable image. The default
 # is oblako's own slim image (JupyterLab + boto3 pre-wired), built on demand from
@@ -31,6 +36,10 @@ class SageMakerService:
     class also manages images, container status, and cleanup, and the Studio
     domain (composed from CloudFormation + EC2).
     """
+
+    # The SageMaker-managed MLflow tracking server; Oblako attaches it, since MLflow
+    # on AWS is a SageMaker resource (oblako.sagemaker.mlflow is the canonical handle).
+    mlflow: MlflowService
 
     def __init__(self):
         """Initialize SageMaker local mode with a deferred Docker client."""
@@ -220,7 +229,9 @@ class SageMakerService:
                         if "/" in member.name
                         else member.name
                     )
-                    files[name] = tar.extractfile(member).read()
+                    fh = tar.extractfile(member)
+                    if fh is not None:
+                        files[name] = fh.read()
             return (files, logs) if return_logs else files
         finally:
             with contextlib.suppress(Exception):
@@ -281,10 +292,11 @@ class SageMakerService:
         return CloudFormationService().get_client()
 
     def _ec2(self):
-        from .ec2 import Ec2Service
+        # EC2's control plane is moto (what Ec2Service.get_client() returns too).
+        from .boto import client
         from .moto import MotoService
 
-        return Ec2Service(MotoService()).get_client()
+        return client("ec2", MotoService().endpoint_url)
 
     def ensure_notebook_image(self) -> str:
         """Build oblako's slim notebook image (JupyterLab + boto3) if it's absent.

@@ -67,15 +67,28 @@ Data & analytics: real engines (S3, Glue, Redshift, Athena, Kinesis, Firehose, R
 
 ## How your code reaches a service
 
-The default path has no proxy in it. `AWS_ENDPOINT_URL_*` (or an explicit
-`endpoint_url=`) points `boto3` straight at `localhost:PORT`, and the service
-container publishes that port. One client, one fixed local port, one real engine.
+`AWS_ENDPOINT_URL_*` (or an explicit `endpoint_url=`) points `boto3` at
+`localhost:PORT`, and the service publishes that port. One client, one fixed local
+port, one real engine. Behind the port is one of four things:
+
+- **The engine itself**, when it already speaks the AWS API: DynamoDB Local on
+  :8001, kinesalite on :4567.
+- **A thin front that adds what the engine lacks.** S3's :9000 is a stock nginx:
+  it passes ordinary requests to S3Proxy on :9001, sends tagging and Inventory to
+  the S3 extensions engine on :8020, and logs completed writes so event
+  notifications fire. Redshift's :5439 is a wire proxy inside the Redshift image:
+  it terminates TLS, rewrites Redshift-only SQL (`DISTKEY`, `SORTKEY`, `SUPER`
+  navigation, ...) and bridges `COPY`/`UNLOAD` to S3, in front of PostgreSQL.
+- **A Python engine of oblako's own**, for APIs no engine speaks: Athena (:8009,
+  queries run on Trino), the Glue Data Catalog (:8486), S3 Tables, S3 Vectors,
+  Firehose, EventBridge and the Data APIs.
+- **moto** (:5500), for control planes with no engine behind them.
 
 ```{figure} _static/diagrams/routing.svg
 :alt: boto3 to localhost:PORT to a real engine, with no proxy in the path
 :width: 100%
 
-boto3 / AWS CLI → `localhost:PORT` → the real engine. No proxy in the path.
+boto3 / AWS CLI → `localhost:PORT` → the real engine (directly for most services).
 ```
 
 **Caddy** sits *beside* that path, not in front of it, for two specific jobs:
@@ -89,8 +102,8 @@ boto3 / AWS CLI → `localhost:PORT` → the real engine. No proxy in the path.
 
 Caddy reaches upstreams on the host via the `host.docker.internal` gateway alias
 (the vmnet gateway on the Apple `container` backend), independent of any Docker
-network. Ordinary services (S3, Redshift, DynamoDB, …) are reached directly and
-never pass through it.
+network. Ordinary service traffic (S3, Redshift, DynamoDB, …) never passes through
+Caddy.
 
 ```{figure} _static/diagrams/caddy.svg
 :alt: Caddy's two jobs — MLflow vanity host and per-ALB load balancer
