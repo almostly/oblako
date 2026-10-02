@@ -75,6 +75,12 @@ try:
 except Exception:  # any import failure disables the feature
     datepart = None
 
+# AVG(...) -> redshift_compat.avg(...): BIGINT for integer arguments. Pure-stdlib.
+try:
+    import integer_avg
+except Exception:  # any import failure disables the feature
+    integer_avg = None
+
 # CREATE/SHOW/DROP MODEL -> Redshift ML functions. Pure-stdlib; optional.
 try:
     import redshift_ml
@@ -283,6 +289,8 @@ def rewrite_sql(sql: str) -> str:
         s = listagg.rewrite_listagg(s)  # LISTAGG -> string_agg
     if datepart is not None:
         s = datepart.rewrite_dateparts(s)  # DATEADD(month, ..) -> ('month', ..)
+    if integer_avg is not None:
+        s = integer_avg.rewrite_avg(s)  # avg( -> redshift_compat.avg( (BIGINT for ints)
     s = _VARCHAR_MAX.sub("text", s)
     s = _CREATEUSER.sub("SUPERUSER", s)
     s = _PASSWORD_DISABLE.sub("PASSWORD NULL", s)
