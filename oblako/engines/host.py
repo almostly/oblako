@@ -38,6 +38,8 @@ ENGINES: dict[str, tuple[str, int]] = {
     "dynamodb-vectors": ("dynamodb_vectors", ports.DYNAMODB_VECTORS),
     "redshift-data": ("redshift_data", ports.REDSHIFT_DATA),
     "rds-data": ("rds_data", ports.RDS_DATA),
+    # per-instance PostgreSQL behind the RDS API; `oblako up rds` starts it
+    "rds-control": ("rds_control", ports.RDS_CONTROL),
     "bedrock-runtime": ("bedrock_runtime", ports.BEDROCK_RUNTIME),
     "cloudformation": ("cloudformation", ports.CLOUDFORMATION),
     "ecs-metadata": ("ecs_metadata", ports.ECS_METADATA),

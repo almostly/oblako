@@ -136,8 +136,9 @@ def test_connect_and_crud_with_psycopg3(cursor):
 
 
 # -- seed helper -----------------------------------------------------------
-def test_seed_idempotent(rds):
-    svc = RdsService()  # control plane only (moto); no engine container needed
+def test_seed_idempotent():
+    svc = RdsService()  # through the rds-control proxy: seed-inst gets a container
+    rds = svc.get_client()  # so cleanup removes it too
     spec = dict(
         instances=[
             {

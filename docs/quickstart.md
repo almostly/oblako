@@ -63,15 +63,16 @@ oblako down stepfunctions   # stop one service
 Service names: `bedrock`, `opensearch`, `redshift`, `rds`, `moto`, `s3`,
 `dynamodb`, `kinesis`, `stepfunctions`, `iceberg` (the Iceberg REST catalog) and
 `trino` (Athena's engine; it also starts the Glue engine). `ollama` aliases
-`bedrock`; `aurora` aliases `rds`. A bare `oblako up` starts all of these except
-`iceberg` and `trino`.
+`bedrock`; `aurora` aliases `rds` (it also starts the RDS API on :8014, which
+runs a PostgreSQL container per DB instance). A bare `oblako up` starts all of
+these except `iceberg` and `trino`.
 
 The API engines that oblako runs in Python rather than in a container start the
 same way, each on its canonical port, so plain boto3 or the AWS CLI can reach
 them without any oblako code in the client: `s3vectors`, `s3tables`, `athena`,
 `firehose`, `eventbridge`, `appconfig`, `sagemaker`, `glue`,
-`dynamodb-vectors`, `redshift-data`, `rds-data`, `bedrock-runtime`,
-`cloudformation`, `ecs-metadata`.
+`dynamodb-vectors`, `redshift-data`, `rds-data`, `rds-control`,
+`bedrock-runtime`, `cloudformation`, `ecs-metadata`.
 
 ```bash
 oblako up s3vectors         # S3 Vectors on :8012, in the background

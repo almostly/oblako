@@ -1,25 +1,27 @@
 """RDS / Aurora service: local Amazon RDS & Aurora.
 
-Same pattern as Redshift — moto for the control plane + a real engine for the
-data plane:
-  * engine: a real PostgreSQL (default) or MySQL container (the actual database).
-  * ``get_client()``: boto3 ``rds`` control plane (via moto) — create/describe
-    **RDS instances** (`create_db_instance`) *and* **Aurora clusters**
-    (`create_db_cluster`); returns endpoints, reader endpoints, members.
+Same pattern as Redshift: an RDS control plane plus real engines for the data
+plane.
+  * engine: a real PostgreSQL (default) or MySQL container, the shared database
+    behind Aurora clusters and instances that oblako doesn't run on their own.
+  * ``get_client()``: boto3 ``rds`` through the rds-control proxy over moto.
+    Create/describe **RDS instances** and **Aurora clusters**; each standalone
+    PostgreSQL instance runs in its own container, with streaming read replicas
+    and parameter-group ``wal_level`` (see ``oblako.engines.rds_control``).
   * ``connect()``: a DB connection straight to the engine (psycopg2 / pymysql).
   * ``seed()``: re-create cluster/instance metadata (moto is in-memory) after a
     restart, idempotently.
 
-The control-plane cluster/instance objects are moto metadata pointing at the one
-local engine — real SQL behavior, simulated topology.
+Aurora cluster objects are moto metadata pointing at the one local engine: real
+SQL behavior, simulated topology.
 """
 
 import importlib
 from typing import TypedDict
 
-from oblako import ports
-from oblako import config
-from .base import Service, PortMapping
+from oblako import config, ports
+
+from .base import PortMapping, Service
 
 # PostgreSQL 16 with pgvector, as RDS and Aurora PostgreSQL offer it
 # (CREATE EXTENSION vector): pgvector 0.8.7 on postgres:16, pinned by digest
@@ -68,7 +70,7 @@ class RdsService(Service):
         user: str = "oblako",
         password: str = "oblako",
         database: str = "oblako",
-        control_port: int = ports.MOTO,
+        control_port: int = ports.RDS_CONTROL,
         data_port: int = ports.RDS_DATA,
         region: str | None = None,
     ):
@@ -135,10 +137,22 @@ class RdsService(Service):
             dbname=self.database,
         )
 
+    def start(self) -> None:
+        """Start the engine, then the RDS control plane that runs one per DB instance."""
+        from oblako.engines import host
+
+        super().start()
+        if self.control_port == ports.RDS_CONTROL:
+            host.start("rds-control")
+
     def get_client(self):
-        """boto3 ``rds`` control-plane client (RDS instances + Aurora clusters, via moto)."""
+        """boto3 ``rds`` control-plane client (RDS instances + Aurora clusters)."""
         from . import boto
 
+        if self.control_port == ports.RDS_CONTROL:
+            from oblako.engines import rds_control
+
+            rds_control.start_in_thread(self.control_port)
         return boto.client(
             "rds",
             f"http://localhost:{self.control_port}",
@@ -154,7 +168,7 @@ class RdsService(Service):
         try:
             fn(**kwargs)
             return True
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             if "AlreadyExists" in type(e).__name__:
                 return False
             raise
@@ -206,6 +220,7 @@ class RdsService(Service):
     def get_data_client(self, autostart: bool = True):
         """boto3 ``rds-data`` client executing real SQL against the engine."""
         from oblako.engines import rds_data
+
         from . import boto
 
         if autostart and not rds_data.is_running(self.data_port):
