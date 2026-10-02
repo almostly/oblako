@@ -166,3 +166,26 @@ def test_workgroup_api(tmp_path):
         "StartQueryExecution", {"QueryString": "SELECT 1", "WorkGroup": "etl"}
     )
     assert status == 400 and "No output location" in body["message"]
+
+
+def test_s3tables_catalog_resolves_to_iceberg():
+    from oblako.engines.athena import catalogs
+
+    assert catalogs.resolve(None, "shop") == ("awsdatacatalog", "shop")
+    assert catalogs.resolve("AwsDataCatalog", "shop") == ("awsdatacatalog", "shop")
+    assert catalogs.resolve("s3tablescatalog/Analytics", "Web") == (
+        "iceberg",
+        "analytics.web",
+    )
+    assert catalogs.resolve("s3tablescatalog/analytics", None) == ("iceberg", None)
+
+
+def test_s3tables_qualified_names_are_rewritten():
+    from oblako.engines.athena import catalogs
+
+    sql = 'SELECT * FROM "s3tablescatalog/analytics"."web"."page_views" JOIN "s3tablescatalog/analytics".web.x ON true'
+    assert catalogs.rewrite(sql) == (
+        'SELECT * FROM iceberg."analytics.web"."page_views" '
+        'JOIN iceberg."analytics.web".x ON true'
+    )
+    assert catalogs.rewrite("SELECT 1") == "SELECT 1"

@@ -24,12 +24,15 @@ from .base import Service, PortMapping
 
 TRINO_CATALOG_DIR = Path.home() / ".oblako" / "trino" / "catalog"
 
+# Nested namespaces on: an S3 Tables table bucket is the first level of a two-level
+# namespace [bucket, namespace], which Trino then shows as the schema "bucket.namespace".
 _ICEBERG_PROPERTIES = """\
 connector.name=iceberg
 iceberg.catalog.type=rest
 iceberg.rest-catalog.uri=http://host.docker.internal:8181
 iceberg.rest-catalog.warehouse=s3://oblako-iceberg/
 iceberg.rest-catalog.security=NONE
+iceberg.rest-catalog.nested-namespace-enabled=true
 fs.native-s3.enabled=true
 s3.endpoint=http://host.docker.internal:9000
 s3.region=us-east-1
