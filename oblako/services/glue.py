@@ -14,7 +14,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from oblako import config
+from oblako import config, ports
 
 IMAGE_TAG = "amazon/aws-glue-libs:5"
 
@@ -34,6 +34,14 @@ _SPARK_CONFS = (
     # which the interceptor can't cleanly fix up — its response carries a body),
     # so marker deletes go through the DELETE-500 -> 204 path above.
     "spark.hadoop.fs.s3a.multiobjectdelete.enable=false",
+    # s3:// and s3a:// both go to oblako's S3 (on AWS Glue, s3:// is EMRFS), so a
+    # job script reads and writes plain s3:// paths with no endpoint of its own
+    "spark.hadoop.fs.s3.impl=org.apache.hadoop.fs.s3a.S3AFileSystem",
+    "spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem",
+    f"spark.hadoop.fs.s3a.endpoint=http://host.docker.internal:{ports.S3}",
+    "spark.hadoop.fs.s3a.endpoint.region=us-east-1",
+    "spark.hadoop.fs.s3a.path.style.access=true",
+    "spark.hadoop.fs.s3a.connection.ssl.enabled=false",
 )
 
 
@@ -121,7 +129,11 @@ class GlueService:
         env: dict[str, str] | None = None,
         timeout: int = 1200,
     ) -> dict:
-        """Run a PySpark script in a Glue 5 container; return ``{exit_code, logs}``.
+        """Run a PySpark script in a Glue 5 container.
+
+        Returns ``{exit_code, logs, stdout, stderr}``: ``logs`` is both streams
+        together, and the split matches Glue's two CloudWatch log groups (the
+        script's own output in ``/aws-glue/jobs/output``, Spark's in ``/error``).
 
         The script is written to a tempdir mounted at ``/scripts/job.py``. The
         container is given creds + endpoints to reach oblako's S3Proxy and Iceberg
@@ -164,7 +176,14 @@ class GlueService:
             try:
                 result = container.wait(timeout=timeout)
                 logs = container.logs().decode("utf-8", errors="replace")
-                return {"exit_code": result["StatusCode"], "logs": logs}
+                stdout = container.logs(stdout=True, stderr=False)
+                stderr = container.logs(stdout=False, stderr=True)
+                return {
+                    "exit_code": result["StatusCode"],
+                    "logs": logs,
+                    "stdout": stdout.decode("utf-8", errors="replace"),
+                    "stderr": stderr.decode("utf-8", errors="replace"),
+                }
             finally:
                 container.remove(force=True)
 

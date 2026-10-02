@@ -23,6 +23,7 @@ servers (cloudformation, bedrock_runtime, lambda_shim).
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -654,6 +655,8 @@ async def _health(_request: Request) -> JSONResponse:
 
 def create_app() -> Starlette:
     """Build the Starlette ASGI app implementing the Glue Data Catalog wire protocol."""
+    # the job actions (CreateJob, StartJobRun, ...) register themselves on import
+    importlib.import_module("oblako.engines.glue_catalog.jobs")
     return Starlette(
         routes=[
             Route("/", _health, methods=["GET"]),
