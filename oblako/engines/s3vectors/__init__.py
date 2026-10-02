@@ -29,7 +29,7 @@ import math
 import threading
 import time
 
-from oblako import ports
+from oblako import config, ports
 from oblako.engines.identity import claim_port, identify, is_engine
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -37,8 +37,6 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 DEFAULT_PORT = ports.S3_VECTORS
-_ACCOUNT = "000000000000"
-_REGION = "us-east-1"
 
 # ---------------------------------------------------------------------------
 # In-memory store
@@ -62,11 +60,11 @@ def reset() -> None:
 # ARNs
 # ---------------------------------------------------------------------------
 def _bucket_arn(name: str) -> str:
-    return f"arn:aws:s3vectors:{_REGION}:{_ACCOUNT}:bucket/{name}"
+    return f"arn:aws:s3vectors:{config.region()}:{config.account_id()}:bucket/{name}"
 
 
 def _index_arn(bucket: str, index: str) -> str:
-    return f"arn:aws:s3vectors:{_REGION}:{_ACCOUNT}:bucket/{bucket}/index/{index}"
+    return f"arn:aws:s3vectors:{config.region()}:{config.account_id()}:bucket/{bucket}/index/{index}"
 
 
 def _parse_index_arn(arn: str) -> tuple[str, str] | None:
@@ -245,7 +243,7 @@ def op_GetIndex(p: dict) -> Response:
     ref = _resolve_index(p)
     with _lock:
         idx = _INDEXES.get(ref) if ref else None
-        if not idx:
+        if ref is None or not idx:
             return _err("NotFoundException", "no such index", 404)
         return _ok(
             {
