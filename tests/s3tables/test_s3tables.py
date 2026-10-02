@@ -280,3 +280,26 @@ def test_pyiceberg_through_the_s3tables_endpoint(client, monkeypatch):
     finally:
         catalog.drop_table("web.page_views")
         client.delete_namespace(tableBucketARN=arn, namespace="web")
+
+
+@pytestmark_integration
+def test_table_buckets_live_in_the_catalog(client):
+    """Buckets are listed from the catalog (so a restart keeps them), and only marked ones."""
+    bucket = "lake" + uuid.uuid4().hex[:8]
+    other = "gluedb" + uuid.uuid4().hex[:8]
+    client.create_table_bucket(name=bucket)
+    # a top-level namespace that is not a table bucket, as a Glue database is
+    httpx.post(f"{s3tables._iceberg_url()}/v1/namespaces", json={"namespace": [other]})
+    try:
+        names = [b["name"] for b in client.list_table_buckets()["tableBuckets"]]
+        assert bucket in names and other not in names
+        # nothing in the engine's memory: a fresh lookup reads the catalog
+        assert (
+            client.get_table_bucket(tableBucketARN=s3tables._bucket_arn(bucket))["name"]
+            == bucket
+        )
+    finally:
+        client.delete_table_bucket(tableBucketARN=s3tables._bucket_arn(bucket))
+        httpx.delete(f"{s3tables._iceberg_url()}/v1/namespaces/{other}")
+    names = [b["name"] for b in client.list_table_buckets()["tableBuckets"]]
+    assert bucket not in names

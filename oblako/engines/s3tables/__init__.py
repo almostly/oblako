@@ -50,14 +50,11 @@ from oblako.engines.s3tables import iceberg
 DEFAULT_PORT = ports.S3_TABLES
 _UNIT = "\x1f"  # Iceberg REST joins multi-level namespaces with the unit separator
 
-_BUCKETS: dict[str, dict] = {}  # name -> {"arn", "createdAt"}
+# A table bucket is a top-level Iceberg namespace carrying this property, so the
+# bucket list lives in the catalog with the tables and survives engine restarts
+# (other top-level namespaces, such as Glue databases, don't have it).
+_BUCKET_MARK = "oblako.s3tables.created-at"
 _lock = threading.RLock()
-
-
-def reset() -> None:
-    """Drop the table-bucket registry (used by tests; Iceberg state is separate)."""
-    with _lock:
-        _BUCKETS.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -137,54 +134,78 @@ def _err(code: str, message: str, status: int = 400) -> Response:
 # ---------------------------------------------------------------------------
 # Operations
 # ---------------------------------------------------------------------------
+def _bucket_record(name: str) -> dict | None:
+    """Return {"arn", "createdAt"} if ``name`` is a table bucket, else None."""
+    r = _ice("GET", f"/v1/namespaces/{urllib.parse.quote(name, safe='')}")
+    if r.status_code >= 400:
+        return None
+    created = (r.json().get("properties") or {}).get(_BUCKET_MARK)
+    if created is None:
+        return None
+    return {"arn": _bucket_arn(name), "createdAt": float(created)}
+
+
 def create_table_bucket(body: dict) -> Response:
-    """Handle CreateTableBucket: register a table bucket (an Iceberg namespace root)."""
+    """Handle CreateTableBucket: a top-level Iceberg namespace, marked as a bucket."""
     name = body["name"]
     with _lock:
-        _BUCKETS.setdefault(name, {"arn": _bucket_arn(name), "createdAt": time.time()})
-    # a table bucket is the parent Iceberg namespace [bucket]; create it (ignore conflict)
-    _ice("POST", "/v1/namespaces", json={"namespace": [name]})
+        if _bucket_record(name) is None:
+            mark = {_BUCKET_MARK: str(time.time())}
+            r = _ice(
+                "POST", "/v1/namespaces", json={"namespace": [name], "properties": mark}
+            )
+            if r.status_code == 409:  # the namespace exists unmarked: mark it
+                _ice(
+                    "POST",
+                    f"/v1/namespaces/{urllib.parse.quote(name, safe='')}/properties",
+                    json={"updates": mark},
+                )
     return _ok({"arn": _bucket_arn(name)})
 
 
 def list_table_buckets(_body: dict, _segs, query) -> Response:
     """ListTableBuckets, filtered by the optional prefix."""
     prefix = query.get("prefix", "")
-    with _lock:
-        buckets = [
-            {
-                "arn": b["arn"],
-                "name": n,
-                "createdAt": b["createdAt"],
-                "ownerAccountId": config.account_id(),
-            }
-            for n, b in _BUCKETS.items()
-            if n.startswith(prefix)
-        ]
+    r = _ice("GET", "/v1/namespaces")
+    tops = r.json().get("namespaces", []) if r.status_code < 400 else []
+    buckets = []
+    for levels in tops:
+        if len(levels) != 1 or not levels[0].startswith(prefix):
+            continue
+        record = _bucket_record(levels[0])
+        if record:
+            buckets.append(
+                {
+                    "arn": record["arn"],
+                    "name": levels[0],
+                    "createdAt": record["createdAt"],
+                    "ownerAccountId": config.account_id(),
+                }
+            )
     return _ok({"tableBuckets": buckets})
 
 
 def get_table_bucket(arn: str) -> Response:
     """Handle GetTableBucket by ARN (or bare name)."""
     name = _bucket_of(arn)
-    with _lock:
-        b = _BUCKETS.get(name)
-    if not b:
+    record = _bucket_record(name)
+    if not record:
         return _err("NotFoundException", f"no table bucket {name}", 404)
     return _ok(
         {
-            "arn": b["arn"],
+            "arn": record["arn"],
             "name": name,
             "ownerAccountId": config.account_id(),
-            "createdAt": b["createdAt"],
+            "createdAt": record["createdAt"],
         }
     )
 
 
 def delete_table_bucket(arn: str) -> Response:
-    """Handle DeleteTableBucket: forget the bucket (idempotent)."""
-    with _lock:
-        _BUCKETS.pop(_bucket_of(arn), None)
+    """Handle DeleteTableBucket: unmark the bucket and drop it if empty (idempotent)."""
+    name = urllib.parse.quote(_bucket_of(arn), safe="")
+    _ice("POST", f"/v1/namespaces/{name}/properties", json={"removals": [_BUCKET_MARK]})
+    _ice("DELETE", f"/v1/namespaces/{name}")  # refused by the catalog unless empty
     return _ok()
 
 
