@@ -69,6 +69,10 @@ ENDPOINTS = {
     # `mlflow.set_tracking_uri(arn)` reaches the local MLflow container (no
     # SageMaker control plane needed). Faithful to the real ARN-based flow.
     "SAGEMAKER_MLFLOW_CUSTOM_ENDPOINT": _local(ports.MLFLOW),
+    # PyIceberg reads catalog settings from PYICEBERG_CATALOG__<NAME>__<KEY>, so a
+    # catalog named "s3tables", configured as for AWS (warehouse = table bucket
+    # ARN, SigV4), finds oblako's S3 Tables Iceberg endpoint without a uri in code.
+    "PYICEBERG_CATALOG__S3TABLES__URI": _local(ports.S3_TABLES) + "/iceberg",
 }
 
 _AWS_CONFIG = (
