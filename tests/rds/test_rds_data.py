@@ -8,6 +8,7 @@ directly) and supports transactions.
 """
 
 import json
+import os
 
 import boto3
 import pytest
@@ -29,7 +30,11 @@ TX_ARN = {k: ARN[k] for k in ("resourceArn", "secretArn", "database")}
 @pytest.fixture(scope="module")
 def data():
     executor = RdsDataExecutor(
-        host="localhost", port=5432, user="oblako", password="oblako", database="oblako"
+        host="localhost",
+        port=int(os.environ.get("OBLAKO_TEST_RDS_PORT", "5432")),
+        user="oblako",
+        password="oblako",
+        database="oblako",
     )
     url = start_in_thread(port=8018, executor=executor)
     return boto3.client("rds-data", endpoint_url=url, **CREDS)
@@ -189,3 +194,25 @@ def test_batch_execute(data, table):
     assert len(r["updateResults"]) == 2
     r = data.execute_statement(sql="SELECT count(*) FROM rdsd_test", **ARN)
     assert r["records"] == [[{"longValue": 2}]]
+
+
+def test_decimal_is_a_string_by_default(data):
+    sql = "SELECT 13.20::numeric(10, 2) AS price, 7 AS n"
+    r = data.execute_statement(sql=sql, formatRecordsAs="JSON", **ARN)
+    assert json.loads(r["formattedRecords"]) == [{"price": "13.20", "n": 7}]
+    r = data.execute_statement(sql=sql, **ARN)
+    assert r["records"][0] == [{"stringValue": "13.20"}, {"longValue": 7}]
+
+
+def test_result_set_options(data):
+    sql = "SELECT 13.20::numeric(10, 2) AS price, 4.00::numeric AS whole, 7 AS n"
+    r = data.execute_statement(
+        sql=sql,
+        formatRecordsAs="JSON",
+        resultSetOptions={
+            "decimalReturnType": "DOUBLE_OR_LONG",
+            "longReturnType": "STRING",
+        },
+        **ARN,
+    )
+    assert json.loads(r["formattedRecords"]) == [{"price": 13.2, "whole": 4, "n": "7"}]

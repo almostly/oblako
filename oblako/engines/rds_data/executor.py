@@ -12,10 +12,12 @@ from __future__ import annotations
 import base64
 import datetime
 import decimal
+import importlib
 import json
 import re
 import threading
 import uuid
+from typing import Any
 
 from oblako.engines.redshift_data.executor import RedshiftDataExecutor
 
@@ -23,12 +25,32 @@ _encode_field = RedshiftDataExecutor._encode_field  # generic PG/py value -> Fie
 _NAMED_PARAM = re.compile(r"(?<!:):([a-zA-Z_][a-zA-Z0-9_]*)")
 
 
+def _decimal_as_number(value: decimal.Decimal) -> int | float:
+    """Return a DECIMAL as a long when it is whole, else a double (DOUBLE_OR_LONG)."""
+    return int(value) if value == value.to_integral_value() else float(value)
+
+
+def _apply_options(value, options: dict):
+    """Apply resultSetOptions to one value, as the Data API does.
+
+    DECIMAL comes back as a string unless ``decimalReturnType`` is
+    ``DOUBLE_OR_LONG``; integers come back as numbers unless ``longReturnType`` is
+    ``STRING``.
+    """
+    if isinstance(value, decimal.Decimal):
+        if options.get("decimalReturnType") == "DOUBLE_OR_LONG":
+            return _decimal_as_number(value)
+        return str(value)
+    if isinstance(value, int) and not isinstance(value, bool):
+        if options.get("longReturnType") == "STRING":
+            return str(value)
+    return value
+
+
 def _json_safe(value):
-    """Plain JSON value for formattedRecords."""
+    """Plain JSON value for formattedRecords (after resultSetOptions)."""
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
-    if isinstance(value, decimal.Decimal):
-        return float(value)
     if isinstance(value, (bytes, memoryview)):
         return base64.b64encode(bytes(value)).decode("ascii")
     if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
@@ -69,7 +91,8 @@ class RdsDataExecutor:
         db = database or self.database
         if self.engine == "mysql":
             try:
-                import pymysql
+                # optional extra (oblako[mysql]), imported only for the MySQL engine
+                pymysql = importlib.import_module("pymysql")
             except ImportError as e:
                 raise ImportError(
                     "rds-data over MySQL needs pymysql: pip install 'oblako[mysql]'"
@@ -95,6 +118,15 @@ class RdsDataExecutor:
         conn.autocommit = autocommit  # psycopg2: attribute
         return conn
 
+    def _conn_for(self, transaction_id, database=None) -> tuple[Any, bool]:
+        """Return (connection, temporary): the transaction's own, or a fresh one."""
+        if transaction_id:
+            conn = self._txns.get(transaction_id)
+            if conn is None:
+                raise ValueError(f"Transaction {transaction_id} is not found")
+            return conn, False
+        return self._connect(database), True
+
     def _pg_types(self, conn) -> dict[int, str]:
         if self._pg_type_cache is None:
             with conn.cursor() as cur:
@@ -104,7 +136,7 @@ class RdsDataExecutor:
 
     def _mysql_types(self) -> dict[int, str]:
         if self._mysql_type_cache is None:
-            from pymysql.constants import FIELD_TYPE
+            FIELD_TYPE = importlib.import_module("pymysql.constants").FIELD_TYPE
 
             self._mysql_type_cache = {
                 v: k
@@ -165,23 +197,21 @@ class RdsDataExecutor:
         transaction_id=None,
         include_result_metadata=False,
         format_records_as=None,
+        result_set_options=None,
     ) -> dict:
         """Execute a SQL statement and return the result dict."""
         bound, params = self._bind(sql, parameters)
-        if transaction_id:
-            conn = self._txns.get(transaction_id)
-            if conn is None:
-                raise ValueError(f"Transaction {transaction_id} is not found")
-            temp = False
-        else:
-            conn = self._connect(database)
-            temp = True
+        conn, temp = self._conn_for(transaction_id, database)
         try:
             with conn.cursor() as cur:
                 cur.execute(bound, params)
                 out: dict = {"numberOfRecordsUpdated": 0, "generatedFields": []}
                 if cur.description:
-                    rows = cur.fetchall()
+                    options = result_set_options or {}
+                    rows = [
+                        [_apply_options(v, options) for v in row]
+                        for row in cur.fetchall()
+                    ]
                     if format_records_as == "JSON":
                         cols = [c[0] for c in cur.description]
                         out["formattedRecords"] = json.dumps(
@@ -208,14 +238,7 @@ class RdsDataExecutor:
     def batch(self, sql, parameter_sets=None, transaction_id=None) -> list[dict]:
         """Execute a parameterised statement once per parameter set and return update results."""
         sets = parameter_sets if parameter_sets else [None]
-        if transaction_id:
-            conn = self._txns.get(transaction_id)
-            if conn is None:
-                raise ValueError(f"Transaction {transaction_id} is not found")
-            temp = False
-        else:
-            conn = self._connect()
-            temp = True
+        conn, temp = self._conn_for(transaction_id)
         try:
             with conn.cursor() as cur:
                 results = []
