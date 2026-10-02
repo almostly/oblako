@@ -9,7 +9,16 @@ from __future__ import annotations
 
 from oblako import ports
 from .base import Service, PortMapping
-from .boto import BotoService
+from .boto import BotoService, client
+
+# Pinned by digest: the image's entrypoint changed on 2026-09-28 (it now passes
+# --port/--path/--shardLimit itself, read from env vars), and an argument override
+# written for the old one crashed kinesalite. A pin keeps the next rebuild from
+# changing behaviour under us.
+KINESIS_IMAGE = (
+    "saidsef/aws-kinesis-local"
+    "@sha256:a1f2be9d4356a024113bf199a0d1a352fa0d10420f35ab2f52a5d08f5920b8c9"
+)
 
 
 @BotoService("kinesis")
@@ -20,17 +29,14 @@ class KinesisService(Service):
         """Initialize on host_port (4567 default) with a configurable shard limit."""
         super().__init__(
             name="kinesis",
-            image="saidsef/aws-kinesis-local:latest",
+            image=KINESIS_IMAGE,
             ports=[PortMapping(container_port=4567, host_port=host_port)],
-            # The image's CMD is shell-mangled; override with a clean args list.
-            command=[
-                "--port",
-                "4567",
-                "--path",
-                "/data",
-                "--shardLimit",
-                str(shard_limit),
-            ],
+            # The entrypoint builds kinesalite's arguments from these variables.
+            environment={
+                "PORT": "4567",
+                "KPATH": "/data",
+                "SHARDLIMIT": str(shard_limit),
+            },
             volumes={"oblako-kinesis-data": {"bind": "/data", "mode": "rw"}},
         )
         self.host_port = host_port
@@ -42,7 +48,7 @@ class KinesisService(Service):
 
     def _health_check(self) -> bool:
         try:
-            self.get_client().list_streams(Limit=1)
+            client("kinesis", self.endpoint_url).list_streams(Limit=1)
             return True
-        except Exception:  # noqa: BLE001
+        except Exception:
             return False

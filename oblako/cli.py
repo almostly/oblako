@@ -297,7 +297,7 @@ def cmd_trust(args):
 
     try:
         print(RedshiftService().trust_cert(python_exe=args.python))
-    except Exception as e:  # noqa: BLE001 - surface a clear message, not a trace
+    except Exception as e:  # surface a clear message, not a trace
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
     print(
@@ -321,6 +321,7 @@ def _get_service(oblako: Oblako, name: str):
         "moto": oblako.moto,
         "s3": oblako.s3,
         "dynamodb": oblako.dynamodb,
+        "kinesis": oblako.kinesis,
         "stepfunctions": oblako.stepfunctions,
         "iceberg": oblako.iceberg,  # the Iceberg REST catalog (S3 Tables, Glue)
         "trino": oblako.trino,  # Athena's engine; starts the Glue engine too

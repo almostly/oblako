@@ -43,7 +43,7 @@ S3_EXT = 8020  # S3 tagging + Inventory (S3Proxy lacks them), reached through :9
 
 # Engines / data plane
 OLLAMA = 11434  # Bedrock runtime is backed by Ollama
-REDSHIFT_PG = 5439  # oblako/redshift engine (redshift-connector + psycopg2, no proxy)
+REDSHIFT_PG = 5439  # redshift image: wire proxy in front of PostgreSQL
 RDS_PG = 5432
 RDS_MYSQL = 3306
 TRINO = 8485  # Athena equivalent
