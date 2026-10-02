@@ -5,6 +5,7 @@ Requires the Bedrock/Ollama engine up with at least one model:
 """
 
 import json
+import socket
 
 import boto3
 import pytest
@@ -30,7 +31,11 @@ def model():
 
 @pytest.fixture(scope="module")
 def bedrock():
-    url = start_in_thread(port=8014)
+    # a free port, so the test never collides with a canonical oblako port
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    url = start_in_thread(port=port)
     return boto3.client("bedrock-runtime", endpoint_url=url, **CREDS)
 
 

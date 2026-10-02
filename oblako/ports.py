@@ -39,6 +39,7 @@ EVENTBRIDGE = 8010  # eventbridge proxy over moto that actually fires rule targe
 ECS_METADATA = 8011  # ECS task metadata endpoint (ECS_CONTAINER_METADATA_URI) for tasks
 S3_VECTORS = 8012  # S3 Vectors: vector buckets + indexes + k-NN QueryVectors
 S3_TABLES = 8013  # S3 Tables: control plane over the Iceberg REST catalog
+RDS_CONTROL = 8014  # RDS API over moto, a real PostgreSQL per DB instance
 S3_EXT = 8020  # S3 tagging + Inventory (S3Proxy lacks them), reached through :9000
 
 # Engines / data plane

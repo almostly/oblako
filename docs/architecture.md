@@ -32,7 +32,8 @@ oblako prefers running the real thing over emulating it:
 - **DynamoDB** → Amazon's DynamoDB Local
 - **Redshift** → a PostgreSQL 16 image that *impersonates* Redshift (accepts
   `redshift-connector` natively, reports `server_version 8.0.2`)
-- **RDS / Aurora** → a real PostgreSQL engine behind moto's control plane
+- **RDS / Aurora** → real PostgreSQL: one container per standalone DB instance
+  (read replicas are streaming standbys), behind an RDS API proxy over moto
 - **Step Functions** → Amazon's `aws-stepfunctions-local`
 - **Bedrock** → Ollama (or OpenRouter for real frontier models)
 - **SageMaker** → oblako's own engine, running jobs and endpoints in real Docker
