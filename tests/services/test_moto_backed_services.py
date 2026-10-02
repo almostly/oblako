@@ -86,13 +86,16 @@ def test_cloudwatch_logs(moto_endpoint):
     logs = _client("logs", moto_endpoint)
     group = f"/oblako/svc-{uuid.uuid4().hex[:8]}"
     logs.create_log_group(logGroupName=group)
-    names = [g["logGroupName"] for g in logs.describe_log_groups()["logGroups"]]
-    assert group in names
+    # filter by prefix: describe_log_groups pages, and a long-lived moto holds many groups
+    found = logs.describe_log_groups(logGroupNamePrefix=group)["logGroups"]
+    assert [g["logGroupName"] for g in found] == [group]
 
 
 def test_ecr_repository(moto_endpoint):
     ecr = _client("ecr", moto_endpoint)
-    repo = ecr.create_repository(repositoryName=f"oblako/img-{uuid.uuid4().hex[:8]}")["repository"]
+    repo = ecr.create_repository(repositoryName=f"oblako/img-{uuid.uuid4().hex[:8]}")[
+        "repository"
+    ]
     assert repo["repositoryUri"]
 
 

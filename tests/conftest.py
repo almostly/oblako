@@ -49,6 +49,7 @@ _INTEGRATION_FILES = {
     "tests/services/test_kinesis_streams.py",
     "tests/services/test_athena.py",
     "tests/services/test_glue_athena.py",
+    "tests/services/test_athena_s3tables.py",
 }
 
 _KUBERNETES_FILES = {

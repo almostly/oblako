@@ -29,12 +29,12 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from . import catalogs
 from .ctas import rewrite, statement_type
 from .workgroups import DEFAULT_OUTPUT, WorkGroupError, WorkGroups
 
 _JSON = "application/x-amz-json-1.1"
 _REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
-_DEFAULT_CATALOG = "awsdatacatalog"  # Trino's Hive-over-Glue catalog
 
 
 def _now() -> datetime.datetime:
@@ -90,7 +90,7 @@ class AthenaExecutor:
         )
         if output.rstrip("/") == DEFAULT_OUTPUT.rstrip("/"):
             _ensure_bucket(output)
-        catalog = (context.get("Catalog") or _DEFAULT_CATALOG).lower()
+        catalog = (context.get("Catalog") or catalogs.DEFAULT_CATALOG).lower()
         record = {
             "QueryExecutionId": query_id,
             "Query": req["QueryString"],
@@ -121,21 +121,20 @@ class AthenaExecutor:
             from oblako.services.trino import TrinoService
 
             trino = TrinoService()
-            sql, catalog, session = record["Query"], record["Catalog"], {}
+            catalog, schema = catalogs.resolve(record["Catalog"], record["Database"])
+            sql, session = catalogs.rewrite(record["Query"]), {}
             ctas = rewrite(sql, record["OutputDir"], query_id)
             if ctas is not None:
                 sql, session = ctas.sql, ctas.session
                 if ctas.iceberg:
                     catalog = "iceberg"
-            result = trino.query(
-                sql, catalog=catalog, schema=record["Database"], session=session
-            )
+            result = trino.query(sql, catalog=catalog, schema=schema, session=session)
             if "error" in result:
                 message = (result["error"] or {}).get("message", "query failed")
                 raise RuntimeError(message)
             if ctas is not None:
                 record["DataManifestLocation"] = self._write_manifest(
-                    trino, record, ctas.table, catalog
+                    trino, record, ctas.table, catalog, schema
                 )
             self._write_csv(record, result["columns"], result["rows"])
             with self._lock:
@@ -156,12 +155,14 @@ class AthenaExecutor:
                 )
 
     @staticmethod
-    def _write_manifest(trino, record: dict, table: str, catalog: str) -> str:
+    def _write_manifest(
+        trino, record: dict, table: str, catalog: str, schema: str | None
+    ) -> str:
         """List a CTAS table's data files in ``<id>-manifest.csv``, as Athena does."""
         files = trino.query(
             f'SELECT DISTINCT "$path" FROM {table}',
             catalog=catalog,
-            schema=record["Database"],
+            schema=schema,
         )
         if "error" in files:
             raise RuntimeError(
