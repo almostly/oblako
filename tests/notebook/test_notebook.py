@@ -17,7 +17,8 @@ from oblako.notebook import (
 def test_make_env_wires_endpoints_creds_and_config(tmp_path):
     env = make_env(tmp_path)
     assert env["AWS_ENDPOINT_URL_S3"] == "http://localhost:9000"
-    assert env["AWS_ENDPOINT_URL_DYNAMODB"] == "http://localhost:8001"
+    assert env["AWS_ENDPOINT_URL_DYNAMODB"] == "http://localhost:8007"
+    assert env["AWS_ENDPOINT_URL_DYNAMODB_STREAMS"] == "http://localhost:8001"
     assert env["AWS_ACCESS_KEY_ID"] == "test"
     assert env["AWS_REQUEST_CHECKSUM_CALCULATION"] == "when_required"
     cfg = pathlib.Path(env["AWS_CONFIG_FILE"])
@@ -33,7 +34,8 @@ def test_endpoint_env_vars_redirect_unmodified_boto3(monkeypatch):
     monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
     expected = {
         "s3": "http://localhost:9000",
-        "dynamodb": "http://localhost:8001",
+        "dynamodb": "http://localhost:8007",  # the proxy: vector search, tags
+        "dynamodbstreams": "http://localhost:8001",  # DynamoDB Local itself
         "stepfunctions": "http://localhost:8083",  # serviceId "SFN"
         "cloudformation": "http://localhost:5601",
         "lambda": "http://localhost:5500",

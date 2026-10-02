@@ -2,7 +2,7 @@
 
 from oblako import ports
 from .base import Service, PortMapping
-from .boto import BotoService, resource
+from .boto import BotoService, client, resource
 
 
 @BotoService("dynamodb")
@@ -40,13 +40,18 @@ class DynamoDBService(Service):
         """Return a boto3 DynamoDB resource for higher-level API."""
         return resource("dynamodb", self.endpoint_url)
 
-    def get_vector_client(self):
-        """Return a boto3 dynamodb client with native vector search enabled.
+    def start(self) -> None:
+        """Start DynamoDB Local, then the proxy that adds vector search and tags."""
+        from oblako.engines import host
 
-        Starts DynamoDB Local (if needed) and the oblako vector-search proxy in
-        front of it, and grafts the ``SearchVectors`` / ``VectorIndexes`` API onto
-        the client so an unpatched boto3 can call it. See
-        ``oblako.engines.dynamodb_vectors``.
+        super().start()
+        host.start("dynamodb-vectors")
+
+    def get_vector_client(self):
+        """Return a boto3 dynamodb client for the proxy (vector search, tags).
+
+        Starts DynamoDB Local (if needed) and the oblako proxy in front of it.
+        See ``oblako.engines.dynamodb_vectors``.
         """
         from oblako.engines import dynamodb_vectors
 
@@ -55,8 +60,7 @@ class DynamoDBService(Service):
 
     def _health_check(self) -> bool:
         try:
-            client = self.get_client()
-            client.list_tables()
+            client("dynamodb", self.endpoint_url).list_tables()
             return True
         except Exception:
             return False

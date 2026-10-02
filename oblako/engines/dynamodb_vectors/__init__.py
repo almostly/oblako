@@ -1,20 +1,19 @@
-"""DynamoDB native vector search over DynamoDB Local.
+"""DynamoDB proxy over DynamoDB Local: native vector search and tagging.
 
-AWS added native vector search to DynamoDB (``SearchVectors`` + ``VectorIndexes``);
-DynamoDB Local doesn't implement it, so oblako runs a thin proxy in front that
-captures the vector indexes and serves ``SearchVectors`` as brute-force KNN. A
-client-side model graft (``enable_dynamodb_vectors``) lets an otherwise-unpatched
-boto3 form the new requests:
+AWS's DynamoDB vector search (``VectorIndexes`` on ``CreateTable`` /
+``UpdateTable``, and ``SearchVectors``) is in boto3 from 1.43.64. DynamoDB Local
+doesn't implement it, nor tagging, so oblako runs a proxy in front that does
+(see ``app``). ``oblako up dynamodb`` starts it; point
+``AWS_ENDPOINT_URL_DYNAMODB`` at it and plain boto3 works:
 
     from oblako.engines.dynamodb_vectors import get_client
-    ddb = get_client()  # boto3 dynamodb, vector API enabled, pointed at the proxy
+    ddb = get_client()  # boto3 dynamodb, pointed at the proxy
     ddb.create_table(..., VectorIndexes=[...])
     ddb.search_vectors(TableName=..., IndexName=..., SearchVector=[...], TopK=5)
 """
 
 from __future__ import annotations
 
-import contextlib
 import threading
 import time
 
@@ -22,12 +21,10 @@ from oblako import ports
 from oblako.engines.identity import claim_port, identify, is_engine
 
 from .app import app, create_app
-from .model import enable_dynamodb_vectors
 
 __all__ = [
     "app",
     "create_app",
-    "enable_dynamodb_vectors",
     "start_in_thread",
     "is_running",
     "get_client",
@@ -76,7 +73,7 @@ def start_in_thread(port: int = DEFAULT_PORT, backend_url: str | None = None) ->
 
 
 def get_client(port: int = DEFAULT_PORT, backend_url: str | None = None):
-    """Return a boto3 dynamodb client with the vector API enabled, via the proxy.
+    """Return a boto3 dynamodb client pointed at the proxy (started if needed).
 
     The caller must have DynamoDB Local running (the proxy forwards to it);
     ``DynamoDBService().get_vector_client()`` starts it for you.
@@ -85,17 +82,8 @@ def get_client(port: int = DEFAULT_PORT, backend_url: str | None = None):
 
     import boto3
 
-    data_dir = enable_dynamodb_vectors()
     start_in_thread(port, backend_url)
-    # a fresh Session has its own loader with an empty model cache, so it loads
-    # the augmented dynamodb model even if a plain client was built earlier
-    session = boto3.Session()
-    if data_dir:  # None when a current botocore already ships the real model
-        with contextlib.suppress(Exception):
-            session._session.get_component("data_loader").search_paths.insert(
-                0, data_dir
-            )
-    return session.client(
+    return boto3.client(
         "dynamodb",
         endpoint_url=f"http://localhost:{port}",
         region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),

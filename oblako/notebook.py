@@ -29,7 +29,9 @@ def _local(port: int) -> str:
 # drift from the Service defaults / docker-compose.
 ENDPOINTS = {
     "AWS_ENDPOINT_URL_S3": _local(ports.S3),
-    "AWS_ENDPOINT_URL_DYNAMODB": _local(ports.DYNAMODB),
+    # the proxy adds vector search and tags; Streams talk to DynamoDB Local
+    "AWS_ENDPOINT_URL_DYNAMODB": _local(ports.DYNAMODB_VECTORS),
+    "AWS_ENDPOINT_URL_DYNAMODB_STREAMS": _local(ports.DYNAMODB),
     "AWS_ENDPOINT_URL_CLOUDFORMATION": _local(ports.CLOUDFORMATION),
     "AWS_ENDPOINT_URL_SFN": _local(ports.STEPFUNCTIONS),
     "AWS_ENDPOINT_URL_REDSHIFT": _local(ports.MOTO),
