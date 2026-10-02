@@ -91,7 +91,7 @@ def test_rds_service_defaults():
 
     svc = RdsService()
     assert svc.name == "rds"
-    assert svc.image == "postgres:16"
+    assert svc.image.startswith("pgvector/pgvector@sha256:")  # postgres 16 + pgvector
     assert svc.host_port == 5432
 
 

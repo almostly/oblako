@@ -59,6 +59,7 @@ class RdsDataApp:
                 transaction_id=req.get("transactionId"),
                 include_result_metadata=req.get("includeResultMetadata", False),
                 format_records_as=req.get("formatRecordsAs"),
+                result_set_options=req.get("resultSetOptions"),
             )
         except Exception as e:  # noqa: BLE001 - any driver/SQL error -> BadRequest
             return _error(str(e).strip())
