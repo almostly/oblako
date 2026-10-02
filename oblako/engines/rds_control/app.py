@@ -37,15 +37,17 @@ from . import instances
 
 _NS = "http://rds.amazonaws.com/doc/2014-10-31/"
 _CREDENTIAL = re.compile(r"Credential=[^/]+/\d{8}/([a-z0-9-]+)/")
-_INSTANCE = re.compile(r"<DBInstance>(.*?)</DBInstance>", re.S)
-_ENDPOINT = re.compile(r"<Endpoint>.*?</Endpoint>", re.S)
+_INSTANCE = re.compile(r"<DBInstance>(.*?)</DBInstance>", re.DOTALL)
+_ENDPOINT = re.compile(r"<Endpoint>.*?</Endpoint>", re.DOTALL)
 _STATUS = re.compile(r"<DBInstanceStatus>[^<]*</DBInstanceStatus>")
+_VERSION = re.compile(r"<EngineVersion>[^<]*</EngineVersion>")
 _SOURCE = re.compile(
     r"<ReadReplicaSourceDBInstanceIdentifier>[^<]*</ReadReplicaSourceDBInstanceIdentifier>"
 )
 _REPLICA = re.compile(r"<(ReadReplicaDBInstanceIdentifier|member)>([^<]*)</\1>")
 _REPLICAS = re.compile(
-    r"<ReadReplicaDBInstanceIdentifiers>(.*?)</ReadReplicaDBInstanceIdentifiers>", re.S
+    r"<ReadReplicaDBInstanceIdentifiers>(.*?)</ReadReplicaDBInstanceIdentifiers>",
+    re.DOTALL,
 )
 
 
@@ -92,6 +94,9 @@ def _rewrite_instance(block: str, records: dict[str, dict]) -> str:
             block += endpoint
         status = f"<DBInstanceStatus>{record['status']}</DBInstanceStatus>"
         block = _STATUS.sub(status, block, count=1)
+        if record.get("engine_version"):
+            version = f"<EngineVersion>{record['engine_version']}</EngineVersion>"
+            block = _VERSION.sub(version, block, count=1)
         if record.get("promoted"):
             block = _SOURCE.sub("", block)
 

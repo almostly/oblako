@@ -6,7 +6,7 @@ _RESPONSE = (
     '<DescribeDBInstancesResponse xmlns="http://rds.amazonaws.com/doc/2014-10-31/">'
     "<DescribeDBInstancesResult><DBInstances>"
     "<DBInstance><DBInstanceIdentifier>{a}</DBInstanceIdentifier>"
-    "<DBInstanceStatus>available</DBInstanceStatus>"
+    "<DBInstanceStatus>available</DBInstanceStatus><EngineVersion>16</EngineVersion>"
     "<Endpoint><Address>{a}.aaaaaaaaaa.us-east-1.rds.amazonaws.com</Address>"
     "<Port>5432</Port></Endpoint>"
     "<ReadReplicaDBInstanceIdentifiers>"
@@ -23,7 +23,13 @@ _RESPONSE = (
 
 
 def _record(port, status="available", promoted=False):
-    return {"port": port, "region": "eu-west-1", "status": status, "promoted": promoted}
+    return {
+        "port": port,
+        "region": "eu-west-1",
+        "status": status,
+        "promoted": promoted,
+        "engine_version": "16.13",
+    }
 
 
 def test_rewrite_points_endpoints_at_the_containers():
@@ -33,6 +39,7 @@ def test_rewrite_points_endpoints_at_the_containers():
     assert "<Address>rep.eu-west-1.rds.localhost</Address><Port>50002</Port>" in out
     assert "<DBInstanceStatus>creating</DBInstanceStatus>" in out
     assert "rds.amazonaws.com</Address>" not in out
+    assert "<EngineVersion>16.13</EngineVersion>" in out
     # an unpromoted replica keeps its source, and the source lists it
     assert "<ReadReplicaSourceDBInstanceIdentifier>src<" in out
     assert "<ReadReplicaDBInstanceIdentifier>rep<" in out

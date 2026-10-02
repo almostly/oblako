@@ -297,6 +297,9 @@ def _start(instance_id: str) -> None:
         _run(instance_id, record, **_replica_spec(instance_id, record))
     else:
         _run(instance_id, record, **_primary_spec(instance_id, record))
+    # Report the version the engine really runs, as RDS reports the minor version
+    version = _psql(instance_id, record, "SHOW server_version").split()[0]
+    _update(instance_id, engine_version=version)
 
 
 # ---------------------------------------------------------------------------
