@@ -29,7 +29,7 @@ def glue(tmp_path, monkeypatch):
         failing = "--fail" in (args or [])
         return {
             "exit_code": 1 if failing else 0,
-            "logs": "out\nerr",
+            "logs": "out\nValueError: bad input" if failing else "out",
             "stdout": "out",
             "stderr": "ValueError: bad input" if failing else "",
         }
@@ -105,3 +105,9 @@ def test_unknown_job_and_delete(glue):
     _create(glue)
     assert glue("DeleteJob", {"JobName": "etl"})[1] == {"JobName": "etl"}
     assert glue("ListJobs", {})[1] == {"JobNames": []}
+
+
+def test_error_message_reads_either_stream():
+    logs = "starting\nTraceback (most recent call last):\nKeyError: 'source'\nshutting down"
+    assert jobs._error_message(logs, 1) == "KeyError: 'source'"
+    assert jobs._error_message("nothing useful", 3) == "exit code 3"

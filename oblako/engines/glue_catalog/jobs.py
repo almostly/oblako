@@ -227,8 +227,9 @@ def _read_script(location: str) -> str:
     return s3.get_object(Bucket=bucket, Key=key)["Body"].read().decode()
 
 
-def _error_message(stderr: str, exit_code: int) -> str:
-    lines = [ln for ln in stderr.splitlines() if "Error" in ln or "Exception" in ln]
+def _error_message(logs: str, exit_code: int) -> str:
+    """Pick the run's last error line (a Python traceback may be on either stream)."""
+    lines = [ln for ln in logs.splitlines() if "Error" in ln or "Exception" in ln]
     return (lines[-1].strip() if lines else f"exit code {exit_code}")[:2000]
 
 
@@ -292,7 +293,5 @@ def _execute(name: str, run_id: str, location: str, arguments: dict, timeout: in
         "ExecutionTime": int(time.time() - started),
     }
     if not ok:
-        fields["ErrorMessage"] = _error_message(
-            result.get("stderr", result["logs"]), result["exit_code"]
-        )
+        fields["ErrorMessage"] = _error_message(result["logs"], result["exit_code"])
     _update_run(name, run_id, **fields)

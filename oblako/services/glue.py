@@ -149,6 +149,10 @@ class GlueService:
             # S3Proxy doesn't speak the new flexible checksums.
             "AWS_REQUEST_CHECKSUM_CALCULATION": "when_required",
             "AWS_RESPONSE_CHECKSUM_VALIDATION": "when_required",
+            # the AWS SDKs in the container (Glue's Java SDK v2 for from_catalog /
+            # getSink catalog updates, boto3 in the script) reach oblako, not AWS
+            "AWS_ENDPOINT_URL_GLUE": f"http://host.docker.internal:{ports.GLUE_CATALOG}",
+            "AWS_ENDPOINT_URL_S3": f"http://host.docker.internal:{ports.S3}",
             **(env or {}),
         }
         with tempfile.TemporaryDirectory() as scripts_dir:
