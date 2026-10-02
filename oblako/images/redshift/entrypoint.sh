@@ -31,9 +31,19 @@ if [ "${OBLAKO_SSL:-1}" = "1" ] && [ ! -f "$OBLAKO_SSL_CERT" ]; then
 fi
 
 # Start the proxy once PostgreSQL is accepting connections on the internal port.
+# First bring every database up to date with the redshift_compat AVG aggregates
+# the proxy routes avg() to (initdb.d/11_integer_avg.sql): initdb scripts run only
+# on a fresh volume, and these must also reach databases created before they
+# existed. The script is idempotent.
 (
   until pg_isready -h 127.0.0.1 -p "$OBLAKO_PG_PORT" -q 2>/dev/null; do
     sleep 0.5
+  done
+  for db in $(psql -U "${POSTGRES_USER:-postgres}" -p "$OBLAKO_PG_PORT" -d postgres -Atq \
+      -c "SELECT datname FROM pg_database WHERE datallowconn" 2>/dev/null); do
+    psql -U "${POSTGRES_USER:-postgres}" -p "$OBLAKO_PG_PORT" -d "$db" -q \
+      -f /docker-entrypoint-initdb.d/11_integer_avg.sql >/dev/null 2>&1 \
+      || echo "oblako: could not install the integer AVG overloads in $db"
   done
   exec python3 /usr/local/bin/redshift_proxy.py
 ) &

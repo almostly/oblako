@@ -68,6 +68,8 @@ COPY proxy/super_nav.py /usr/local/bin/super_nav.py
 COPY proxy/listagg.py /usr/local/bin/listagg.py
 # Bare datepart keywords (DATEADD(month, ...)) -> quoted, imported by the proxy.
 COPY proxy/datepart.py /usr/local/bin/datepart.py
+# AVG(...) -> redshift_compat.avg(...) (Redshift's BIGINT result for integers).
+COPY proxy/integer_avg.py /usr/local/bin/integer_avg.py
 # Redshift ML: CREATE/SHOW/DROP MODEL rewriting (proxy), the plpython3u entry
 # points (initdb.d/09_redshift_ml.sql) and the training agent, plus the training
 # image's build context the agent builds on first use.
