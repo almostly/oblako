@@ -35,9 +35,11 @@ class Oblako:
         self.bedrock = BedrockService()
         self.ollama = self.bedrock  # backwards-compatible alias (engine is Ollama)
         self.opensearch = OpenSearchService()
-        # Redshift = oblako's own PostgreSQL-16 image impersonating Redshift, so
-        # redshift-connector (dbt-redshift) connects natively — no wire proxy.
-        # See services/redshift.py + oblako/images/redshift.
+        # Redshift = oblako's own PostgreSQL-16 image impersonating Redshift. A wire
+        # proxy bundled in the image (on 5439, in front of PostgreSQL) rewrites
+        # Redshift-only SQL, terminates TLS and bridges COPY/UNLOAD to S3, so
+        # redshift-connector (dbt-redshift) connects natively. See
+        # services/redshift.py + oblako/images/redshift/proxy.
         self.redshift = RedshiftService()
         self.rds = RdsService()
         self.aurora = self.rds  # Aurora shares the rds control plane + engine
@@ -102,6 +104,7 @@ class Oblako:
             self.moto,
             self.s3,
             self.dynamodb,
+            self.kinesis,
             self.stepfunctions,
         ]
 

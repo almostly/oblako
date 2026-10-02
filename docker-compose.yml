@@ -133,6 +133,18 @@ services:
     volumes:
       - dynamodb_data:/home/dynamodblocal/data
 
+  kinesis:
+    # Pinned by digest; see oblako/services/kinesis.py.
+    image: saidsef/aws-kinesis-local@sha256:a1f2be9d4356a024113bf199a0d1a352fa0d10420f35ab2f52a5d08f5920b8c9
+    environment:
+      PORT: "4567"
+      KPATH: /data
+      SHARDLIMIT: "100"
+    ports:
+      - "4567:4567"
+    volumes:
+      - kinesis_data:/data
+
   stepfunctions:
     image: amazon/aws-stepfunctions-local:latest
     ports:
@@ -147,3 +159,4 @@ volumes:
   rds_data:
   s3_data:
   dynamodb_data:
+  kinesis_data:
