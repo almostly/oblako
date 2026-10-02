@@ -3978,6 +3978,9 @@ mysql = [
 notebook = [
     { name = "jupyterlab" },
 ]
+parquet = [
+    { name = "pyarrow" },
+]
 sagemaker = [
     { name = "botocore", extra = ["crt"] },
     { name = "sagemaker" },
@@ -4002,6 +4005,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.1" },
     { name = "psycopg2-binary", specifier = ">=2.9" },
     { name = "pyarrow", marker = "extra == 'dev'", specifier = ">=14" },
+    { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=14" },
     { name = "pyiceberg", extras = ["pyarrow", "s3fs"], marker = "extra == 'iceberg'", specifier = ">=0.7" },
     { name = "pymysql", marker = "extra == 'mysql'", specifier = ">=1.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -4018,7 +4022,7 @@ requires-dist = [
     { name = "syne-tune", marker = "extra == 'sagemaker'", specifier = ">=0.13" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
-provides-extras = ["dev", "agentcore", "mysql", "notebook", "sagemaker", "mlflow", "iceberg", "docs"]
+provides-extras = ["dev", "agentcore", "mysql", "parquet", "notebook", "sagemaker", "mlflow", "iceberg", "docs"]
 
 [[package]]
 name = "omegaconf"

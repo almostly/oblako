@@ -43,6 +43,10 @@ agentcore = [
 mysql = [
     "pymysql>=1.1",
 ]
+parquet = [
+    # Firehose record format conversion (JSON -> Parquet)
+    "pyarrow>=14",
+]
 notebook = [
     "jupyterlab>=4",
 ]
