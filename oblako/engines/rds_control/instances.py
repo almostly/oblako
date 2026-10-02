@@ -103,10 +103,16 @@ def _save(records: dict[str, dict]) -> None:
     tmp.replace(STATE)
 
 
-def _update(instance_id: str, **fields) -> dict:
-    """Merge ``fields`` into the instance's record and return it."""
+def _update(instance_id: str, create: bool = False, **fields) -> dict:
+    """Merge ``fields`` into the instance's record and return it.
+
+    Only ``create`` adds a record: a background step finishing after the instance
+    was deleted must not bring it back.
+    """
     with _lock:
         records = load()
+        if instance_id not in records and not create:
+            return {}
         record = {**records.get(instance_id, {}), **fields}
         records[instance_id] = record
         _save(records)
@@ -317,6 +323,7 @@ def create_primary(
     """Record a new primary instance and start its container in the background."""
     record = _update(
         instance_id,
+        create=True,
         port=_free_port(),
         region=region,
         user=user,
@@ -340,6 +347,7 @@ def create_replica(instance_id: str, source_id: str) -> dict:
         raise KeyError(source_id)
     record = _update(
         instance_id,
+        create=True,
         **{k: source[k] for k in ("user", "password", "database", "region")},
         port=_free_port(),
         role="replica",

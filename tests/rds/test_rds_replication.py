@@ -14,7 +14,7 @@ from oblako.engines import rds_control
 
 PASSWORD = "Secret123"
 GROUP = "pytest-logical"
-IDS = ("pytest-sub", "pytest-rep", "pytest-pub")
+IDS = ("pytest-sub", "pytest-rep", "pytest-pub", "pytest-nobackup")
 
 
 @pytest.fixture(scope="module")
@@ -169,3 +169,18 @@ def test_instance_replica_logical_and_promotion(rds):
     with _connect(rep) as conn:
         assert conn.execute("SELECT pg_is_in_recovery()").fetchone() == (False,)
         conn.execute("INSERT INTO orders VALUES (500, 1)")
+
+
+def test_replica_needs_automated_backups_on_the_source(rds):
+    _create(rds, "pytest-nobackup", BackupRetentionPeriod=0)
+    try:
+        _wait(rds, "pytest-nobackup")
+        with pytest.raises(rds.exceptions.InvalidDBInstanceStateFault):
+            rds.create_db_instance_read_replica(
+                DBInstanceIdentifier="pytest-nobackup-rep",
+                SourceDBInstanceIdentifier="pytest-nobackup",
+            )
+    finally:
+        rds.delete_db_instance(
+            DBInstanceIdentifier="pytest-nobackup", SkipFinalSnapshot=True
+        )

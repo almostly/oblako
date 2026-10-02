@@ -173,20 +173,36 @@ class RdsControlProxy:
                     return str(p.get("ParameterValue", "0")) == "1"
         return False
 
+    def _backup_retention(self, region: str, instance_id: str) -> int:
+        found = self._boto(region).describe_db_instances(
+            DBInstanceIdentifier=instance_id
+        )
+        return found["DBInstances"][0].get("BackupRetentionPeriod", 0)
+
     def _parameter_group(self, region: str, instance_id: str) -> str | None:
         rds = self._boto(region)
         found = rds.describe_db_instances(DBInstanceIdentifier=instance_id)
         groups = found["DBInstances"][0].get("DBParameterGroups", [])
         return groups[0]["DBParameterGroupName"] if groups else None
 
-    def _precheck(self, action: str, form: dict[str, str]) -> Response | None:
-        """Refuse what RDS refuses while an instance isn't available."""
+    def _precheck(
+        self, action: str, form: dict[str, str], region: str
+    ) -> Response | None:
+        """Refuse what RDS refuses: busy instances, replicas of unbacked-up sources."""
         if action == "CreateDBInstanceReadReplica":
-            source = instances.get(form.get("SourceDBInstanceIdentifier", ""))
+            source_id = form.get("SourceDBInstanceIdentifier", "")
+            source = instances.get(source_id)
             if source is not None and source["status"] != "available":
                 return error_response(
                     "InvalidDBInstanceState",
                     f"Source instance is {source['status']}, not available.",
+                )
+            if source is not None and self._backup_retention(region, source_id) == 0:
+                return error_response(
+                    "InvalidDBInstanceState",
+                    "Automated backups are not enabled for this database instance. "
+                    "To enable automated backups, use ModifyDBInstance to set the "
+                    "backup retention period to a non-zero value.",
                 )
         if action in ("RebootDBInstance", "PromoteReadReplica"):
             record = instances.get(form.get("DBInstanceIdentifier", ""))
@@ -230,15 +246,14 @@ class RdsControlProxy:
         body = await request.body()
         form = {k: v[0] for k, v in parse_qs(body.decode(errors="replace")).items()}
         action = form.get("Action", "")
-        refused = self._precheck(action, form)
+        region = region_of(request.headers)
+        refused = await run_in_threadpool(self._precheck, action, form, region)
         if refused is not None:
             return refused
         upstream = await self._forward(request, body)
         if upstream.status_code == 200:
             try:
-                await run_in_threadpool(
-                    self._apply, action, form, region_of(request.headers)
-                )
+                await run_in_threadpool(self._apply, action, form, region)
             except Exception as e:
                 return error_response("InternalFailure", str(e), status=500)
         content = upstream.content
