@@ -46,6 +46,7 @@ This page lists what each one provides and where it diverges from AWS.
 
 | Service | Description | Limitations |
 |---|---|---|
+| **MWAA (Airflow)** | `mwaa` on `http://localhost:8016`: each environment runs AWS's own MWAA Airflow image (PostgreSQL, ElasticMQ, webserver, scheduler, worker); DAGs sync from the S3 source bucket; `InvokeRestApi` reaches Airflow's REST API; tasks reach oblako's services. | The image builds on first use (about 6 minutes). Auth is Airflow's simple auth manager (every user an admin); `CreateCliToken`, `CreateWebLoginToken` and CloudWatch logging are not simulated; capacity and network settings are recorded only. |
 | **Step Functions** | Amazon's `aws-stepfunctions-local`. | Lambda-backed states need a running SAM CLI. |
 | **Lambda** | Control plane + **real Docker-based invocation**. | x86_64 + python3.12 runtime image; SAM CLI for the dev-loop. |
 | **ECS / Fargate** | `ecs` control plane (moto) + **each task is a real container**; `run_task`/`create_service` launch the image, wired to oblako's endpoints and published on a host port. Tasks also get the **ECS task metadata endpoint** (`ECS_CONTAINER_METADATA_URI[_V4]`) that AWS containers read. | Fargate launch type; no continuous reconciliation/autoscaling; per-task compute needs a Docker socket. |
@@ -68,6 +69,48 @@ This page lists what each one provides and where it diverges from AWS.
 ---
 
 The deep dives below cover the services with the most local-specific behavior.
+
+## MWAA (Airflow)
+
+`oblako up mwaa` starts the MWAA API on port 8016
+(`AWS_ENDPOINT_URL_MWAA=http://localhost:8016`). `CreateEnvironment` runs the
+containers Amazon MWAA runs, from the images AWS publishes as source in
+[aws/amazon-mwaa-docker-images](https://github.com/aws/amazon-mwaa-docker-images)
+(Apache-2.0): PostgreSQL for Airflow's metadata, ElasticMQ as the Celery queue,
+then the webserver, scheduler and worker, on a network of their own. The image is
+built from a pinned commit of that repository the first time a version is used
+(about 6 minutes and 4.7 GB for 3.3.1); later environments start in under a
+minute.
+
+```python
+mwaa = boto3.client("mwaa")
+mwaa.create_environment(
+    Name="etl", AirflowVersion="3.3.1",
+    SourceBucketArn="arn:aws:s3:::my-dags", DagS3Path="dags",
+    ExecutionRoleArn="arn:aws:iam::123456789012:role/mwaa",
+    NetworkConfiguration={"SubnetIds": ["subnet-1", "subnet-2"]},
+)
+# CREATING, then AVAILABLE; WebserverUrl is localhost:<port>
+mwaa.invoke_rest_api(Name="etl", Path="/dags", Method="GET")
+```
+
+DAG files under `DagS3Path` are mirrored into the environment every 10 seconds,
+as MWAA syncs them. `requirements.txt`, the plugins zip and the startup script are
+read when the environment is created or updated (`UpdateEnvironment` restarts
+Airflow with them). Tasks use oblako's services through the same
+`AWS_ENDPOINT_URL_*` settings as `oblako notebook`, so a DAG's plain boto3 calls
+reach oblako. Airflow 2.9.2 to 3.3.1 are accepted; 3.3.1 is the version tested.
+
+boto3 prefixes MWAA's hostnames, so a client pointed at `localhost:8016` calls
+`api.localhost:8016` and `env.localhost:8016`. macOS and Linux hosts with
+systemd-resolved resolve those to the loopback address (the engine listens on
+IPv4 and IPv6); inside a plain container they don't resolve, so code there needs
+`Config(inject_host_prefix=False)`.
+
+The webserver uses Airflow's simple auth manager with every user an admin (AWS's
+`testing` auth type), so it accepts any login. `CreateCliToken`,
+`CreateWebLoginToken` and CloudWatch logging are not simulated; environment class,
+worker counts and network settings are recorded and reported, not enforced.
 
 ## Redshift
 
