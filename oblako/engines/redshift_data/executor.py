@@ -145,8 +145,13 @@ class RedshiftDataExecutor:
         database: str | None = None,
         cluster_identifier: str | None = None,
         parameters: list[dict] | None = None,
+        workgroup_name: str | None = None,
     ) -> str:
-        """Run SQL, store the statement + result, return the statement id."""
+        """Run SQL, store the statement + result, return the statement id.
+
+        A Serverless workgroup is the shared engine, so ``workgroup_name`` only
+        labels the statement.
+        """
         stmt_id = str(uuid.uuid4())
         now = datetime.datetime.now(datetime.timezone.utc)
         statement = {
@@ -154,6 +159,7 @@ class RedshiftDataExecutor:
             "QueryString": sql,
             "Database": database or self.database,
             "ClusterIdentifier": cluster_identifier,
+            **({"WorkgroupName": workgroup_name} if workgroup_name else {}),
             "CreatedAt": now,
             "UpdatedAt": now,
             "Status": "STARTED",

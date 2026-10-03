@@ -35,6 +35,7 @@ _INTEGRATION_FILES = {
     "tests/redshift/test_redshift_catalog.py",
     "tests/redshift/test_redshift_redtape.py",
     "tests/redshift/test_redshift_data.py",
+    "tests/redshift/test_redshift_serverless.py",
     "tests/redshift/test_redshift_copy_unload.py",
     "tests/redshift/test_redshift_super.py",
     "tests/redshift/test_redshift_listagg.py",

@@ -16,6 +16,8 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from oblako.engines.redshift_control import serverless
+
 from .executor import RedshiftDataExecutor
 
 
@@ -65,6 +67,9 @@ class RedshiftDataApp:
         handler = getattr(self, f"op_{op}", None)
         if handler is None:
             return _error("ValidationException", f"Unknown operation: {op or '(none)'}")
+        refused = _check_workgroup(req)
+        if refused is not None:
+            return refused
         try:
             return handler(req)
         except _NotFound as e:
@@ -91,12 +96,13 @@ class RedshiftDataApp:
             database=req.get("Database"),
             cluster_identifier=req.get("ClusterIdentifier"),
             parameters=req.get("Parameters"),
+            workgroup_name=req.get("WorkgroupName"),
         )
         stmt = self._stored(stmt_id)
         return _json_response(
             {
                 "Id": stmt_id,
-                "ClusterIdentifier": req.get("ClusterIdentifier"),
+                **_target(req),
                 "Database": stmt["Database"],
                 "CreatedAt": stmt["CreatedAt"],
             }
@@ -113,6 +119,7 @@ class RedshiftDataApp:
                 database=req.get("Database"),
                 cluster_identifier=req.get("ClusterIdentifier"),
                 parameters=req.get("Parameters"),
+                workgroup_name=req.get("WorkgroupName"),
             )
             for sql in sqls
         ]
@@ -132,7 +139,7 @@ class RedshiftDataApp:
         return _json_response(
             {
                 "Id": ids[-1],
-                "ClusterIdentifier": req.get("ClusterIdentifier"),
+                **_target(req),
                 "Database": last["Database"],
                 "CreatedAt": last["CreatedAt"],
             }
@@ -209,6 +216,28 @@ class RedshiftDataApp:
 
 class _NotFound(Exception):
     pass
+
+
+def _target(req: dict) -> dict:
+    """Return the cluster or the workgroup a statement ran on, as AWS echoes it."""
+    if req.get("WorkgroupName"):
+        return {"WorkgroupName": req["WorkgroupName"]}
+    return {"ClusterIdentifier": req.get("ClusterIdentifier")}
+
+
+def _check_workgroup(req: dict) -> Response | None:
+    """Refuse an unknown workgroup, or a request naming a cluster and a workgroup."""
+    name = req.get("WorkgroupName")
+    if not name:
+        return None
+    if req.get("ClusterIdentifier"):
+        return _error(
+            "ValidationException",
+            "Specify either a ClusterIdentifier or a WorkgroupName, not both",
+        )
+    if serverless.get_workgroup_record(name) is None:
+        return _error("ValidationException", f"Workgroup {name} not found")
+    return None
 
 
 def _require(req: dict, key: str):

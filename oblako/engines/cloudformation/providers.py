@@ -8,7 +8,11 @@ in oblako.
 from __future__ import annotations
 
 import json
+
 import uuid
+
+from oblako import config
+from oblako.services import boto
 
 
 def _s3_client():
@@ -20,12 +24,10 @@ def _s3_client():
 def _dynamodb_client():
     from oblako.services import DynamoDBService
 
-    return DynamoDBService(host_port=8001).get_client()
+    return boto.client("dynamodb", DynamoDBService(host_port=8001).endpoint_url)
 
 
 def _moto_client(service):
-    from oblako.services import boto
-
     return boto.client(service, "http://localhost:5500", region="us-east-1")
 
 
@@ -101,6 +103,72 @@ def _redshift_delete(physical_id, props):
         )
     except Exception:
         pass
+
+
+# AWS::RedshiftServerless::Namespace / ::Workgroup (oblako's Serverless records;
+# every workgroup is the shared Redshift engine)
+def _serverless_attrs(prefix: str, record: dict) -> dict:
+    """Flatten a record into GetAtt names: Workgroup.Endpoint.Address, ..."""
+    attrs = {}
+    for key, value in record.items():
+        name = f"{prefix}.{key[0].upper()}{key[1:]}"
+        if isinstance(value, dict):
+            attrs.update(_serverless_attrs(name, value))
+        elif not isinstance(value, list):
+            attrs[name] = value
+    return attrs
+
+
+def _namespace_create(logical_id, props, ctx):
+    from oblako.engines.redshift_control import serverless
+
+    name = props.get("NamespaceName") or f"{ctx['stack']}-{logical_id}".lower()
+    req = {
+        "namespaceName": name,
+        "adminUsername": props.get("AdminUsername"),
+        "adminUserPassword": props.get("AdminUserPassword"),
+        "dbName": props.get("DbName"),
+        "iamRoles": props.get("IamRoles", []),
+        "defaultIamRoleArn": props.get("DefaultIamRoleArn"),
+    }
+    record = serverless.create_namespace(req)["namespace"]
+    return {"PhysicalId": name, "Attributes": _serverless_attrs("Namespace", record)}
+
+
+def _namespace_delete(physical_id, props):
+    from oblako.engines.redshift_control import serverless
+
+    try:
+        serverless.delete_namespace({"namespaceName": physical_id})
+    except serverless.ServerlessError:
+        pass  # already gone
+
+
+def _workgroup_create(logical_id, props, ctx):
+    from oblako.engines.redshift_control import serverless
+
+    name = props.get("WorkgroupName") or f"{ctx['stack']}-{logical_id}".lower()
+    req = {
+        "workgroupName": name,
+        "namespaceName": props.get("NamespaceName"),
+        "publiclyAccessible": props.get("PubliclyAccessible", False),
+        "securityGroupIds": props.get("SecurityGroupIds", []),
+        "subnetIds": props.get("SubnetIds", []),
+    }
+    for key in ("BaseCapacity", "MaxCapacity"):
+        if key in props:
+            req[key[0].lower() + key[1:]] = props[key]
+    record = serverless.create_workgroup(req)["workgroup"]
+    return {"PhysicalId": name, "Attributes": _serverless_attrs("Workgroup", record)}
+
+
+def _workgroup_delete(physical_id, props):
+    from oblako.engines.redshift_control import serverless
+
+    try:
+        serverless.delete_workgroup({"workgroupName": physical_id})
+    except serverless.ServerlessError:
+        pass  # already gone
 
 
 # AWS::RDS::DBInstance (control plane via moto)
@@ -242,11 +310,8 @@ def _sfn_create(logical_id, props, ctx):
     }
     if "StateMachineType" in props:
         kwargs["type"] = props["StateMachineType"]
-    arn = (
-        StepFunctionsService()
-        .get_client()
-        .create_state_machine(**kwargs)["stateMachineArn"]
-    )
+    sfn = boto.client("stepfunctions", StepFunctionsService().endpoint_url)
+    arn = sfn.create_state_machine(**kwargs)["stateMachineArn"]
     # Ref returns the ARN (as in real CFN); GetAtt Name returns the name.
     return {"PhysicalId": arn, "Attributes": {"Name": name, "Arn": arn}}
 
@@ -255,9 +320,8 @@ def _sfn_delete(physical_id, props):
     from oblako.services import StepFunctionsService
 
     try:
-        StepFunctionsService().get_client().delete_state_machine(
-            stateMachineArn=physical_id
-        )
+        sfn = boto.client("stepfunctions", StepFunctionsService().endpoint_url)
+        sfn.delete_state_machine(stateMachineArn=physical_id)
     except Exception:
         pass
 
@@ -279,7 +343,7 @@ def _opensearch_create(logical_id, props, ctx):
         "PhysicalId": name,
         "Attributes": {
             "DomainEndpoint": endpoint,
-            "Arn": f"arn:aws:es:us-east-1:000000000000:domain/{name}",
+            "Arn": f"arn:aws:es:{config.region()}:{config.account_id()}:domain/{name}",
         },
     }
 
@@ -534,6 +598,8 @@ PROVIDERS = {
     "AWS::S3::Bucket": (_s3_create, _s3_delete),
     "AWS::DynamoDB::Table": (_ddb_create, _ddb_delete),
     "AWS::Redshift::Cluster": (_redshift_create, _redshift_delete),
+    "AWS::RedshiftServerless::Namespace": (_namespace_create, _namespace_delete),
+    "AWS::RedshiftServerless::Workgroup": (_workgroup_create, _workgroup_delete),
     "AWS::RDS::DBInstance": (_rds_create, _rds_delete),
     "AWS::IAM::Role": (_iam_create, _iam_delete),
     "AWS::EC2::Instance": (_ec2_create, _ec2_delete),

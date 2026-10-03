@@ -57,7 +57,7 @@ This page lists what each one provides and where it diverges from AWS.
 
 | Service | Description | Limitations |
 |---|---|---|
-| **CloudFormation** | `cloudformation` (+ `aws cloudformation deploy` / `sam deploy`) provisions **real** oblako resources, including a full ECS Fargate + ALB stack. | Subset of resource types (S3, DynamoDB, Redshift, RDS, ECS, ELBv2, …). |
+| **CloudFormation** | `cloudformation` (+ `aws cloudformation deploy` / `sam deploy`, or `CreateStack`) provisions **real** oblako resources, including a full ECS Fargate + ALB stack and Redshift Serverless. | Subset of resource types (S3, DynamoDB, Redshift, Redshift Serverless, RDS, ECS, ELBv2, …). |
 | **IAM / STS** | moto control plane + oblako's policy evaluator. | Policy evaluation is a best-effort reimplementation. |
 | **EC2** | moto control plane + real container-backed instances. | `describe_*` fidelity; instances are containers, not VMs. |
 | **OpenSearch** | OpenSearch single-node (Knowledge Bases / RAG). | Security plugin disabled for local use. |
@@ -191,6 +191,30 @@ node's role and address. **Unmodified Redshift DDL distributes**: the proxy turn
 into a reference table before the `CREATE` returns; a `SORTKEY` becomes a btree
 index. Tables with no distribution style stay on the leader. The Data API reaches
 a cluster by `ClusterIdentifier`. Up to 8 compute nodes per cluster.
+
+**Redshift Serverless.** The same port answers the `redshift-serverless` API
+(`AWS_ENDPOINT_URL_REDSHIFT_SERVERLESS=http://localhost:8015`). A namespace
+creates its admin user, with the given password, and its database (`dev` by
+default) in the engine; every workgroup's endpoint is the shared engine,
+`localhost:5439`, whatever `port` is requested:
+
+```python
+rss = boto3.client("redshift-serverless")
+rss.create_namespace(namespaceName="analytics", adminUsername="admin",
+                     adminUserPassword="...", dbName="dev")
+rss.create_workgroup(workgroupName="analytics", namespaceName="analytics")
+rss.get_workgroup(workgroupName="analytics")["workgroup"]["endpoint"]
+# {'address': 'localhost', 'port': 5439}
+```
+
+`DeleteNamespace` drops the user and database it created, and refuses while a
+workgroup uses the namespace (`ConflictException`). The Data API takes
+`WorkgroupName` in place of `ClusterIdentifier`, and CloudFormation creates
+`AWS::RedshiftServerless::Namespace` and `::Workgroup` with their `GetAtt`
+attributes (`Workgroup.Endpoint.Address`, ...). Base and maximum capacity, VPC
+settings, snapshots, usage limits and `GetCredentials` are not simulated: a
+workgroup has the engine's resources, and the API accepts and reports the
+capacity and network settings it is given.
 
 The image (`oblako/images/redshift-cluster`) builds from the single-node one and
 compiles Citus from source, so it is native on amd64 and arm64. Because Citus
