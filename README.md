@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="https://oblako-public.s3.amazonaws.com/oblako_logo.png" width="320" alt="oblako">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://oblako-public.s3.amazonaws.com/oblako_logo_dark.png">
+    <img src="https://oblako-public.s3.amazonaws.com/oblako_logo.png" width="320" alt="oblako">
+  </picture>
 </p>
 
 <p align="center">
