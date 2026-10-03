@@ -19,16 +19,19 @@ import sys
 
 from oblako import ports
 from oblako.engines import host
+from oblako.services.backends import PortInUseError
 from oblako.services.platform import Oblako
 
 
 def _check_docker():
     """Verify Docker is reachable."""
-    try:
-        import docker
+    import docker
+    import docker.errors
 
+    try:
         docker.from_env().ping()
-    except Exception:
+    # requests' connection errors are OSErrors
+    except (docker.errors.DockerException, OSError):
         print("Error: Docker is not running. Start Docker and try again.")
         sys.exit(1)
 
@@ -52,15 +55,25 @@ def cmd_up(args):
     oblako = Oblako()
     if args.service:
         svc = _get_service(oblako, args.service)
-        svc.start()
-        svc.wait_ready()
+        try:
+            svc.start()
+        except PortInUseError as err:
+            print(f"Error: {err}")
+            sys.exit(1)
+        readiness = {svc.name: svc.wait_ready(timeout=args.timeout)}
     else:
-        oblako.up()
+        try:
+            oblako.up()
+        except PortInUseError as err:
+            print(f"Error: {err}")
+            sys.exit(1)
         print("Waiting for services...")
-        readiness = oblako.wait_ready(timeout=60)
-        for name, ready in readiness.items():
-            status = "ready" if ready else "not ready"
-            print(f"  {name}: {status}")
+        readiness = oblako.wait_ready(timeout=args.timeout)
+    for name, ready in readiness.items():
+        print(f"{name}: {'ready' if ready else 'not ready'}")
+    # A CI step that starts services must fail when one never became ready
+    if not all(readiness.values()):
+        sys.exit(1)
 
 
 def cmd_down(args):
@@ -187,8 +200,8 @@ def cmd_redshift_data(args):
     port = args.port or ports.REDSHIFT_DATA
     print(f"Starting Redshift Data API on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('redshift-data', endpoint_url=...)")
-    from oblako.engines.redshift_data.app import app
     from oblako.engines.identity import identify
+    from oblako.engines.redshift_data.app import app
 
     uvicorn.run(identify(app, "redshift_data"), host="0.0.0.0", port=port)
 
@@ -213,8 +226,8 @@ def cmd_rds_data(args):
     port = args.port or ports.RDS_DATA
     print(f"Starting RDS Data API on http://localhost:{port}")
     print("  point boto3 at it: boto3.client('rds-data', endpoint_url=...)")
-    from oblako.engines.rds_data.app import app
     from oblako.engines.identity import identify
+    from oblako.engines.rds_data.app import app
 
     uvicorn.run(identify(app, "rds_data"), host="0.0.0.0", port=port)
 
@@ -293,11 +306,15 @@ def cmd_test_integration(args):
 
 def cmd_trust(args):
     """Trust redshift-local's TLS cert in a venv's redshift-connector bundle."""
+    import subprocess
+
     from oblako.services import RedshiftService
 
     try:
         print(RedshiftService().trust_cert(python_exe=args.python))
-    except Exception as e:  # surface a clear message, not a trace
+    # no cert found, no redshift_connector in that interpreter, or an unwritable
+    # bundle: surface a clear message, not a trace
+    except (RuntimeError, OSError, subprocess.CalledProcessError) as e:
         print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
     print(
@@ -343,6 +360,12 @@ def main():
 
     p_up = sub.add_parser("up", help="Start services")
     p_up.add_argument("service", nargs="?", help="Start a specific service")
+    p_up.add_argument(
+        "--timeout",
+        type=float,
+        default=120.0,
+        help="Seconds to wait for each service to become ready (default: 120)",
+    )
     p_up.set_defaults(func=cmd_up)
 
     p_down = sub.add_parser("down", help="Stop services")
