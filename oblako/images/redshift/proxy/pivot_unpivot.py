@@ -19,12 +19,13 @@ sqlglot is an optional dependency; if it's absent the proxy simply doesn't rewri
 
 from __future__ import annotations
 
-try:
+import importlib.util
+
+# sqlglot is optional: without it the proxy does not rewrite
+HAVE_SQLGLOT = importlib.util.find_spec("sqlglot") is not None
+if HAVE_SQLGLOT:
     import sqlglot
     from sqlglot import exp
-except Exception:  # noqa: BLE001 - absent sqlglot disables the feature
-    sqlglot = None
-    exp = None
 
 
 def _source_columns(parent) -> list[str] | None:
@@ -88,11 +89,11 @@ def _build_unpivot(piv, parent, source_sql: str, cols: list[str]) -> str | None:
 
 def rewrite_pivot_unpivot(sql: str) -> str:
     """Rewrite PIVOT/UNPIVOT over a subquery source into standard SQL."""
-    if sqlglot is None or "pivot" not in sql.lower():
+    if not HAVE_SQLGLOT or "pivot" not in sql.lower():
         return sql
     try:
         tree = sqlglot.parse_one(sql, read="redshift")
-    except Exception:  # noqa: BLE001 - unparseable -> leave untouched
+    except Exception:  # unparseable -> leave untouched
         return sql
     pivots = list(tree.find_all(exp.Pivot))
     if not pivots:
@@ -100,6 +101,8 @@ def rewrite_pivot_unpivot(sql: str) -> str:
     replaced = 0
     for piv in pivots:
         parent = piv.parent
+        if parent is None:
+            continue
         cols = _source_columns(parent)
         if cols is None:
             continue
@@ -114,11 +117,11 @@ def rewrite_pivot_unpivot(sql: str) -> str:
                 continue
             parent.replace(sqlglot.parse_one(new_sql, read="postgres"))
             replaced += 1
-        except Exception:  # noqa: BLE001 - transform failed -> leave this one
+        except Exception:  # transform failed -> leave this one
             continue
     if not replaced:
         return sql
     try:
         return tree.sql(dialect="postgres")
-    except Exception:  # noqa: BLE001
+    except Exception:
         return sql

@@ -87,9 +87,10 @@ def _container_name(task_id: str, container: str) -> str:
     return f"oblako-ecs-{task_id[:12]}-{container}"
 
 
-@BotoService("ecs")
-class EcsService:
+class EcsService(BotoService):
     """AWS ECS, moto control plane + real container-backed Fargate tasks."""
+
+    aws_services = ("ecs",)
 
     name = "ecs"
 
@@ -207,7 +208,7 @@ class EcsService:
                 continue
             try:
                 eni = ec2.create_network_interface(SubnetId=subnet)["NetworkInterface"]
-            except Exception:  # noqa: BLE001 - realism only; never block the run
+            except Exception:  # realism only; never block the run
                 continue
             return [
                 {
@@ -241,7 +242,7 @@ class EcsService:
         return subnets[0] if subnets else None
 
     def _default_subnet(self) -> str | None:
-        """A default-VPC subnet from moto (so awsvpc just works locally)."""
+        """Return a default-VPC subnet from moto (so awsvpc just works locally)."""
         ec2 = client("ec2", self.endpoint_url)
         subs = ec2.describe_subnets(
             Filters=[{"Name": "default-for-az", "Values": ["true"]}]
@@ -263,7 +264,7 @@ class EcsService:
         image = cdef["image"]
         try:
             client.images.get(image)
-        except Exception:  # noqa: BLE001 - not present locally -> pull
+        except Exception:  # not present locally -> pull
             client.images.pull(image)
 
         env = _task_endpoint_env()
@@ -389,7 +390,7 @@ class EcsService:
                 desiredCount=desired_count,
                 launchType=launch_type,
             )
-        except Exception:  # noqa: BLE001 - moto strictness shouldn't block the real run
+        except Exception:  # moto strictness shouldn't block the real run
             pass
 
         run = self.run_task(
@@ -422,7 +423,7 @@ class EcsService:
             self.get_client().delete_service(
                 cluster=cluster, service=service_name, force=True
             )
-        except Exception:  # noqa: BLE001 - already gone / moto strictness
+        except Exception:  # already gone / moto strictness
             pass
 
     def describe_tasks(
@@ -470,6 +471,7 @@ class EcsService:
     def task_url(self, task: str) -> str | None:
         """Reachable URL for a task's first published port, or None."""
         import docker
+        import docker.errors
 
         for c in self._task_containers():
             if c.labels.get(TASK_LABEL) != task:

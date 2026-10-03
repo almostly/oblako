@@ -236,5 +236,5 @@ class RdsService(Service):
             conn = self.connect()
             conn.close()
             return True
-        except Exception:  # noqa: BLE001 - driver-specific connection errors
+        except Exception:  # driver-specific connection errors
             return False

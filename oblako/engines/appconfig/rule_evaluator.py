@@ -264,7 +264,7 @@ def evaluate_rule(rule: str, context: dict[str, Any]) -> bool:
     try:
         node = _parse(rule)
         return bool(_eval(node, context))
-    except Exception as exc:  # noqa: BLE001 - a bad rule never breaks evaluation
+    except Exception as exc:  # a bad rule never breaks evaluation
         LOG.warning("rule evaluation failed for %r: %s", rule, exc)
         return False
 

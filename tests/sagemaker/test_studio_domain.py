@@ -24,7 +24,7 @@ def sm(monkeypatch):
         pytest.skip("moto is not running on :5500")
     try:
         ec2mod._docker().ping()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pytest.skip("Docker is not available")
     # back the notebook instance with a tiny image (treated as a user override,
     # so ensure_notebook_image() won't build the real JupyterLab image).

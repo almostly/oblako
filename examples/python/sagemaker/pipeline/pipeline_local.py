@@ -15,6 +15,18 @@ import pathlib
 
 import boto3
 from botocore.config import Config
+from sagemaker.core.processing import (
+    PipelineSession,
+    ProcessingInput,
+    ProcessingOutput,
+    ScriptProcessor,
+)
+from sagemaker.core.shapes import ProcessingS3Input, ProcessingS3Output
+from sagemaker.mlops.local.local_pipeline_session import (
+    LocalPipelineSession as _MlopsLocalPipelineSession,
+)
+from sagemaker.mlops.workflow.pipeline import Pipeline
+from sagemaker.mlops.workflow.steps import ProcessingStep
 
 from oblako.engines.sagemaker import use_local_stubs
 
@@ -41,19 +53,6 @@ _s3 = boto3.client(
 )
 if BUCKET not in [b["Name"] for b in _s3.list_buckets()["Buckets"]]:
     _s3.create_bucket(Bucket=BUCKET)
-
-from sagemaker.core.processing import (  # noqa: E402
-    PipelineSession,
-    ProcessingInput,
-    ProcessingOutput,
-    ScriptProcessor,
-)
-from sagemaker.core.shapes import ProcessingS3Input, ProcessingS3Output  # noqa: E402
-from sagemaker.mlops.local.local_pipeline_session import (  # noqa: E402
-    LocalPipelineSession as _MlopsLocalPipelineSession,
-)
-from sagemaker.mlops.workflow.pipeline import Pipeline  # noqa: E402
-from sagemaker.mlops.workflow.steps import ProcessingStep  # noqa: E402
 
 
 class LocalPipelineSession(_MlopsLocalPipelineSession, PipelineSession):

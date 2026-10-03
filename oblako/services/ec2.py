@@ -65,6 +65,7 @@ def start_instance_container(
     instance publishing JupyterLab).
     """
     import docker
+    import docker.errors
 
     client = _docker()
     name = _container_name(instance_id)
@@ -115,9 +116,10 @@ def terminate_instance_container(instance_id: str) -> None:
         pass
 
 
-@BotoService("ec2")
-class Ec2Service:
+class Ec2Service(BotoService):
     """AWS EC2 — moto control plane + container-backed instances."""
+
+    aws_services = ("ec2",)
 
     name = "ec2"
 

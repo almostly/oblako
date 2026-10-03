@@ -141,7 +141,7 @@ class CfnApp:
             return _error(str(e))
         except AttributeError:
             return _error(f"unsupported action: {action}", code="InvalidAction")
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return _error(str(e), code="InternalFailure", status=500)
 
     def op_DescribeStacks(self, form):

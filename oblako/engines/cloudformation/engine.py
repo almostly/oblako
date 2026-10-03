@@ -409,7 +409,7 @@ class StackStore:
                     stack, name, "AWS::CloudFormation::Stack", name, f"{verb}_COMPLETE"
                 )
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             stack["StackStatus"] = f"{verb}_FAILED"
             stack["StackStatusReason"] = str(e)
             stack["events"].append(

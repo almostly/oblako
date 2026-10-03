@@ -55,7 +55,7 @@ def _ensure_bucket(s3_endpoint: str) -> None:
             b["Name"] for b in s3.list_buckets().get("Buckets", [])
         }:
             s3.create_bucket(Bucket=ARTIFACT_BUCKET)
-    except Exception:  # noqa: BLE001 - S3Proxy may not be up; mlflow handles missing later
+    except Exception:  # S3Proxy may not be up; mlflow handles missing later
         pass
 
 

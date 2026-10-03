@@ -65,7 +65,7 @@ def svc():
     lam.ensure_exec_role()
     try:
         lam.ensure_runtime_image(RUNTIME, architecture="x86_64")
-    except Exception as e:  # noqa: BLE001 — image pull is best-effort
+    except Exception as e:  # image pull is best-effort
         pytest.skip(f"could not pull the {RUNTIME} runtime image: {e}")
     return lam
 

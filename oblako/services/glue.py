@@ -226,7 +226,7 @@ class GlueService:
                 continue
             try:
                 r = self.submit_job(script, timeout=timeout)
-            except Exception as e:  # noqa: BLE001 — surface the failure in the step
+            except Exception as e:  # surface the failure in the step
                 results.append(
                     {
                         "name": sname,

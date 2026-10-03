@@ -5,9 +5,10 @@ from .base import Service, PortMapping
 from .boto import BotoService, client, resource
 
 
-@BotoService("dynamodb")
-class DynamoDBService(Service):
+class DynamoDBService(Service, BotoService):
     """DynamoDB Local service backed by the official Amazon Docker image."""
+
+    aws_services = ("dynamodb",)
 
     def __init__(self, host_port: int = ports.DYNAMODB):
         """Initialize the DynamoDB Local service on the given host port."""

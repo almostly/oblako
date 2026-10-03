@@ -28,7 +28,7 @@ def live_slugs() -> set[str]:
 def main() -> int:
     try:
         live = live_slugs()
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         print(f"ERROR: could not fetch the OpenRouter catalog: {e}")
         return 2
 

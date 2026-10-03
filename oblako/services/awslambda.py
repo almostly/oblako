@@ -23,9 +23,10 @@ ASSUME_ROLE_POLICY = (
 )
 
 
-@BotoService("lambda", "iam")
-class LambdaService:
+class LambdaService(BotoService):
     """AWS Lambda — control plane + invocation via moto + Docker."""
+
+    aws_services = ("lambda", "iam")
 
     def __init__(self, moto: MotoService):
         """Wire to the shared moto endpoint (no own container)."""
@@ -65,6 +66,7 @@ class LambdaService:
         """
         import re
         import docker
+        import docker.errors
         from .backends import docker_client
 
         m = re.match(r"([a-z]+)([\d.]+)", runtime)

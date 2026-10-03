@@ -91,6 +91,19 @@ Homepage = "https://oblako-sdk.almostly.ai/"
 Documentation = "https://oblako-sdk.almostly.ai/"
 Repository = "https://github.com/almostly/oblako"
 
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+# Ruff's classic default rules, written out so that every ruff version (the
+# pre-commit pin, an editor's, `uvx ruff`) checks the same set
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ty.environment]
+# Stubs for packages that only example containers install (see typings/)
+extra-paths = ["typings"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
