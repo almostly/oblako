@@ -6,29 +6,32 @@ sum of the SHAP feature contributions plus the base value (so higher score = bet
 credit). Mirrors the reference's inference.py.
 """
 
+import functools
 import json
 import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 MODEL = "/opt/ml/model"
-_model = None
-_meta = None
 
 
+@functools.cache
 def _load():
-    global _model, _meta
+    """Load the model and its metadata once; later calls return the same pair."""
     import joblib
 
-    _model = joblib.load(os.path.join(MODEL, "catboost_model.joblib"))
-    _meta = json.load(open(os.path.join(MODEL, "model_metadata.json")))
+    model = joblib.load(os.path.join(MODEL, "catboost_model.joblib"))
+    with open(os.path.join(MODEL, "model_metadata.json")) as f:
+        meta = json.load(f)
+    return model, meta
 
 
 def _score(instances):
     import pandas as pd
     from catboost import Pool
 
-    feats, cats = _meta["feature_names"], _meta["categorical_features"]
-    factor, offset = _meta["factor"], _meta["offset"]
+    model, meta = _load()
+    feats, cats = meta["feature_names"], meta["categorical_features"]
+    factor, offset = meta["factor"], meta["offset"]
     cat_idx = [feats.index(c) for c in cats]
     out = []
     for inst in instances:
@@ -36,8 +39,8 @@ def _score(instances):
         for col in cats:
             X[col] = X[col].astype(str)
         pool = Pool(X, cat_features=cat_idx)
-        proba = float(_model.predict_proba(pool)[0, 1])  # P(default)
-        shap = _model.get_feature_importance(type="ShapValues", data=pool)
+        proba = float(model.predict_proba(pool)[0, 1])  # P(default)
+        shap = model.get_feature_importance(type="ShapValues", data=pool)
         log_odds = float(shap[0, :-1].sum() + shap[0, -1])  # contributions + base
         out.append(
             {"proba": round(proba, 4), "score": int(offset + factor * (-log_odds))}
@@ -46,13 +49,13 @@ def _score(instances):
 
 
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):  # noqa: N802 - SageMaker health check
+    def do_GET(self):  # SageMaker health check
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(b'{"status": "healthy"}')
 
-    def do_POST(self):  # noqa: N802 - SageMaker /invocations
+    def do_POST(self):  # SageMaker /invocations
         if self.path != "/invocations":
             self.send_response(404)
             self.end_headers()
@@ -66,7 +69,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(payload)
 
-    def log_message(self, *args):
+    def log_message(self, format, *args):
         pass
 
 

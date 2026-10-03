@@ -1,5 +1,6 @@
 """oblako dashboard API: exposes local services to the Cloudscape frontend."""
 
+import importlib.util
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,7 +26,7 @@ async def lifespan(app: FastAPI):
         from oblako.engines import lambda_shim
 
         lambda_shim.start_in_thread()
-    except Exception:  # noqa: BLE001 - dashboard still works without live SFN runs
+    except Exception:  # dashboard still works without live SFN runs
         pass
     yield
 
@@ -544,7 +545,7 @@ def athena_query(body: dict):
         return {"error": "sql is required"}
     try:
         return oblako.trino.query(sql, timeout=120)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": {"message": str(e)}}
 
 
@@ -562,7 +563,7 @@ def athena_schemas(catalog: str = "iceberg"):
             )
             result.append({"schema": schema, "tables": [t[0] for t in tables]})
         return {"catalog": catalog, "schemas": result}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"catalog": catalog, "schemas": [], "error": str(e)}
 
 
@@ -857,9 +858,7 @@ def run_code(body: dict):
 @app.post("/api/notebook/launch")
 def launch_notebook():
     """Spawn JupyterLab (pre-wired to oblako) and return its URL for the UI to open."""
-    try:
-        import jupyterlab  # noqa: F401
-    except ImportError:
+    if importlib.util.find_spec("jupyterlab") is None:
         return {
             "error": "JupyterLab isn't installed. Run: pip install 'oblako[notebook]'"
         }
@@ -867,7 +866,7 @@ def launch_notebook():
         from oblako import notebook
 
         return notebook.spawn(port=8888)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -881,7 +880,7 @@ def _mlflow_urls() -> dict:
         oblako.caddy.wait_ready(timeout=15)
         vanity_url = oblako.caddy.vanity_url(vanity_host("mlflow"))
         hosts_line = oblako.caddy.hosts_line()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return {
         "url": oblako.sagemaker.mlflow.tracking_uri,
@@ -903,7 +902,7 @@ def mlflow_status():
         if oblako.sagemaker.mlflow.wait_ready(timeout=2):
             return {"status": "ready", **_mlflow_urls()}
         return {"status": oblako.sagemaker.mlflow.status().value}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"status": "error", "error": str(e)}
 
 
@@ -918,7 +917,7 @@ def launch_mlflow():
                 "error": "MLflow did not become ready within 120s",
             }
         return {"status": "ready", **_mlflow_urls()}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"status": "error", "error": str(e)}
 
 
@@ -929,7 +928,7 @@ def sagemaker_domain_status(name: str):
     """Domain status (CFN stack state + notebook instance id)."""
     try:
         return oblako.sagemaker.domain_status(name)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"domain": name, "status": "error", "error": str(e)}
 
 
@@ -941,7 +940,7 @@ def sagemaker_create_domain(body: dict):
             body.get("name", "studio"),
             instance_type=body.get("instanceType", "t3.medium"),
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"status": "error", "error": str(e)}
 
 
@@ -950,7 +949,7 @@ def sagemaker_launch_notebook(name: str):
     """Launch JupyterLab inside the domain's notebook instance; return its URL."""
     try:
         return {"ok": True, **oblako.sagemaker.launch_notebook(name)}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -960,7 +959,7 @@ def sagemaker_delete_domain(name: str):
     try:
         oblako.sagemaker.delete_domain(name)
         return {"ok": True}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1092,7 +1091,7 @@ def lambda_list_functions():
                 for f in resp.get("Functions", [])
             ]
         }
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e), "functions": []}
 
 
@@ -1102,7 +1101,7 @@ def lambda_get_function(name: str):
     lam = oblako.awslambda.get_client()
     try:
         resp = lam.get_function(FunctionName=name)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
     cfg = resp["Configuration"]
     cached = _LAMBDA_SOURCE_CACHE.get(name) or {}
@@ -1146,7 +1145,7 @@ def lambda_create_function(body: dict):
     architecture = body.get("architecture", "x86_64")
     try:
         oblako.awslambda.ensure_runtime_image(runtime, architecture=architecture)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass  # not fatal — moto will fall back to the local image
     try:
         lam.create_function(
@@ -1162,7 +1161,7 @@ def lambda_create_function(body: dict):
         )
         _LAMBDA_SOURCE_CACHE[name] = {"filename": filename, "source": source}
         return {"ok": True, "name": name}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1182,7 +1181,7 @@ def lambda_update_code(name: str, body: dict):
         )
         _LAMBDA_SOURCE_CACHE[name] = {"filename": filename, "source": body["source"]}
         return {"ok": True, "lastModified": cfg.get("LastModified", "")}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1194,7 +1193,7 @@ def lambda_delete_function(name: str):
         lam.delete_function(FunctionName=name)
         _LAMBDA_SOURCE_CACHE.pop(name, None)
         return {"ok": True}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1215,14 +1214,14 @@ def lambda_invoke(name: str, body: dict):
     started = time.time()
     try:
         r = lam.invoke(FunctionName=name, Payload=payload, LogType="Tail")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
     duration_ms = int((time.time() - started) * 1000)
     raw = r["Payload"].read().decode("utf-8", errors="replace")
     parsed = None
     try:
         parsed = json.loads(raw)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     log_tail = ""
     if r.get("LogResult"):
@@ -1232,7 +1231,7 @@ def lambda_invoke(name: str, body: dict):
             log_tail = base64.b64decode(r["LogResult"]).decode(
                 "utf-8", errors="replace"
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
     return {
         "statusCode": r.get("StatusCode"),
@@ -1270,7 +1269,7 @@ def lambda_list_layers():
                 for lr in resp.get("Layers", [])
             ]
         }
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e), "layers": []}
 
 
@@ -1324,7 +1323,7 @@ def lambda_publish_layer(body: dict):
             CompatibleRuntimes=runtimes,
         )
         return {"ok": True, "version": resp["Version"], "arn": resp["LayerVersionArn"]}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1373,7 +1372,7 @@ def lambda_attach_layers(name: str, body: dict):
             Layers=body.get("layers", []),
         )
         return {"ok": True}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1399,7 +1398,7 @@ def glue_list_databases():
                 for d in resp.get("DatabaseList", [])
             ]
         }
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e), "databases": []}
 
 
@@ -1415,7 +1414,7 @@ def glue_create_database(body: dict):
             }
         )
         return {"ok": True}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1440,7 +1439,7 @@ def glue_list_tables(db: str):
                 for t in resp.get("TableList", [])
             ]
         }
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e), "tables": []}
 
 
@@ -1461,7 +1460,7 @@ def glue_get_table(db: str, name: str):
             "location": t.get("StorageDescriptor", {}).get("Location", ""),
             "parameters": t.get("Parameters", {}),
         }
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1485,7 +1484,7 @@ def glue_run_job(body: dict):
             env=body.get("env") or {},
             timeout=int(body.get("timeout", 600)),
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e), "durationMs": int((time.time() - started) * 1000)}
     record = {
         "name": body.get("name") or f"job-{int(started)}",
@@ -1531,7 +1530,7 @@ def glue_run_workflow(body: dict):
             steps,
             timeout=int(body.get("timeout", 600)),
         )
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e), "durationMs": int((time.time() - started) * 1000)}
     record = {
         **result,
@@ -1558,7 +1557,7 @@ def ec2_list_instances():
     ec2 = oblako.ec2
     try:
         reservations = ec2.get_client().describe_instances().get("Reservations", [])
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"instances": [], "error": str(e)}
     instances = []
     for r in reservations:
@@ -1598,7 +1597,7 @@ def ec2_run_instance(body: dict):
                 Tags=[{"Key": "Name", "Value": body["name"]}],
             )
         return {"ok": True, "id": iid}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1608,7 +1607,7 @@ def ec2_stop_instance(iid: str):
     try:
         oblako.ec2.stop_instance(iid)
         return {"ok": True}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1618,7 +1617,7 @@ def ec2_start_instance(iid: str):
     try:
         oblako.ec2.start_instance(iid)
         return {"ok": True}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1628,7 +1627,7 @@ def ec2_terminate_instance(iid: str):
     try:
         oblako.ec2.terminate_instance(iid)
         return {"ok": True}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1658,7 +1657,7 @@ def appconfig_applications():
                 }
             )
         return {"applications": apps}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1670,7 +1669,7 @@ def appconfig_create_application(body: dict):
             Name=body["name"], Description=body.get("description", "")
         )
         return {"id": a["Id"], "name": a["Name"]}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1684,7 +1683,7 @@ def appconfig_environments(app_id: str):
                 for e in _ac().list_environments(ApplicationId=app_id).get("Items", [])
             ]
         }
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1698,7 +1697,7 @@ def appconfig_create_environment(app_id: str, body: dict):
             Description=body.get("description", ""),
         )
         return {"id": e["Id"], "name": e["Name"]}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1719,7 +1718,7 @@ def appconfig_profiles(app_id: str):
                 .get("Items", [])
             ]
         }
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1734,7 +1733,7 @@ def appconfig_create_profile(app_id: str, body: dict):
             Type=body.get("type", "AWS.Freeform"),
         )
         return {"id": p["Id"], "name": p["Name"]}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1759,7 +1758,7 @@ def appconfig_versions(app_id: str, profile_id: str):
                 for v in items
             ]
         }
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1776,7 +1775,7 @@ def appconfig_version_content(app_id: str, profile_id: str, number: int):
             "versionNumber": v["VersionNumber"],
             "content": v["Content"].read().decode("utf-8", "replace"),
         }
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1796,7 +1795,7 @@ def appconfig_create_version(app_id: str, profile_id: str, body: dict):
         return {"versionNumber": v["VersionNumber"]}
     except json.JSONDecodeError as e:
         return {"error": f"Invalid JSON: {e}"}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1815,7 +1814,7 @@ def appconfig_strategies():
                 for s in _ac().list_deployment_strategies().get("Items", [])
             ]
         }
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1841,7 +1840,7 @@ def appconfig_deployments(app_id: str, env_id: str):
                 for d in items
             ]
         }
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1857,7 +1856,7 @@ def appconfig_start_deployment(app_id: str, env_id: str, body: dict):
             DeploymentStrategyId=body.get("strategyId", "AppConfig.AllAtOnce"),
         )
         return {"deploymentNumber": d["DeploymentNumber"], "state": d.get("State", "")}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 
@@ -1884,7 +1883,7 @@ def appconfig_evaluate(body: dict):
         return {"flags": evaluate_config(values, context)}
     except json.JSONDecodeError as e:
         return {"error": f"Configuration is not valid JSON: {e}"}
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         return {"error": str(e)}
 
 

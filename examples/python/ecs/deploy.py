@@ -29,7 +29,7 @@ def _wait_url(url: str, attempts: int = 45) -> None:
         try:
             urllib.request.urlopen(url, timeout=2).read()
             return
-        except Exception:  # noqa: BLE001 - service still coming up
+        except Exception:  # service still coming up
             time.sleep(1)
     raise TimeoutError(f"{url} never served")
 
@@ -50,10 +50,15 @@ def main() -> None:
         Parameters=[
             {"ParameterKey": "VpcId", "ParameterValue": "vpc-local"},
             {"ParameterKey": "SubnetIds", "ParameterValue": "subnet-a,subnet-b"},
-            {"ParameterKey": "ContainerImage", "ParameterValue": "decision-service:latest"},
+            {
+                "ParameterKey": "ContainerImage",
+                "ParameterValue": "decision-service:latest",
+            },
         ],
     )
-    cfn.get_waiter("change_set_create_complete").wait(StackName=STACK, ChangeSetName="cs1")
+    cfn.get_waiter("change_set_create_complete").wait(
+        StackName=STACK, ChangeSetName="cs1"
+    )
     cfn.execute_change_set(StackName=STACK, ChangeSetName="cs1")
     cfn.get_waiter("stack_create_complete").wait(StackName=STACK)
     print("stack CREATE_COMPLETE")

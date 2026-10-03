@@ -17,9 +17,10 @@ DUMMY_ROLE = config.arn("iam", "role/DummyRole", region_scoped=False)
 MOCK_CONFIG_MOUNT = "/oblako/sfn"
 
 
-@BotoService("stepfunctions")
-class StepFunctionsService(Service):
+class StepFunctionsService(Service, BotoService):
     """Step Functions Local service backed by the official Amazon image."""
+
+    aws_services = ("stepfunctions",)
 
     def __init__(
         self,

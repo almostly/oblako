@@ -16,9 +16,10 @@ from .boto import BotoService
 from .moto import MotoService
 
 
-@BotoService("iam", "sts")
-class IamService:
+class IamService(BotoService):
     """IAM/STS control plane (moto) plus oblako's trust + authorization evaluator."""
+
+    aws_services = ("iam", "sts")
 
     name = "iam"
 

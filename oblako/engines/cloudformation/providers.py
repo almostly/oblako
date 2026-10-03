@@ -46,7 +46,7 @@ def _s3_delete(physical_id, props):
         for o in objs:
             s3.delete_object(Bucket=physical_id, Key=o["Key"])
         s3.delete_bucket(Bucket=physical_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -71,7 +71,7 @@ def _ddb_create(logical_id, props, ctx):
 def _ddb_delete(physical_id, props):
     try:
         _dynamodb_client().delete_table(TableName=physical_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -99,7 +99,7 @@ def _redshift_delete(physical_id, props):
         _moto_client("redshift").delete_cluster(
             ClusterIdentifier=physical_id, SkipFinalClusterSnapshot=True
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -125,7 +125,7 @@ def _rds_delete(physical_id, props):
         _moto_client("rds").delete_db_instance(
             DBInstanceIdentifier=physical_id, SkipFinalSnapshot=True
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -142,7 +142,7 @@ def _iam_delete(physical_id, props):
     name = physical_id.rsplit("/", 1)[-1]
     try:
         _moto_client("iam").delete_role(RoleName=name)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -178,7 +178,7 @@ def _ec2_delete(physical_id, props):
 
     try:
         _moto_client("ec2").terminate_instances(InstanceIds=[physical_id])
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     terminate_instance_container(physical_id)
 
@@ -210,7 +210,7 @@ def _lambda_create(logical_id, props, ctx):
 def _lambda_delete(physical_id, props):
     try:
         _moto_client("lambda").delete_function(FunctionName=physical_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -223,7 +223,7 @@ def _apigw_create(logical_id, props, ctx):
 def _apigw_delete(physical_id, props):
     try:
         _moto_client("apigateway").delete_rest_api(restApiId=physical_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -258,7 +258,7 @@ def _sfn_delete(physical_id, props):
         StepFunctionsService().get_client().delete_state_machine(
             stateMachineArn=physical_id
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -316,7 +316,7 @@ def _ecs_cluster_create(logical_id, props, ctx):
 def _ecs_cluster_delete(physical_id, props):
     try:
         _moto_client("ecs").delete_cluster(cluster=physical_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -373,7 +373,7 @@ def _ecs_taskdef_create(logical_id, props, ctx):
 def _ecs_taskdef_delete(physical_id, props):
     try:
         _moto_client("ecs").deregister_task_definition(taskDefinition=physical_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -405,7 +405,7 @@ def _ecs_service_create(logical_id, props, ctx):
             "services"
         ]
         arn = svc[0]["serviceArn"] if svc else name
-    except Exception:  # noqa: BLE001
+    except Exception:
         arn = name
     return {"PhysicalId": arn, "Attributes": {"Name": name, "ServiceArn": arn}}
 
@@ -472,7 +472,7 @@ def _elb_tg_create(logical_id, props, ctx):
 def _elb_tg_delete(physical_id, props):
     try:
         _moto_client("elbv2").delete_target_group(TargetGroupArn=physical_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -497,7 +497,7 @@ def _logs_create(logical_id, props, ctx):
     name = props.get("LogGroupName") or f"/oblako/{ctx['stack']}/{logical_id}"
     try:
         _moto_client("logs").create_log_group(logGroupName=name)
-    except Exception:  # noqa: BLE001 - already exists
+    except Exception:  # already exists
         pass
     return name
 
@@ -505,7 +505,7 @@ def _logs_create(logical_id, props, ctx):
 def _logs_delete(physical_id, props):
     try:
         _moto_client("logs").delete_log_group(logGroupName=physical_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -525,7 +525,7 @@ def _sg_create(logical_id, props, ctx):
 def _sg_delete(physical_id, props):
     try:
         _moto_client("ec2").delete_security_group(GroupId=physical_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 

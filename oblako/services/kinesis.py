@@ -21,9 +21,10 @@ KINESIS_IMAGE = (
 )
 
 
-@BotoService("kinesis")
-class KinesisService(Service):
+class KinesisService(Service, BotoService):
     """Local Kinesis Data Streams (kinesalite-backed)."""
+
+    aws_services = ("kinesis",)
 
     def __init__(self, host_port: int = ports.KINESIS, shard_limit: int = 100):
         """Initialize on host_port (4567 default) with a configurable shard limit."""

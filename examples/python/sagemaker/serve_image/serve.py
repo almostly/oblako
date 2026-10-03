@@ -19,7 +19,7 @@ def _predict(x: float) -> float:
 
 
 class Handler(BaseHTTPRequestHandler):
-    def do_GET(self):  # noqa: N802 - http.server API
+    def do_GET(self):  # http.server API
         if self.path == "/ping":
             self.send_response(200)
             self.end_headers()
@@ -27,7 +27,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    def do_POST(self):  # noqa: N802 - http.server API
+    def do_POST(self):  # http.server API
         if self.path != "/invocations":
             self.send_response(404)
             self.end_headers()
@@ -44,7 +44,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(out.encode("utf-8"))
 
-    def log_message(self, *args):  # silence request logging
+    def log_message(self, format, *args):  # silence request logging
         pass
 
 

@@ -75,7 +75,7 @@ class Service:
             # Prefer the published image; build from source if it isn't pullable.
             try:
                 self.backend.ensure_image(self.image)
-            except Exception:  # noqa: BLE001 - any pull failure -> local build
+            except Exception:  # any pull failure -> local build
                 self.backend.build_image(self.image, self.build_context)
         else:
             self.backend.ensure_image(self.image)
@@ -113,7 +113,7 @@ class Service:
                 if self.backend.status(self.container_name) == RUNNING
                 else ServiceStatus.STOPPED
             )
-        except Exception:  # noqa: BLE001 - backend/daemon unreachable
+        except Exception:  # backend/daemon unreachable
             return ServiceStatus.ERROR
 
     def logs(self, tail: int = 50) -> str:

@@ -180,7 +180,7 @@ def main() -> None:
         print(f"\nQ: {q}")
         try:
             sql = generate_sql(adapter, q)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             print(f"  model didn't return SQL: {e}")
             continue
         print(f"SQL: {sql}")

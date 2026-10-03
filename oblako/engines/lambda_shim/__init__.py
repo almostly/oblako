@@ -79,7 +79,7 @@ async def _invocations(request: Request) -> JSONResponse:
     try:
         event = json.loads(await request.body() or b"{}")
         return JSONResponse(handler(event))
-    except Exception as e:  # noqa: BLE001 - surface as a Lambda function error
+    except Exception as e:  # surface as a Lambda function error
         return JSONResponse(
             {"errorMessage": str(e), "errorType": type(e).__name__},
             headers={"X-Amz-Function-Error": "Unhandled"},

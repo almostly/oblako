@@ -1,0 +1,6 @@
+# Stubs for the part of joblib that oblako's example containers use; joblib is
+# installed only inside those containers, never in oblako's environment.
+from typing import Any
+
+def load(filename: str, mmap_mode: str | None = ...) -> Any: ...
+def dump(value: Any, filename: str, compress: int | bool = ...) -> list[str]: ...

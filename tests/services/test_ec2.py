@@ -23,7 +23,7 @@ def ec2():
         pytest.skip("moto is not running on :5500")
     try:
         ec2mod._docker().ping()
-    except Exception:  # noqa: BLE001
+    except Exception:
         pytest.skip("Docker is not available")
     os.environ["OBLAKO_EC2_IMAGE"] = "alpine:3"  # tiny backing image for the test
     yield Ec2Service(moto=moto)
@@ -59,6 +59,7 @@ def test_instance_is_backed_by_real_container_and_volume(ec2):
     # terminate removes both container and EBS volume
     assert ec2.instance_container(iid) is None
     import docker
+    import docker.errors
 
     with pytest.raises(docker.errors.NotFound):
         ec2mod._docker().volumes.get(ec2mod._volume_name(iid))

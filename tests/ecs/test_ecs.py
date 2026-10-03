@@ -79,7 +79,7 @@ def _get_status(url: str, attempts: int = 45) -> int:
     for _ in range(attempts):
         try:
             return urllib.request.urlopen(url, timeout=2).status
-        except Exception as e:  # noqa: BLE001 - container still coming up
+        except Exception as e:  # container still coming up
             last = e
             time.sleep(1)
     raise AssertionError(f"{url} never served ({last})")
@@ -114,7 +114,9 @@ def test_run_task_and_service_behind_alb():
     run = ecs.run_task(family, count=1)
     task = run["tasks"][0]["taskArn"]
     try:
-        assert _get_status(ecs.task_url(task)) == 200
+        url = ecs.task_url(task)
+        assert url is not None
+        assert _get_status(url) == 200
         assert run["tasks"][0]["attachments"]  # awsvpc ENI metadata
         assert ecs.describe_tasks(tasks=[task])["tasks"][0]["lastStatus"] == "RUNNING"
     finally:

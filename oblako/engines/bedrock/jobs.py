@@ -7,6 +7,7 @@ S3 output location — mirroring real Bedrock batch inference, but local.
 
 from __future__ import annotations
 
+import builtins
 import datetime
 import json
 import threading
@@ -101,7 +102,7 @@ class ModelInvocationJob:
                             )
                         )
                         success += 1
-                    except Exception as e:  # noqa: BLE001 - record-level error
+                    except Exception as e:  # record-level error
                         out_lines.append(
                             json.dumps(
                                 {
@@ -126,7 +127,7 @@ class ModelInvocationJob:
             self.details["successRecordCount"] = success
             self.details["errorRecordCount"] = errors
             self.details["status"] = "Stopped" if self._stop.is_set() else "Completed"
-        except Exception as e:  # noqa: BLE001 - job-level failure
+        except Exception as e:  # job-level failure
             self.details["status"] = "Failed"
             self.details["message"] = str(e)
         finally:
@@ -156,7 +157,7 @@ class JobStore:
         with self._lock:
             return self._jobs.get(job_id)
 
-    def list(self) -> list[ModelInvocationJob]:
+    def list(self) -> builtins.list[ModelInvocationJob]:
         """Return all registered jobs."""
         with self._lock:
             return list(self._jobs.values())

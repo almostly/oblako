@@ -48,7 +48,7 @@ def _proxy_name(lb_id: str) -> str:
 
 
 def _alb_caddyfile(upstreams: list[str], health_path: str) -> str:
-    """A Caddy config: listen on PROXY_PORT, round-robin to the targets."""
+    """Return a Caddy config: listen on PROXY_PORT, round-robin to the targets."""
     lines = ["{", "    auto_https off", "    admin off", "}", "", f":{PROXY_PORT} {{"]
     if upstreams:
         lines.append(f"    reverse_proxy {' '.join(upstreams)} {{")
@@ -65,9 +65,10 @@ def _alb_caddyfile(upstreams: list[str], health_path: str) -> str:
     return "\n".join(lines)
 
 
-@BotoService("elbv2")
-class Elbv2Service:
+class Elbv2Service(BotoService):
     """Application Load Balancer, moto control plane + a real Caddy proxy per LB."""
+
+    aws_services = ("elbv2",)
 
     name = "elbv2"
 
@@ -94,7 +95,7 @@ class Elbv2Service:
         return [s["SubnetId"] for s in subs][:2]
 
     def _default_vpc(self) -> str:
-        """The default VPC id from moto (target groups require one)."""
+        """Return the default VPC id from moto (target groups require one)."""
         ec2 = client("ec2", self.endpoint_url)
         vpcs = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])[
             "Vpcs"
@@ -169,7 +170,7 @@ class Elbv2Service:
             self._apply(lb_arn)
 
     def dns_name(self, lb_arn: str) -> str:
-        """The local hostname for an LB, so ``http://<DNSName>`` is curlable."""
+        """Return the local hostname for an LB, so ``http://<DNSName>`` is curlable."""
         return f"localhost:{self._lbs[lb_arn]['host_port']}"
 
     def lb_url(self, lb_arn: str) -> str:
@@ -188,14 +189,14 @@ class Elbv2Service:
                     all=True, filters={"label": f"{LB_LABEL}={lb_arn}"}
                 ):
                     c.remove(force=True)
-        except Exception:  # noqa: BLE001 - already gone
+        except Exception:  # already gone
             pass
         self._listeners = {
             k: v for k, v in self._listeners.items() if v["lb_arn"] != lb_arn
         }
         try:  # also clear the moto-side record so the name frees up
             self.get_client().delete_load_balancer(LoadBalancerArn=lb_arn)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
     # Internals
@@ -225,7 +226,7 @@ class Elbv2Service:
         name = _proxy_name(info["id"])
         try:
             client.containers.get(name).remove(force=True)
-        except Exception:  # noqa: BLE001 - not present yet
+        except Exception:  # not present yet
             pass
         client.containers.run(
             "caddy:alpine",

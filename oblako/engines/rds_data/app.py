@@ -61,7 +61,7 @@ class RdsDataApp:
                 format_records_as=req.get("formatRecordsAs"),
                 result_set_options=req.get("resultSetOptions"),
             )
-        except Exception as e:  # noqa: BLE001 - any driver/SQL error -> BadRequest
+        except Exception as e:  # any driver/SQL error -> BadRequest
             return _error(str(e).strip())
         return JSONResponse(result)
 
@@ -76,7 +76,7 @@ class RdsDataApp:
                 parameter_sets=req.get("parameterSets"),
                 transaction_id=req.get("transactionId"),
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return _error(str(e).strip())
         return JSONResponse({"updateResults": results})
 
@@ -85,7 +85,7 @@ class RdsDataApp:
         req = await self._body(request)
         try:
             tid = self.executor.begin(database=req.get("database"))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return _error(str(e).strip())
         return JSONResponse({"transactionId": tid})
 
@@ -94,7 +94,7 @@ class RdsDataApp:
         req = await self._body(request)
         try:
             status = self.executor.commit(req["transactionId"])
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return _error(str(e).strip())
         return JSONResponse({"transactionStatus": status})
 
@@ -103,7 +103,7 @@ class RdsDataApp:
         req = await self._body(request)
         try:
             status = self.executor.rollback(req["transactionId"])
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             return _error(str(e).strip())
         return JSONResponse({"transactionStatus": status})
 

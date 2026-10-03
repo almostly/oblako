@@ -22,16 +22,15 @@ import os
 from datetime import date
 
 import pyarrow as pa
+from pyiceberg.catalog import load_catalog
+
+from oblako.services.platform import Oblako
 
 # S3Proxy needs path-style addressing + the new flexible checksums turned off.
 os.environ.update(
     AWS_REQUEST_CHECKSUM_CALCULATION="when_required",
     AWS_RESPONSE_CHECKSUM_VALIDATION="when_required",
 )
-
-from pyiceberg.catalog import load_catalog  # noqa: E402
-
-from oblako.services.platform import Oblako  # noqa: E402
 
 NAMESPACE = "s3_namespace"
 TABLE = "daily_sales"
@@ -104,11 +103,11 @@ def main() -> None:
     # 1. Schema + partitioned table (Iceberg's month() transform).
     try:
         cat.drop_table(f"{NAMESPACE}.{TABLE}")
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     try:
         cat.drop_namespace(NAMESPACE)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     cat.create_namespace(NAMESPACE)
 

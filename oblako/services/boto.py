@@ -6,7 +6,7 @@ creds and the active region. Centralizing that here means cross-cutting changes
 moto — happen in one place instead of being copy-pasted across every service.
 
 ``client()`` is the low-level factory that every service funnels through, even
-the bespoke ones. ``@BotoService`` is sugar for the common case: a Service that
+the bespoke ones. ``BotoService`` is a mixin for the common case: a Service that
 exposes ``endpoint_url`` and speaks one or more AWS APIs there with the standard
 creds + active region. Services that need autostart, a non-default region,
 multiple endpoints, or a custom Config keep their own ``get_client`` and call
@@ -51,39 +51,29 @@ def resource(
 
 
 class BotoService:
-    """Class decorator: attach ``get_client(service=services[0], **overrides)``.
+    """Mixin: ``get_client(service=aws_services[0], **overrides)``.
 
-    Applied to a Service exposing ``endpoint_url`` that speaks the given AWS
-    API(s) with the standard local creds + active region::
+    For a service exposing ``endpoint_url`` that speaks the listed AWS API(s)
+    with the standard local creds + active region::
 
-        @BotoService("glue")
-        class GlueCatalogService(Service): ...
+        class GlueCatalogService(BotoService):
+            aws_services = ("glue",)
 
-        @BotoService("iam", "sts")   # get_client() -> iam, get_client("sts") -> sts
-        class IamService: ...
+        class IamService(BotoService):
+            aws_services = ("iam", "sts")  # get_client() -> iam, ("sts") -> sts
 
-    ``services[0]`` is the default; pass another listed service to
-    ``get_client()`` for multi-API services. It's a class (not a function) so it
-    reads alongside the ``*Service`` classes it decorates — but you apply it with
-    ``@``, you never instantiate a service from it.
+    ``aws_services[0]`` is the default; pass another listed service to
+    ``get_client()`` for multi-API services. A real method (not one a decorator
+    attaches) so type checkers see it.
     """
 
-    def __init__(self, *services: str):
-        """Record the AWS service name(s) this Service speaks (first is default)."""
-        if not services:
-            raise ValueError("BotoService needs at least one AWS service name")
-        self.services = services
+    aws_services: tuple[str, ...] = ()
 
-    def __call__(self, cls):
-        """Attach a ``get_client`` bound to the decorated class's ``endpoint_url``."""
-        default = self.services[0]
+    @property
+    def endpoint_url(self) -> str:
+        """The local endpoint; every service using the mixin defines it."""
+        raise NotImplementedError
 
-        def get_client(self, service: str = default, **overrides):
-            return client(service, self.endpoint_url, **overrides)
-
-        get_client.__doc__ = (
-            f"boto3 {default!r} client pointed at this service's endpoint."
-        )
-        cls.get_client = get_client
-        cls._aws_services = self.services
-        return cls
+    def get_client(self, service: str | None = None, **overrides):
+        """Return a boto3 client for ``service`` at this service's endpoint."""
+        return client(service or self.aws_services[0], self.endpoint_url, **overrides)
