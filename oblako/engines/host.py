@@ -43,6 +43,8 @@ ENGINES: dict[str, tuple[str, int]] = {
     # multi-node clusters behind the Redshift API; `oblako up redshift` starts it
     "redshift-control": ("redshift_control", ports.REDSHIFT_CONTROL),
     "mwaa": ("mwaa", ports.MWAA),
+    # RunTask as real containers; the profile's ecs endpoint points here
+    "ecs": ("ecs_control", ports.ECS_CONTROL),
     "bedrock-runtime": ("bedrock_runtime", ports.BEDROCK_RUNTIME),
     "cloudformation": ("cloudformation", ports.CLOUDFORMATION),
     "ecs-metadata": ("ecs_metadata", ports.ECS_METADATA),

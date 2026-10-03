@@ -59,7 +59,7 @@ ENDPOINTS = {
     "AWS_ENDPOINT_URL_CLOUDWATCH": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_EVENTBRIDGE": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_ECR": _local(ports.MOTO),
-    "AWS_ENDPOINT_URL_ECS": _local(ports.MOTO),
+    "AWS_ENDPOINT_URL_ECS": _local(ports.ECS_CONTROL),
     "AWS_ENDPOINT_URL_EKS": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_FIREHOSE": _local(ports.FIREHOSE),
     "AWS_ENDPOINT_URL_KINESIS": _local(ports.KINESIS),

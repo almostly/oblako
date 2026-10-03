@@ -42,6 +42,7 @@ S3_TABLES = 8013  # S3 Tables: control plane over the Iceberg REST catalog
 RDS_CONTROL = 8014  # RDS API over moto, a real PostgreSQL per DB instance
 REDSHIFT_CONTROL = 8015  # Redshift API over moto, real multi-node clusters
 MWAA = 8016  # MWAA API: AWS's Airflow containers per environment
+ECS_CONTROL = 8018  # ECS API over moto that runs tasks as real containers
 S3_EXT = 8020  # S3 tagging + Inventory (S3Proxy lacks them), reached through :9000
 
 # Engines / data plane
