@@ -24,7 +24,7 @@ jobs:
       - name: Unit tests
         run: >
           uv run --python 3.12 --extra dev python -m pytest -v
-          -m "not integration and not kubernetes"
+          -m "not integration and not kubernetes and not cluster"
 
   integration:
     name: integration tests (Docker services)
@@ -98,7 +98,7 @@ jobs:
 
       # Coordinator + 2 workers, named explicitly so compose starts only the
       # cluster (a bare `--profile cluster up` would also start the single-node
-      # `redshift` service, colliding on 5439). Runners are amd64: Citus native.
+      # `redshift` service, colliding on 5439).
       - name: Build + start the Citus cluster
         run: >
           docker compose --profile cluster up -d --build
@@ -121,6 +121,17 @@ jobs:
         run: >
           uv run --python 3.12 --extra dev python -m pytest -v
           tests/redshift/test_redshift_cluster.py
+
+      # A multi-node cluster created through the Redshift API (moto behind the
+      # redshift-control proxy) runs from the image compose just built.
+      - name: Start moto
+        run: >
+          uv run --python 3.12 --extra dev python -c "from oblako.services import Oblako as O;
+          m = O().moto; m.start(); import sys; sys.exit(0 if m.wait_ready(timeout=120) else 1)"
+
+      - name: Multi-node cluster through the Redshift API
+        run: >
+          uv run --python 3.12 --extra dev python -m pytest -v -m cluster
 
   kubernetes:
     name: kubernetes backend (kind)

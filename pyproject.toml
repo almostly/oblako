@@ -96,6 +96,7 @@ testpaths = ["tests"]
 markers = [
     "integration: requires running oblako services (Docker)",
     "kubernetes: requires a Kubernetes cluster (minikube/kind)",
+    "cluster: requires the redshift-cluster image (Redshift multi-node)",
 ]
 
 [tool.commitizen]

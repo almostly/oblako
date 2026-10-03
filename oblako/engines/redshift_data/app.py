@@ -75,6 +75,13 @@ class RedshiftDataApp:
     # -------------------------------------------------------------------------------
     # Operations
     # -------------------------------------------------------------------------------
+    def _stored(self, stmt_id: str) -> dict:
+        """Return a statement this server just ran (always stored by execute)."""
+        stmt = self.executor.get(stmt_id)
+        if stmt is None:
+            raise _NotFound(stmt_id)
+        return stmt
+
     def op_ExecuteStatement(self, req: dict) -> Response:
         """Execute a single SQL statement and return its statement id."""
         if not req.get("Sql"):
@@ -85,7 +92,7 @@ class RedshiftDataApp:
             cluster_identifier=req.get("ClusterIdentifier"),
             parameters=req.get("Parameters"),
         )
-        stmt = self.executor.describe(stmt_id)
+        stmt = self._stored(stmt_id)
         return _json_response(
             {
                 "Id": stmt_id,
@@ -109,18 +116,18 @@ class RedshiftDataApp:
             )
             for sql in sqls
         ]
-        last = self.executor.describe(ids[-1])
+        last = self._stored(ids[-1])
         # link the sub-statements so DescribeStatement can report them
-        parent = self.executor.get(ids[-1])
-        parent["SubStatements"] = [
+        subs = [self._stored(sid) for sid in ids]
+        last["SubStatements"] = [
             {
-                "Id": sid,
-                "QueryString": self.executor.get(sid)["QueryString"],
-                "Status": self.executor.get(sid)["Status"],
-                "HasResultSet": self.executor.get(sid)["HasResultSet"],
-                "ResultRows": self.executor.get(sid)["ResultRows"],
+                "Id": sub["Id"],
+                "QueryString": sub["QueryString"],
+                "Status": sub["Status"],
+                "HasResultSet": sub["HasResultSet"],
+                "ResultRows": sub["ResultRows"],
             }
-            for sid in ids
+            for sub in subs
         ]
         return _json_response(
             {
@@ -157,13 +164,21 @@ class RedshiftDataApp:
     def op_ListDatabases(self, req: dict) -> Response:
         """Return the list of databases in the cluster."""
         return _json_response(
-            {"Databases": self.executor.list_databases(req.get("Database"))}
+            {
+                "Databases": self.executor.list_databases(
+                    req.get("Database"), req.get("ClusterIdentifier")
+                )
+            }
         )
 
     def op_ListSchemas(self, req: dict) -> Response:
         """Return the list of schemas in the specified database."""
         return _json_response(
-            {"Schemas": self.executor.list_schemas(req.get("Database"))}
+            {
+                "Schemas": self.executor.list_schemas(
+                    req.get("Database"), req.get("ClusterIdentifier")
+                )
+            }
         )
 
     def op_ListTables(self, req: dict) -> Response:
@@ -172,6 +187,7 @@ class RedshiftDataApp:
             database=req.get("Database"),
             schema_pattern=req.get("SchemaPattern"),
             table_pattern=req.get("TablePattern"),
+            cluster=req.get("ClusterIdentifier"),
         )
         return _json_response({"Tables": tables})
 
@@ -182,7 +198,10 @@ class RedshiftDataApp:
             {
                 "TableName": table,
                 "ColumnList": self.executor.describe_table(
-                    table, req.get("Database"), req.get("Schema")
+                    table,
+                    req.get("Database"),
+                    req.get("Schema"),
+                    req.get("ClusterIdentifier"),
                 ),
             }
         )

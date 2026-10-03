@@ -170,34 +170,42 @@ keypair at `/etc/oblako-redshift`, or disable TLS with `OBLAKO_SSL=0`.
 
 `OBLAKO_SSL=0` turns TLS off entirely.
 
-**MPP cluster (opt-in).** The single-node engine is enough for dev/CI, but a
-`cluster` profile runs the *same* Redshift-compatible engine on **Citus**, so
-tables shard across worker nodes for real multi-node parallelism:
+**Multi-node clusters.** The Redshift API on `http://localhost:8015` (a proxy over
+moto, started by `oblako up redshift`) makes clusters real. A single-node cluster's
+endpoint is the shared engine, `localhost:5439`. A multi-node cluster runs as its
+own Citus cluster, the same Redshift-compatible engine with Citus underneath:
+
+```python
+redshift.create_cluster(ClusterIdentifier="analytics", ClusterType="multi-node",
+                        NodeType="ra3.large", NumberOfNodes=2,
+                        MasterUsername="admin", MasterUserPassword="...", DBName="dev")
+redshift.get_waiter("cluster_available").wait(ClusterIdentifier="analytics")
+```
+
+The cluster is a leader node (the Citus coordinator, which holds no data) and
+`NumberOfNodes` compute nodes (Citus workers), at
+`<id>.<region>.redshift.localhost` on a port of its own; `DescribeClusters`
+reports `creating` until every node is registered, and `ClusterNodes` lists each
+node's role and address. **Unmodified Redshift DDL distributes**: the proxy turns
+`CREATE TABLE … DISTKEY(col)` into `create_distributed_table` and `DISTSTYLE ALL`
+into a reference table before the `CREATE` returns; a `SORTKEY` becomes a btree
+index. Tables with no distribution style stay on the leader. The Data API reaches
+a cluster by `ClusterIdentifier`. Up to 8 compute nodes per cluster.
+
+The image (`oblako/images/redshift-cluster`) builds from the single-node one and
+compiles Citus from source, so it is native on amd64 and arm64. Because Citus
+can't tolerate a spoofed `server_version`, the engine reports its real version and
+the **wire proxy** presents Redshift's version to clients instead
+(`OBLAKO_PROXY_SERVER_VERSION`). For self-hosting without oblako's API, the compose
+`cluster` profile runs the same image:
 
 ```bash
-# name the services so only the cluster starts (a bare `--profile cluster up`
-# would also start the single-node `redshift` service and collide on 5439)
 docker compose --profile cluster up redshift-coordinator redshift-w1 redshift-w2
 ```
 
-Everything the single-node image does still works, on the cluster: clients
-connect natively (redshift_connector, dbt), the catalog views, date functions,
-and plpython UDFs are all present, and a distributed table's aggregations run in
-parallel on the workers. **Unmodified Redshift DDL distributes automatically**:
-the proxy turns `CREATE TABLE … DISTKEY(col)` into a `create_distributed_table`
-(sharded across the workers) and `DISTSTYLE ALL` into a reference table, right
-after the CREATE commits; a `SORTKEY` becomes a btree index on those columns.
-Tables with no distribution style (EVEN/AUTO) stay local on the coordinator. It
-works whether the DDL is autocommitted or inside a transaction (dbt wraps its
-models in one): the distribution fires on commit, so rows written in the same
-transaction are preserved. So a dbt model with a `dist`/`sort` config, or any
-`DISTKEY` DDL, shards with no code change.
-The image (`oblako/images/redshift-cluster`) builds from the single-node one and
-layers Citus underneath; because Citus can't tolerate a spoofed `server_version`,
-the engine reports its real version and the **wire proxy** presents Redshift's
-version to clients instead (`OBLAKO_PROXY_SERVER_VERSION`). amd64 only (Citus
-ships no arm64 image), so on Apple Silicon it runs under emulation. This is a
-distinct product track from the single-node simulator, aimed at self-hosting.
+**Passwords.** The engine checks passwords as Redshift does when
+`POSTGRES_HOST_AUTH_METHOD` is `md5` (oblako's default); a deployment that sets
+`trust` keeps passwordless logins.
 
 **Redshift ML.** `CREATE MODEL`, `SHOW MODEL [ALL]` and `DROP MODEL [IF EXISTS]`
 work from any client, because the wire proxy turns them into calls to functions

@@ -1,49 +1,48 @@
-# oblako redshift-local, MPP variant: the same Redshift-compatible engine, but on
-# Citus so tables shard across worker nodes for real multi-node parallelism. It
-# reuses the single-node image's whole compat layer (the oblako_redshift C
-# extension, the initdb SQL, the wire proxy, the baked TLS cert) and layers Citus
-# underneath, preloaded alongside oblako_redshift.
-#
-# amd64 only: Citus publishes no arm64 image, so on Apple Silicon this runs under
-# emulation (fine for correctness, not for speed). See oblako/images/redshift for
-# the single-node image this builds on.
-FROM citusdata/citus:12.1
+# oblako redshift-local, MPP variant: the same Redshift-compatible engine, with
+# Citus underneath so tables shard across worker nodes for real multi-node
+# parallelism. It builds FROM the single-node image, so it keeps that image's
+# whole compatibility layer (the oblako_redshift extension, the initdb SQL, the
+# wire proxy, the COPY/UNLOAD bridge, the baked TLS cert), and compiles Citus from
+# source for the build platform, so it is multi-arch (amd64 + arm64) and runs
+# natively on Apple Silicon.
 
-# plpython3u for the Redshift UDFs / Redshift ML prediction UDFs; python3 runs the
-# wire proxy; openssl is only a fallback (the TLS cert is baked, copied below).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        postgresql-plpython3-16 python3 openssl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Reuse the single-node image's artifacts instead of rebuilding them: the compat
-# C extension, the initdb SQL (system tables, UDFs, date functions, catalog
-# views), the wire proxy + its entrypoint, and the baked TLS cert. The extension
-# is built for PostgreSQL 16, ABI-compatible with Citus's PG 16.
 ARG BASE_IMAGE=public.ecr.aws/oblako/redshift-local:16
-COPY --from=public.ecr.aws/oblako/redshift-local:16 \
-     /usr/lib/postgresql/16/lib/oblako_redshift.so /usr/lib/postgresql/16/lib/
-COPY --from=public.ecr.aws/oblako/redshift-local:16 \
-     /docker-entrypoint-initdb.d/ /docker-entrypoint-initdb.d/
-COPY --from=public.ecr.aws/oblako/redshift-local:16 \
-     /usr/local/bin/redshift_proxy.py /usr/local/bin/oblako-entrypoint.sh /usr/local/bin/
-COPY --from=public.ecr.aws/oblako/redshift-local:16 \
-     /etc/oblako-redshift/ /etc/oblako-redshift/
-RUN chmod 600 /etc/oblako-redshift/server.key \
-    && chmod +x /usr/local/bin/oblako-entrypoint.sh
 
-# Preload Citus first (it detects the real PG 16), then the oblako_redshift shim
-# (no-op Redshift GUCs + server_version spoof, applied afterwards). md5 auth to
-# match redshift_connector, exactly as the single-node image does.
+# --- build stage: compile Citus against PostgreSQL 16
+FROM postgres:16 AS citus
+ARG CITUS_VERSION=13.2.2
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        postgresql-server-dev-16 gcc make autoconf ca-certificates curl \
+        libcurl4-openssl-dev liblz4-dev libzstd-dev libssl-dev libkrb5-dev \
+        libicu-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL "https://github.com/citusdata/citus/archive/refs/tags/v${CITUS_VERSION}.tar.gz" \
+        | tar xz -C /tmp \
+    && cd "/tmp/citus-${CITUS_VERSION}" \
+    && ./configure --without-libcurl \
+    && make -j"$(nproc)" \
+    && make install DESTDIR=/out
+
+# --- runtime: the single-node image plus Citus
+FROM ${BASE_IMAGE}
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        liblz4-1 libzstd1 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=citus /out/ /
+
+# Preload Citus first, then the oblako_redshift shim; the last setting in the
+# sample config wins, so this replaces the single-node image's line.
 RUN echo "shared_preload_libraries = 'citus,oblako_redshift'" \
-        >> /usr/share/postgresql/postgresql.conf.sample \
-    && echo "password_encryption = md5" \
         >> /usr/share/postgresql/postgresql.conf.sample
 
+# CREATE EXTENSION citus runs before the single-node init scripts (00_...).
+COPY 000_citus.sql /docker-entrypoint-initdb.d/
+
 # On Citus the engine must NOT spoof server_version (it breaks CREATE EXTENSION
-# citus), so disable the in-engine spoof and have the wire proxy present Redshift's
-# version to clients instead. The engine keeps its real version for Citus.
-# OBLAKO_CITUS=1 also makes the proxy auto-distribute DISTKEY / DISTSTYLE ALL
-# tables (create_distributed_table / create_reference_table) after CREATE commits.
+# citus), so the in-engine spoof is off and the wire proxy presents Redshift's
+# version to clients instead. OBLAKO_CITUS=1 makes the proxy distribute DISTKEY /
+# DISTSTYLE ALL tables (create_distributed_table / create_reference_table) after
+# their CREATE commits.
 ENV OBLAKO_SPOOF_SERVER_VERSION=off \
     OBLAKO_PROXY_SERVER_VERSION=8.0.2 \
     OBLAKO_CITUS=1

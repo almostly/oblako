@@ -83,7 +83,7 @@ class RedshiftService(Service):
         user: str = "oblako",
         password: str = "oblako",
         database: str = "oblako",
-        control_port: int = ports.MOTO,
+        control_port: int = ports.REDSHIFT_CONTROL,
         data_port: int = ports.REDSHIFT_DATA,
         region: str | None = None,
     ):
@@ -181,10 +181,22 @@ class RedshiftService(Service):
             else f"already trusted in {bundle}"
         )
 
+    def start(self) -> None:
+        """Start the engine, then the Redshift API that runs multi-node clusters."""
+        from oblako.engines import host
+
+        super().start()
+        if self.control_port == ports.REDSHIFT_CONTROL:
+            host.start("redshift-control")
+
     def get_client(self):
-        """boto3 ``redshift`` control-plane client (clusters/nodes via moto)."""
+        """boto3 ``redshift`` control-plane client (single-node and multi-node)."""
         from . import boto
 
+        if self.control_port == ports.REDSHIFT_CONTROL:
+            from oblako.engines import redshift_control
+
+            redshift_control.start_in_thread(self.control_port)
         return boto.client(
             "redshift",
             f"http://localhost:{self.control_port}",
