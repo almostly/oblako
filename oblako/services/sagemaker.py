@@ -6,7 +6,7 @@ import contextlib
 import json
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, overload
 
 import docker
 import docker.types
@@ -133,6 +133,33 @@ class SageMakerService:
             if "stream" in chunk:
                 print(chunk["stream"], end="")
         return image.tags[0]
+
+    @overload
+    def run_training(
+        self,
+        image: str,
+        channels: dict[str, str],
+        hyperparameters: dict | None = ...,
+        environment: dict | None = ...,
+        gpus: bool = ...,
+        timeout: int = ...,
+        return_logs: Literal[False] = ...,
+        on_container=...,
+    ) -> dict[str, bytes]: ...
+
+    @overload
+    def run_training(
+        self,
+        image: str,
+        channels: dict[str, str],
+        hyperparameters: dict | None = ...,
+        environment: dict | None = ...,
+        gpus: bool = ...,
+        timeout: int = ...,
+        *,
+        return_logs: Literal[True],
+        on_container=...,
+    ) -> tuple[dict[str, bytes], str]: ...
 
     def run_training(
         self,

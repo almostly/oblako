@@ -1,4 +1,5 @@
 """Pipeline step 1: write a few numbers to the processing output."""
+
 import os
 
 os.makedirs("/opt/ml/processing/output", exist_ok=True)

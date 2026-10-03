@@ -426,7 +426,10 @@ class SageMakerExecutor:
             for member in src.getmembers():
                 if not member.isfile():
                     continue
-                data = src.extractfile(member).read()
+                handle = src.extractfile(member)
+                if handle is None:  # a regular file always has content
+                    continue
+                data = handle.read()
                 info = tarfile.TarInfo(f"opt/ml/model/{member.name}")
                 info.size = len(data)
                 dst.addfile(info, io.BytesIO(data))
@@ -911,7 +914,10 @@ class SageMakerExecutor:
                 rel = member.name
                 if rel.startswith(f"{base}/"):
                     rel = rel[len(base) + 1 :]
-                data = tar.extractfile(member).read()
+                handle = tar.extractfile(member)
+                if handle is None:
+                    continue
+                data = handle.read()
                 s3.put_object(
                     Bucket=bucket, Key=f"{prefix}/{rel}".lstrip("/"), Body=data
                 )
@@ -942,8 +948,7 @@ class SageMakerExecutor:
         """Register a tuning job and run the search in the background; return ARN."""
         name = req["HyperParameterTuningJobName"]
         arn = (
-            f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}"
-            f":hyper-parameter-tuning-job/{name}"
+            f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:hyper-parameter-tuning-job/{name}"
         )
         with self._lock:
             self._tuning_jobs[name] = {
@@ -1022,8 +1027,7 @@ class SageMakerExecutor:
                 tuned = {k: _hp_str(v) for k, v in sampled.items()}
                 trial_name = f"{name}-{i + 1:03d}"
                 trial_arn = (
-                    f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}"
-                    f":training-job/{trial_name}"
+                    f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:training-job/{trial_name}"
                 )
                 trial = {
                     "TrainingJobName": trial_name,
@@ -1105,9 +1109,7 @@ class SageMakerExecutor:
 
     def stop_hyper_parameter_tuning_job(self, name: str) -> bool:
         """Request a tuning job stop; kill the in-flight trial and launch no more."""
-        return self._stop_job(
-            self._tuning_jobs, name, "HyperParameterTuningJobStatus"
-        )
+        return self._stop_job(self._tuning_jobs, name, "HyperParameterTuningJobStatus")
 
     def describe_hyper_parameter_tuning_job(self, name: str) -> dict | None:
         """Return the public tuning-job record, or None if unknown."""
@@ -1122,9 +1124,7 @@ class SageMakerExecutor:
                 {
                     "HyperParameterTuningJobName": j["HyperParameterTuningJobName"],
                     "HyperParameterTuningJobArn": j["HyperParameterTuningJobArn"],
-                    "HyperParameterTuningJobStatus": j[
-                        "HyperParameterTuningJobStatus"
-                    ],
+                    "HyperParameterTuningJobStatus": j["HyperParameterTuningJobStatus"],
                     "CreationTime": j["CreationTime"],
                 }
                 for j in self._tuning_jobs.values()
@@ -1236,10 +1236,7 @@ class SageMakerExecutor:
         """Register a Studio user profile; return {UserProfileArn}."""
         domain_id = req["DomainId"]
         name = req["UserProfileName"]
-        arn = (
-            f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}"
-            f":user-profile/{domain_id}/{name}"
-        )
+        arn = f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}:user-profile/{domain_id}/{name}"
         now = _now()
         with self._lock:
             self._user_profiles[domain_id, name] = {
@@ -1352,8 +1349,8 @@ class SageMakerExecutor:
             if meta is None:
                 raise KeyError(name)
             online_enabled = bool(meta["OnlineStoreConfig"].get("EnableOnlineStore"))
-            offline_uri = (
-                (meta["OfflineStoreConfig"].get("S3StorageConfig") or {}).get("S3Uri")
+            offline_uri = (meta["OfflineStoreConfig"].get("S3StorageConfig") or {}).get(
+                "S3Uri"
             )
         values = {f["FeatureName"]: f["ValueAsString"] for f in record}
         if meta["RecordIdentifierFeatureName"] not in values:
@@ -1482,7 +1479,10 @@ class SageMakerExecutor:
                     )
             elif mi.get("S3Input"):  # oblako convenience: a direct S3 input
                 inputs.append(
-                    {"InputName": mi.get("InputName", "input"), "S3Input": mi["S3Input"]}
+                    {
+                        "InputName": mi.get("InputName", "input"),
+                        "S3Input": mi["S3Input"],
+                    }
                 )
         base = jobdef.get("BaselineConfig", {})
         for key, local in (
@@ -1512,7 +1512,9 @@ class SageMakerExecutor:
                     "S3UploadMode": mo["S3Output"].get("S3UploadMode", "EndOfJob"),
                 },
             }
-            for mo in jobdef.get("MonitoringOutputConfig", {}).get("MonitoringOutputs", [])
+            for mo in jobdef.get("MonitoringOutputConfig", {}).get(
+                "MonitoringOutputs", []
+            )
             if mo.get("S3Output", {}).get("S3Uri")
         ]
         proc_name = f"{name}-{uuid.uuid4().hex[:8]}"
@@ -1747,7 +1749,10 @@ def _offline_append(name: str, meta: dict, values: dict, offline_uri: str) -> No
         for d in meta.get("FeatureDefinitions", [])
     }
     columns = {
-        k: pa.array([_cast_feature(v, types.get(k, "String"))], _arrow_type(types.get(k, "String")))
+        k: pa.array(
+            [_cast_feature(v, types.get(k, "String"))],
+            _arrow_type(types.get(k, "String")),
+        )
         for k, v in values.items()
     }
     buf = io.BytesIO()
@@ -1812,7 +1817,12 @@ def _capture_part(data: bytes, content_type: str | None, mode: str) -> dict:
         encoding, payload = "JSON", raw.decode("utf-8", "replace")
     else:
         encoding, payload = "BASE64", base64.b64encode(raw).decode("ascii")
-    return {"observedContentType": ct, "mode": mode, "data": payload, "encoding": encoding}
+    return {
+        "observedContentType": ct,
+        "mode": mode,
+        "data": payload,
+        "encoding": encoding,
+    }
 
 
 def _hp_str(value) -> str:
@@ -1876,9 +1886,7 @@ class _RandomSearch:
         for r in self._ranges.get("ContinuousParameterRanges", []):
             lo, hi = float(r["MinValue"]), float(r["MaxValue"])
             if str(r.get("ScalingType")) == "Logarithmic" and lo > 0:
-                cfg[r["Name"]] = math.exp(
-                    random.uniform(math.log(lo), math.log(hi))
-                )
+                cfg[r["Name"]] = math.exp(random.uniform(math.log(lo), math.log(hi)))
             else:
                 cfg[r["Name"]] = random.uniform(lo, hi)
         for r in self._ranges.get("IntegerParameterRanges", []):
@@ -1922,6 +1930,8 @@ class _SyneTuneSearch:
     def suggest(self) -> dict:
         """Ask the scheduler for the next configuration to evaluate."""
         suggestion = self._scheduler.suggest()
+        if suggestion is None or suggestion.config is None:
+            raise RuntimeError("the tuner has no configuration left to try")
         return dict(suggestion.config)
 
     def report(self, config: dict, value: float) -> None:
@@ -1950,7 +1960,10 @@ def _mme_payload(model_url: str, target_model: str) -> bytes:
         for member in src.getmembers():
             if not member.isfile():
                 continue
-            data = src.extractfile(member).read()
+            handle = src.extractfile(member)
+            if handle is None:
+                continue
+            data = handle.read()
             info = tarfile.TarInfo(f"opt/ml/models/{target_model}/{member.name}")
             info.size = len(data)
             dst.addfile(info, io.BytesIO(data))

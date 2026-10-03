@@ -59,7 +59,9 @@ class OllamaBackend:
             kwargs["temperature"] = temperature
         if top_p is not None:
             kwargs["top_p"] = top_p
-        for chunk in self.client.chat_stream(resolve_model(model_id), messages, **kwargs):
+        for chunk in self.client.chat_stream(
+            resolve_model(model_id), messages, **kwargs
+        ):
             text = chunk.get("message", {}).get("content", "")
             if text:
                 yield {"text": text}

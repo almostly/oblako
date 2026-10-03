@@ -8,6 +8,7 @@ code to create policies and see GUARDRAIL_INTERVENED when content trips them.
 
 from __future__ import annotations
 
+import builtins
 import datetime
 import threading
 import uuid
@@ -69,7 +70,7 @@ class GuardrailStore:
             record = self._resolve(identifier)
             return dict(record) if record else None
 
-    def list(self) -> list[dict]:
+    def list(self) -> builtins.list[dict]:
         """Return a summary list of all guardrails."""
         with self._lock:
             return [
@@ -92,7 +93,7 @@ class GuardrailStore:
             if record:
                 self._guardrails.pop(record["guardrailId"], None)
 
-    def apply(self, identifier: str, source: str, content: list[dict]) -> dict:
+    def apply(self, identifier: str, source: str, content: builtins.list[dict]) -> dict:
         """Evaluate content against a guardrail's policies (ApplyGuardrail)."""
         with self._lock:
             record = self._resolve(identifier)
@@ -125,9 +126,10 @@ class GuardrailStore:
         for topic in record["topicPolicy"].get("topicsConfig", []):
             if topic.get("type", "DENY") != "DENY":
                 continue
-            phrases = [topic.get("name", "").lower(), *[
-                e.lower() for e in topic.get("examples", [])
-            ]]
+            phrases = [
+                topic.get("name", "").lower(),
+                *[e.lower() for e in topic.get("examples", [])],
+            ]
             if any(p and p in joined for p in phrases):
                 matched_topics.append(topic["name"])
         if matched_topics:

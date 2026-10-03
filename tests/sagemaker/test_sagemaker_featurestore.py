@@ -72,7 +72,9 @@ def test_control_plane_and_online_store(clients):
     desc = sm.describe_feature_group(FeatureGroupName=fg)
     assert desc["FeatureGroupStatus"] == "Created"
     assert desc["RecordIdentifierFeatureName"] == "customer_id"
-    assert fg in [g["FeatureGroupName"] for g in sm.list_feature_groups()["FeatureGroupSummaries"]]
+    assert fg in [
+        g["FeatureGroupName"] for g in sm.list_feature_groups()["FeatureGroupSummaries"]
+    ]
 
     fs.put_record(FeatureGroupName=fg, Record=_record("c1", 30, 0.9))
     fs.put_record(FeatureGroupName=fg, Record=_record("c2", 41, 0.2))
@@ -95,7 +97,10 @@ def test_control_plane_and_online_store(clients):
             {"FeatureGroupName": fg, "RecordIdentifiersValueAsString": ["c1", "c2"]}
         ]
     )
-    assert {r["RecordIdentifierValueAsString"] for r in batch["Records"]} == {"c1", "c2"}
+    assert {r["RecordIdentifierValueAsString"] for r in batch["Records"]} == {
+        "c1",
+        "c2",
+    }
 
     # a missing record comes back with no Record member (not an error)
     miss = fs.get_record(FeatureGroupName=fg, RecordIdentifierValueAsString="nope")

@@ -49,7 +49,9 @@ def test_endpoint_config_crud_and_list_endpoints(sm):
     )
     desc = sm.describe_endpoint_config(EndpointConfigName="ec-crud")
     assert desc["ProductionVariants"][0]["VariantName"] == "v0"
-    names = [c["EndpointConfigName"] for c in sm.list_endpoint_configs()["EndpointConfigs"]]
+    names = [
+        c["EndpointConfigName"] for c in sm.list_endpoint_configs()["EndpointConfigs"]
+    ]
     assert "ec-crud" in names
     sm.delete_endpoint_config(EndpointConfigName="ec-crud")
     with pytest.raises(sm.exceptions.ClientError):
@@ -98,7 +100,10 @@ def test_studio_domain_and_user_profile_lifecycle(sm):
 
     sm.update_domain(
         DomainId=domain_id,
-        DefaultUserSettings={"ExecutionRole": _arn_role(), "JupyterServerAppSettings": {}},
+        DefaultUserSettings={
+            "ExecutionRole": _arn_role(),
+            "JupyterServerAppSettings": {},
+        },
     )
     assert domain_id in [d["DomainId"] for d in sm.list_domains()["Domains"]]
 

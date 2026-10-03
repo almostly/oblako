@@ -148,8 +148,6 @@ def test_multi_model_endpoint_routes_by_target_model():
 
         # a multi-model endpoint requires a TargetModel
         with pytest.raises(rt.exceptions.ClientError):
-            rt.invoke_endpoint(
-                EndpointName="mme-ep", Body=b"5", ContentType="text/csv"
-            )
+            rt.invoke_endpoint(EndpointName="mme-ep", Body=b"5", ContentType="text/csv")
     finally:
         sm.delete_endpoint(EndpointName="mme-ep")
