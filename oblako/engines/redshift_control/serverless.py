@@ -125,12 +125,10 @@ def _create_in_engine(user: str | None, password: str | None, database: str) -> 
             "SELECT 1 FROM pg_database WHERE datname = %s", (database,)
         ).fetchone()
         if not exists:
-            owner = sql.Identifier(user) if user else sql.SQL("CURRENT_USER")
-            conn.execute(
-                sql.SQL("CREATE DATABASE {} OWNER {}").format(
-                    sql.Identifier(database), owner
-                )
-            )
+            statement = sql.SQL("CREATE DATABASE {}").format(sql.Identifier(database))
+            if user:  # otherwise the engine's own user owns it
+                statement += sql.SQL(" OWNER {}").format(sql.Identifier(user))
+            conn.execute(statement)
             created["database"] = True
     return created
 
@@ -157,7 +155,11 @@ def _drop_from_engine(record: dict) -> None:
 # Namespaces
 # ---------------------------------------------------------------------------
 def _namespace_view(record: dict) -> dict:
-    return {k: v for k, v in record.items() if k != "created"}
+    return {k: v for k, v in record.items() if k not in ("created", "tags")}
+
+
+def _workgroup_view(record: dict) -> dict:
+    return {k: v for k, v in record.items() if k != "tags"}
 
 
 def create_namespace(req: dict) -> dict:
@@ -189,6 +191,7 @@ def create_namespace(req: dict) -> dict:
             "status": "AVAILABLE",
             "creationDate": _now(),
             "created": created,
+            "tags": {t["key"]: t["value"] for t in req.get("tags", [])},
         }
         if not user:
             del record["adminUsername"]
@@ -269,12 +272,13 @@ def create_workgroup(req: dict) -> dict:
             "endpoint": {"address": "localhost", "port": ports.REDSHIFT_PG},
             "status": "AVAILABLE",
             "creationDate": _now(),
+            "tags": {t["key"]: t["value"] for t in req.get("tags", [])},
         }
         if "maxCapacity" in req:
             record["maxCapacity"] = int(req["maxCapacity"])
         state["workgroups"][name] = record
         _save(state)
-    return {"workgroup": record}
+    return {"workgroup": _workgroup_view(record)}
 
 
 def _workgroup(state: dict, name: str | None) -> dict:
@@ -288,12 +292,12 @@ def _workgroup(state: dict, name: str | None) -> dict:
 
 def get_workgroup(req: dict) -> dict:
     """Return one workgroup."""
-    return {"workgroup": _workgroup(load(), req.get("workgroupName"))}
+    return {"workgroup": _workgroup_view(_workgroup(load(), req.get("workgroupName")))}
 
 
 def list_workgroups(req: dict) -> dict:
     """Return every workgroup."""
-    return {"workgroups": list(load()["workgroups"].values())}
+    return {"workgroups": [_workgroup_view(r) for r in load()["workgroups"].values()]}
 
 
 def delete_workgroup(req: dict) -> dict:
@@ -304,7 +308,47 @@ def delete_workgroup(req: dict) -> dict:
         record = _workgroup(state, name)
         del state["workgroups"][name]
         _save(state)
-    return {"workgroup": {**record, "status": "DELETING"}}
+    return {"workgroup": {**_workgroup_view(record), "status": "DELETING"}}
+
+
+# ---------------------------------------------------------------------------
+# Tags (on namespaces and workgroups, by ARN)
+# ---------------------------------------------------------------------------
+def _by_arn(state: dict, arn: str) -> dict:
+    for kind in ("namespaces", "workgroups"):
+        for record in state[kind].values():
+            if arn in (record.get("namespaceArn"), record.get("workgroupArn")):
+                return record
+    raise ServerlessError("ResourceNotFoundException", f"Resource {arn} not found")
+
+
+def tag_resource(req: dict) -> dict:
+    """Add or replace tags on a namespace or workgroup."""
+    with _lock:
+        state = load()
+        record = _by_arn(state, req.get("resourceArn", ""))
+        tags = record.setdefault("tags", {})
+        tags.update({t["key"]: t["value"] for t in req.get("tags", [])})
+        _save(state)
+    return {}
+
+
+def untag_resource(req: dict) -> dict:
+    """Remove tags from a namespace or workgroup."""
+    with _lock:
+        state = load()
+        record = _by_arn(state, req.get("resourceArn", ""))
+        for key in req.get("tagKeys", []):
+            record.get("tags", {}).pop(key, None)
+        _save(state)
+    return {}
+
+
+def list_tags_for_resource(req: dict) -> dict:
+    """Return a namespace's or workgroup's tags."""
+    record = _by_arn(load(), req.get("resourceArn", ""))
+    tags = record.get("tags", {})
+    return {"tags": [{"key": k, "value": v} for k, v in tags.items()]}
 
 
 OPERATIONS = {
@@ -316,6 +360,9 @@ OPERATIONS = {
     "GetWorkgroup": get_workgroup,
     "ListWorkgroups": list_workgroups,
     "DeleteWorkgroup": delete_workgroup,
+    "TagResource": tag_resource,
+    "UntagResource": untag_resource,
+    "ListTagsForResource": list_tags_for_resource,
 }
 
 
