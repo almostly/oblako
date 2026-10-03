@@ -50,7 +50,8 @@ def conn():
         database="oblako",
         user="oblako",
         password="oblako",
-        ssl=False,
+        ssl=True,
+        sslmode="verify-ca",  # oblako trust has added the cert
     )
     c.autocommit = True
     cur = c.cursor()
@@ -210,7 +211,8 @@ def test_auto_distribute_in_transaction():
         database="oblako",
         user="oblako",
         password="oblako",
-        ssl=False,
+        ssl=True,
+        sslmode="verify-ca",  # oblako trust has added the cert
     )
     try:
         cur = c.cursor()

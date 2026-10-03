@@ -9,6 +9,7 @@ import boto3
 import pytest
 
 from oblako.engines.bedrock_runtime import start_in_thread
+from tests.ports import free_port
 
 CREDS = dict(
     region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"
@@ -17,7 +18,7 @@ CREDS = dict(
 
 @pytest.fixture(scope="module")
 def clients():
-    url = start_in_thread(port=8016)
+    url = start_in_thread(port=free_port())
     return (
         boto3.client("bedrock", endpoint_url=url, **CREDS),
         boto3.client("bedrock-runtime", endpoint_url=url, **CREDS),

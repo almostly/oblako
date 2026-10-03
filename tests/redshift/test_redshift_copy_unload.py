@@ -123,7 +123,8 @@ def test_extended_protocol_via_redshift_connector(s3):
         database="oblako",
         user="oblako",
         password="oblako",
-        ssl=False,
+        ssl=True,
+        sslmode="verify-ca",  # oblako trust has added the cert
     )
     con.autocommit = True
     try:
@@ -228,7 +229,8 @@ def test_awswrangler_copy_and_unload(s3, monkeypatch, tmp_path):
         database="oblako",
         user="oblako",
         password="oblako",
-        ssl=False,
+        ssl=True,
+        sslmode="verify-ca",  # oblako trust has added the cert
     )
     try:
         df = pd.DataFrame({"id": [10, 20, 30], "name": ["x", "y", "z"]})
@@ -274,7 +276,9 @@ def test_json_copy_auto_shreds_columns_and_super(conn, s3):
         "COPY cu_json_auto FROM 's3://rs-bridge-test/json_auto/' "
         "IAM_ROLE 'x' FORMAT AS JSON 'auto'"
     )
-    cur.execute("SELECT r_regionkey, r_name, r_nations FROM cu_json_auto ORDER BY r_regionkey")
+    cur.execute(
+        "SELECT r_regionkey, r_name, r_nations FROM cu_json_auto ORDER BY r_regionkey"
+    )
     rows = cur.fetchall()
     assert [(r[0], r[1]) for r in rows] == [(0, "AFRICA"), (1, "AMERICA")]
     assert _super(rows[0][2]) == [{"n": "AF"}, {"n": "EG"}]
@@ -323,7 +327,9 @@ def test_json_copy_jsonpaths(conn, s3):
     )
     cur = conn.cursor()
     cur.execute("DROP TABLE IF EXISTS cu_json_jp")
-    cur.execute("CREATE TABLE cu_json_jp (regionkey smallint, name varchar, meta super)")
+    cur.execute(
+        "CREATE TABLE cu_json_jp (regionkey smallint, name varchar, meta super)"
+    )
     cur.execute(
         "COPY cu_json_jp FROM 's3://rs-bridge-test/json_jp/' "
         "IAM_ROLE 'x' FORMAT AS JSON 's3://rs-bridge-test/paths/np.json'"

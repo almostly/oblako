@@ -91,3 +91,28 @@ def test_ssl_require_is_encrypted():
         assert cur.fetchone()[0] == 1
     finally:
         c.close()
+
+
+@pytest.mark.skipif(not _ssl_available(), reason="redshift image without the SSL proxy")
+def test_redshift_connector_verifies_the_certificate():
+    """redshift_connector with sslmode=verify-ca, after `oblako trust`, as readers connect.
+
+    verify-ca checks the proxy's certificate against the driver's CA bundle, so
+    this fails unless `oblako trust` has added oblako's cert to it.
+    """
+    redshift_connector = pytest.importorskip("redshift_connector")
+    conn = redshift_connector.connect(
+        host="localhost",
+        port=RS_CONFIG["port"],
+        database=RS_CONFIG["dbname"],
+        user=RS_CONFIG["user"],
+        password=RS_CONFIG["password"],
+        ssl=True,
+        sslmode="verify-ca",
+    )
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        assert cur.fetchone()[0] == 1
+    finally:
+        conn.close()

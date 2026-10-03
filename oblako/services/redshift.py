@@ -83,7 +83,7 @@ class RedshiftService(Service):
         user: str = "oblako",
         password: str = "oblako",
         database: str = "oblako",
-        control_port: int = ports.MOTO,
+        control_port: int = ports.REDSHIFT_CONTROL,
         data_port: int = ports.REDSHIFT_DATA,
         region: str | None = None,
     ):
@@ -145,13 +145,23 @@ class RedshiftService(Service):
         )
 
     def server_cert(self) -> str | None:
-        """Read the proxy's self-signed TLS cert (PEM) from the container."""
+        """Return the proxy's TLS cert (PEM).
+
+        The running container's cert comes first, since a mounted cert replaces
+        the baked one; otherwise the cert every oblako Redshift image bakes in
+        (images/redshift/certs), so ``oblako trust`` works before anything runs
+        and for a multi-node cluster, whose nodes carry the same cert.
+        """
         try:
             container = self.client.containers.get(self.container_name)
             code, out = container.exec_run(["cat", SSL_CERT_PATH])
-        except Exception:  # noqa: BLE001 - not running / no docker
-            return None
-        return out.decode() if code == 0 else None
+            if code == 0:
+                return out.decode()
+        except Exception:  # not running, or no Docker
+            pass
+        baked = Path(__file__).resolve().parents[1] / "images" / "redshift" / "certs"
+        cert = baked / "server.crt"
+        return cert.read_text() if cert.exists() else None
 
     def trust_cert(self, python_exe: str | None = None) -> str:
         """Trust the proxy's cert in a venv's redshift_connector CA bundle.
@@ -170,8 +180,8 @@ class RedshiftService(Service):
         cert = self.server_cert()
         if not cert:
             raise RuntimeError(
-                f"couldn't read the TLS cert from {self.container_name}; "
-                "is redshift running (oblako up redshift)?"
+                "couldn't find oblako's Redshift TLS cert in the running "
+                "container or in the oblako package"
             )
         bundle = _redshift_connector_bundle(python_exe or sys.executable)
         added = append_cert_to_bundle(bundle, cert)
@@ -181,10 +191,22 @@ class RedshiftService(Service):
             else f"already trusted in {bundle}"
         )
 
+    def start(self) -> None:
+        """Start the engine, then the Redshift API that runs multi-node clusters."""
+        from oblako.engines import host
+
+        super().start()
+        if self.control_port == ports.REDSHIFT_CONTROL:
+            host.start("redshift-control")
+
     def get_client(self):
-        """boto3 ``redshift`` control-plane client (clusters/nodes via moto)."""
+        """boto3 ``redshift`` control-plane client (single-node and multi-node)."""
         from . import boto
 
+        if self.control_port == ports.REDSHIFT_CONTROL:
+            from oblako.engines import redshift_control
+
+            redshift_control.start_in_thread(self.control_port)
         return boto.client(
             "redshift",
             f"http://localhost:{self.control_port}",

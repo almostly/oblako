@@ -46,13 +46,14 @@ services:
   # engine on Citus, so tables shard across worker nodes for real multi-node
   # parallelism. Start with `docker compose --profile cluster up`. The coordinator
   # is what clients connect to (it also publishes 5439, so run it INSTEAD of the
-  # single-node `redshift` service, not alongside). amd64 only (Citus ships no
-  # arm64 image); the image builds FROM the single-node redshift image.
+  # single-node `redshift` service, not alongside). The image builds FROM the
+  # single-node redshift image and compiles Citus, so it is native on amd64 and
+  # arm64. (Through oblako's Redshift API, create_cluster(ClusterType=
+  # 'multi-node') starts a cluster like this one without compose.)
   redshift-coordinator:
     profiles: ["cluster"]
     image: public.ecr.aws/oblako/redshift-cluster:16
     build: ./oblako/images/redshift-cluster
-    platform: linux/amd64
     ports:
       - "5439:5439"
     environment:
@@ -73,7 +74,6 @@ services:
     profiles: ["cluster"]
     image: public.ecr.aws/oblako/redshift-cluster:16
     build: ./oblako/images/redshift-cluster
-    platform: linux/amd64
     environment:
       POSTGRES_USER: oblako
       POSTGRES_PASSWORD: oblako
@@ -85,7 +85,6 @@ services:
     profiles: ["cluster"]
     image: public.ecr.aws/oblako/redshift-cluster:16
     build: ./oblako/images/redshift-cluster
-    platform: linux/amd64
     environment:
       POSTGRES_USER: oblako
       POSTGRES_PASSWORD: oblako

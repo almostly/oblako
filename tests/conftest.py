@@ -1,9 +1,10 @@
 """Auto-mark integration / kubernetes tests so CI can select by category.
 
 CI is then:
-  unit:        pytest -m "not integration and not kubernetes"
+  unit:        pytest -m "not integration and not kubernetes and not cluster"
   integration: pytest -m integration
   kubernetes:  pytest -m kubernetes
+  cluster:     pytest -m cluster   (Redshift multi-node, needs the cluster image)
 
 Adding a new integration test = drop it into one of the integration dirs / files
 listed below; no need to touch ci.yml.
@@ -54,6 +55,11 @@ _INTEGRATION_FILES = {
     "tests/services/test_firehose.py",
 }
 
+# Need the redshift-cluster image, which only the cluster CI job builds.
+_CLUSTER_FILES = {
+    "tests/redshift/test_redshift_multinode.py",
+}
+
 _KUBERNETES_FILES = {
     "tests/services/test_k8s_backend.py",
 }
@@ -68,3 +74,5 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.integration)
         if rel in _KUBERNETES_FILES:
             item.add_marker(pytest.mark.kubernetes)
+        if rel in _CLUSTER_FILES:
+            item.add_marker(pytest.mark.cluster)

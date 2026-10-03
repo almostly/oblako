@@ -24,7 +24,7 @@ jobs:
       - name: Unit tests
         run: >
           uv run --python 3.12 --extra dev python -m pytest -v
-          -m "not integration and not kubernetes"
+          -m "not integration and not kubernetes and not cluster"
 
   integration:
     name: integration tests (Docker services)
@@ -69,6 +69,11 @@ jobs:
           r = {s.name: s.wait_ready(timeout=180) for s in svcs};
           print('ready:', r); sys.exit(0 if all(r.values()) else 1)"
 
+      # Trust oblako's Redshift TLS cert in the test environment, as a reader does,
+      # so redshift_connector connects with sslmode=verify-ca.
+      - name: Trust the Redshift certificate
+        run: uv run --python 3.12 --extra dev --extra sagemaker oblako trust
+
       # MySQL (test_rds_data mysql cases) isn't started, so those skip; the Step
       # Functions tests use Pass-only state machines (no Lambda).
       - name: Integration tests
@@ -98,7 +103,7 @@ jobs:
 
       # Coordinator + 2 workers, named explicitly so compose starts only the
       # cluster (a bare `--profile cluster up` would also start the single-node
-      # `redshift` service, colliding on 5439). Runners are amd64: Citus native.
+      # `redshift` service, colliding on 5439).
       - name: Build + start the Citus cluster
         run: >
           docker compose --profile cluster up -d --build
@@ -117,10 +122,24 @@ jobs:
           done
           echo "cluster did not form"; docker compose logs redshift-coordinator | tail -40; exit 1
 
+      - name: Trust the Redshift certificate
+        run: uv run --python 3.12 --extra dev oblako trust
+
       - name: Cluster tests
         run: >
           uv run --python 3.12 --extra dev python -m pytest -v
           tests/redshift/test_redshift_cluster.py
+
+      # A multi-node cluster created through the Redshift API (moto behind the
+      # redshift-control proxy) runs from the image compose just built.
+      - name: Start moto
+        run: >
+          uv run --python 3.12 --extra dev python -c "from oblako.services import Oblako as O;
+          m = O().moto; m.start(); import sys; sys.exit(0 if m.wait_ready(timeout=120) else 1)"
+
+      - name: Multi-node cluster through the Redshift API
+        run: >
+          uv run --python 3.12 --extra dev python -m pytest -v -m cluster
 
   kubernetes:
     name: kubernetes backend (kind)

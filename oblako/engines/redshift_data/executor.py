@@ -46,14 +46,27 @@ class RedshiftDataExecutor:
     # -------------------------------------------------------------------------------
     # Connections
     # -------------------------------------------------------------------------------
-    def _connect(self, database: str | None = None):
-        conn = psycopg2.connect(
-            host=self.host,
-            port=self.port,
-            user=self.user,
-            password=self.password,
-            dbname=database or self.database,
-        )
+    def _connect(self, database: str | None = None, cluster: str | None = None):
+        """Connect to the shared engine, or to a multi-node cluster's own leader."""
+        from oblako.engines.redshift_control import clusters
+
+        record = clusters.get(cluster) if cluster else None
+        if record is not None and record.get("status") == "available":
+            conn = psycopg2.connect(
+                host="localhost",
+                port=record["port"],
+                user=record["user"],
+                password=record["password"],
+                dbname=database or record["database"],
+            )
+        else:
+            conn = psycopg2.connect(
+                host=self.host,
+                port=self.port,
+                user=self.user,
+                password=self.password,
+                dbname=database or self.database,
+            )
         conn.autocommit = True
         return conn
 
@@ -152,7 +165,7 @@ class RedshiftDataExecutor:
         start = datetime.datetime.now()
         try:
             bound_sql, params = self._bind_params(sql, parameters)
-            conn = self._connect(database)
+            conn = self._connect(database, cluster_identifier)
             try:
                 with conn.cursor() as cur:
                     cur.execute(bound_sql, params)
@@ -174,7 +187,7 @@ class RedshiftDataExecutor:
         except psycopg2.Error as err:
             statement["Status"] = "FAILED"
             statement["Error"] = str(err).strip()
-        except Exception as err:  # noqa: BLE001 - parameter binding, connection errors
+        except Exception as err:  # parameter binding, connection errors
             statement["Status"] = "FAILED"
             statement["Error"] = str(err).strip()
         statement["UpdatedAt"] = datetime.datetime.now(datetime.timezone.utc)
@@ -225,8 +238,10 @@ class RedshiftDataExecutor:
     # -------------------------------------------------------------------------------
     # Catalog helpers
     # -------------------------------------------------------------------------------
-    def _scalar_list(self, sql: str, database: str | None = None) -> list[str]:
-        conn = self._connect(database)
+    def _scalar_list(
+        self, sql: str, database: str | None = None, cluster: str | None = None
+    ) -> list[str]:
+        conn = self._connect(database, cluster)
         try:
             with conn.cursor() as cur:
                 cur.execute(sql)
@@ -234,18 +249,24 @@ class RedshiftDataExecutor:
         finally:
             conn.close()
 
-    def list_databases(self, database: str | None = None) -> list[str]:
+    def list_databases(
+        self, database: str | None = None, cluster: str | None = None
+    ) -> list[str]:
         """Return the names of all non-template databases."""
         return self._scalar_list(
             "SELECT datname FROM pg_database WHERE datistemplate = false ORDER BY datname",
             database,
+            cluster,
         )
 
-    def list_schemas(self, database: str | None = None) -> list[str]:
+    def list_schemas(
+        self, database: str | None = None, cluster: str | None = None
+    ) -> list[str]:
         """Return the names of all schemas in the specified database."""
         return self._scalar_list(
             "SELECT schema_name FROM information_schema.schemata ORDER BY schema_name",
             database,
+            cluster,
         )
 
     def list_tables(
@@ -253,6 +274,7 @@ class RedshiftDataExecutor:
         database: str | None = None,
         schema_pattern: str | None = None,
         table_pattern: str | None = None,
+        cluster: str | None = None,
     ) -> list[dict]:
         """Return tables matching optional schema and name LIKE patterns."""
         clauses = ["table_schema NOT IN ('pg_catalog', 'information_schema')"]
@@ -267,7 +289,7 @@ class RedshiftDataExecutor:
             "SELECT table_name, table_schema, table_type FROM information_schema.tables "
             f"WHERE {' AND '.join(clauses)} ORDER BY table_schema, table_name"
         )
-        conn = self._connect(database)
+        conn = self._connect(database, cluster)
         try:
             with conn.cursor() as cur:
                 cur.execute(sql, params or None)
@@ -279,7 +301,11 @@ class RedshiftDataExecutor:
             conn.close()
 
     def describe_table(
-        self, table: str, database: str | None = None, schema: str | None = None
+        self,
+        table: str,
+        database: str | None = None,
+        schema: str | None = None,
+        cluster: str | None = None,
     ) -> list[dict]:
         """Return column metadata for the named table.
 
@@ -289,7 +315,7 @@ class RedshiftDataExecutor:
         (``integer``, ``real``, ...). Clients such as Feast key their Redshift
         type map on the internal names, so returning ``integer`` breaks them.
         """
-        conn = self._connect(database)
+        conn = self._connect(database, cluster)
         try:
             with conn.cursor() as cur:
                 cur.execute(

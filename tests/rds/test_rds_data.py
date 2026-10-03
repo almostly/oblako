@@ -15,6 +15,7 @@ import pytest
 
 from oblako.engines.rds_data import start_in_thread
 from oblako.engines.rds_data.executor import RdsDataExecutor
+from tests.ports import free_port
 
 CREDS = dict(
     region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"
@@ -36,7 +37,7 @@ def data():
         password="oblako",
         database="oblako",
     )
-    url = start_in_thread(port=8018, executor=executor)
+    url = start_in_thread(port=free_port(), executor=executor)
     return boto3.client("rds-data", endpoint_url=url, **CREDS)
 
 
@@ -138,7 +139,7 @@ def mysql_data():
         database="oblako",
         engine="mysql",
     )
-    url = start_in_thread(port=8017, executor=executor)
+    url = start_in_thread(port=free_port(), executor=executor)
     return boto3.client("rds-data", endpoint_url=url, **CREDS)
 
 

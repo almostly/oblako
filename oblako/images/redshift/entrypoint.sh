@@ -60,6 +60,13 @@ if [ -S /var/run/docker.sock ]; then
   ) &
 fi
 
+# A data directory initialised before loopback TCP followed POSTGRES_HOST_AUTH_METHOD
+# (initdb.d/12_password_auth.sh) gets the same change here, on every start.
+if [ -f "${PGDATA:-/var/lib/postgresql/data}/pg_hba.conf" ]; then
+  PGDATA="${PGDATA:-/var/lib/postgresql/data}" \
+    bash /docker-entrypoint-initdb.d/12_password_auth.sh || true
+fi
+
 # Hand off to the stock postgres entrypoint (initdb, auth, etc.); PostgreSQL
 # listens on the internal port so only the proxy fronts it.
 exec docker-entrypoint.sh postgres -p "$OBLAKO_PG_PORT"
