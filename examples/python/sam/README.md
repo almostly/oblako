@@ -112,8 +112,8 @@ The object/item are really in oblako afterward (verify from the host with the sa
   CloudFormation:
 
   ```bash
-  oblako cloudformation                                   # server on :5601
-  export AWS_ENDPOINT_URL_CLOUDFORMATION=http://localhost:5601
+  oblako cloudformation                                   # server on :8017
+  export AWS_ENDPOINT_URL_CLOUDFORMATION=http://localhost:8017
   sam deploy --stack-name demo --no-confirm-changeset     # plain CFN resource types
   ```
 

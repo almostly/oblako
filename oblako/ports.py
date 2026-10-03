@@ -25,7 +25,7 @@ OPENSEARCH = 9200
 MOTO = 5500
 
 # In-process API servers (started lazily by their Service)
-CLOUDFORMATION = 5601
+CLOUDFORMATION = 8017  # not 5601, the OpenSearch Dashboards / Kibana port
 REDSHIFT_DATA = 8002
 RDS_DATA = 8006
 BEDROCK_RUNTIME = 8004

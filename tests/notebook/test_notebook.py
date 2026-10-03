@@ -37,7 +37,7 @@ def test_endpoint_env_vars_redirect_unmodified_boto3(monkeypatch):
         "dynamodb": "http://localhost:8007",  # the proxy: vector search, tags
         "dynamodbstreams": "http://localhost:8001",  # DynamoDB Local itself
         "stepfunctions": "http://localhost:8083",  # serviceId "SFN"
-        "cloudformation": "http://localhost:5601",
+        "cloudformation": "http://localhost:8017",
         "lambda": "http://localhost:5500",
         "apigateway": "http://localhost:5500",  # serviceId "API Gateway"
     }

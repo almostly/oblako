@@ -237,7 +237,7 @@ def cmd_cloudformation(args):
     """Run the CloudFormation server (boto3 'cloudformation' endpoint -> oblako engines).
 
     Long-lived so `aws cloudformation deploy` / `sam deploy` can target it:
-        export AWS_ENDPOINT_URL_CLOUDFORMATION=http://localhost:5601
+        export AWS_ENDPOINT_URL_CLOUDFORMATION=http://localhost:8017
     """
     import uvicorn
 
@@ -461,7 +461,11 @@ def main():
 
     p_cfn = sub.add_parser("cloudformation", help="Run the CloudFormation server")
     p_cfn.add_argument(
-        "-p", "--port", type=int, default=5601, help="Port (default: 5601)"
+        "-p",
+        "--port",
+        type=int,
+        default=ports.CLOUDFORMATION,
+        help="Port (default: 8017)",
     )
     p_cfn.set_defaults(func=cmd_cloudformation)
 

@@ -97,7 +97,7 @@ oblako down s3vectors
 | `oblako redshift-data [-p PORT]` | Start the Redshift Data API server (default: 8002) |
 | `oblako bedrock-runtime [-p PORT]` | Start the Bedrock Runtime server (default: 8004) |
 | `oblako rds-data [-p PORT]` | Start the RDS Data API server (default: 8006) |
-| `oblako cloudformation [-p PORT]` | Start the CloudFormation server (default: 5601) |
+| `oblako cloudformation [-p PORT]` | Start the CloudFormation server (default: 8017) |
 | `oblako agentcore run <file>` | Run a local AgentCore agent (default: 8080) |
 | `oblako logs <service>` | Show logs for a service |
 | `oblako pull [model]` | Pull a model into the engine (default: `qwen2.5:0.5b`) |
