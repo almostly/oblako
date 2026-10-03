@@ -283,6 +283,8 @@ def test_json_rows_jsonpaths_positional():
 
 def test_json_rows_gzip():
     s3 = _FakeS3({"k": gzip.compress(b'{"a":1}')})
-    assert _mod._json_rows(_FakePlpy(), s3, "bkt", ["k"], ["a"], "auto", "gzip") == [[1]]
+    assert _mod._json_rows(_FakePlpy(), s3, "bkt", ["k"], ["a"], "auto", "gzip") == [
+        [1]
+    ]
     # auto-detect gzip without the token
     assert _mod._json_rows(_FakePlpy(), s3, "bkt", ["k"], ["a"], "auto", None) == [[1]]

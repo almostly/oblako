@@ -123,6 +123,29 @@ def test_multi_node_cluster(redshift):
     assert records == [[{"longValue": 10000}]]
 
 
+def test_redshift_connector_ddl_is_distributed(redshift):
+    """redshift_connector's two-round extended protocol still distributes DISTKEY."""
+    redshift_connector = pytest.importorskip("redshift_connector")
+    cluster = redshift.describe_clusters(ClusterIdentifier=CLUSTER)["Clusters"][0]
+    conn = redshift_connector.connect(
+        host=cluster["Endpoint"]["Address"],
+        port=cluster["Endpoint"]["Port"],
+        database="dev",
+        user="admin",
+        password=PASSWORD,
+        ssl=True,
+        sslmode="require",
+    )
+    conn.autocommit = True
+    try:
+        cur = conn.cursor()
+        cur.execute("CREATE TABLE visits (id int, page varchar(32)) DISTKEY(page)")
+        cur.execute("SELECT diststyle FROM svv_table_info WHERE \"table\" = 'visits'")
+        assert cur.fetchone()[0] == "KEY(page)"
+    finally:
+        conn.close()
+
+
 def test_single_node_cluster_is_the_shared_engine(redshift):
     redshift.create_cluster(
         ClusterIdentifier="pytest-single",

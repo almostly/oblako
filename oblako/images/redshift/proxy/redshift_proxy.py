@@ -572,9 +572,19 @@ async def _pipe_typed(
                     session["staged"] = extract_distribution(sql)
                 writer.write(_rewrite_parse_message(body))
             else:
+                if OBLAKO_CITUS and type_byte == b"E":  # Execute: the statement runs
+                    session["executed"] = True
                 if OBLAKO_CITUS and type_byte == b"S":  # Sync ends an extended stmt
-                    session["queue"].append(session["staged"])
-                    session["staged"] = []
+                    # Clients such as redshift_connector send Parse/Describe/Sync
+                    # before Bind/Execute/Sync; only the Sync after an Execute
+                    # carries the distribution, the others an empty entry, so the
+                    # queue stays aligned with the server's ReadyForQuery replies.
+                    if session["executed"]:
+                        session["queue"].append(session["staged"])
+                        session["staged"] = []
+                    else:
+                        session["queue"].append([])
+                    session["executed"] = False
                 writer.write(type_byte + length_b + body)
             await writer.drain()
     except (asyncio.IncompleteReadError, ConnectionError, asyncio.CancelledError):
@@ -605,7 +615,7 @@ async def _handle(client_reader, client_writer) -> None:
     # entry per client statement (a list of distribution/index commands, possibly
     # empty), `staged` is the extended-protocol statement's commands pending its
     # Sync, and `ready` accumulates them until the transaction commits.
-    session: dict = {"queue": [], "staged": [], "ready": []}
+    session: dict = {"queue": [], "staged": [], "ready": [], "executed": False}
     # server -> client: the framed path rewrites server_version and fires pending
     # distributions (Citus variant); the single-node path is a raw byte copy.
     if PROXY_SERVER_VERSION or OBLAKO_CITUS:

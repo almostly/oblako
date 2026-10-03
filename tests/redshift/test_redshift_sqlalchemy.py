@@ -62,13 +62,17 @@ def engine():
     eng.dispose()
 
 
-@pytest.mark.skipif(not _catalog_compat_present(), reason="image without catalog compat")
+@pytest.mark.skipif(
+    not _catalog_compat_present(), reason="image without catalog compat"
+)
 def test_get_table_names(engine):
     # relations query: reads c.reldiststyle + UNIONs svv_external_tables
     assert TABLE in sa.inspect(engine).get_table_names()
 
 
-@pytest.mark.skipif(not _catalog_compat_present(), reason="image without catalog compat")
+@pytest.mark.skipif(
+    not _catalog_compat_present(), reason="image without catalog compat"
+)
 def test_get_columns(engine):
     # column query: reads attencodingtype/format_encoding, attisdistkey,
     # attsortkeyord, adsrc, and UNIONs pg_get_late_binding_view_cols + svv_*
@@ -77,7 +81,9 @@ def test_get_columns(engine):
     assert not cols["id"]["nullable"]  # NOT NULL round-trips through reflection
 
 
-@pytest.mark.skipif(not _catalog_compat_present(), reason="image without catalog compat")
+@pytest.mark.skipif(
+    not _catalog_compat_present(), reason="image without catalog compat"
+)
 def test_autoload_and_default_checkfirst(engine):
     # create_all with the default checkfirst=True runs has_table (the catalog
     # probe) then a full autoload -> the Alembic-style reflection path

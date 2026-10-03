@@ -26,6 +26,8 @@ import threading
 import time
 from pathlib import Path
 
+from oblako import ports
+
 STATE = Path.home() / ".oblako" / "redshift" / "clusters.json"
 NETWORK = "oblako-redshift"
 IMAGE = "public.ecr.aws/oblako/redshift-cluster:16"
@@ -182,7 +184,10 @@ def _run_node(client, network, cluster_id: str, record: dict, node: int | None):
         "POSTGRES_PASSWORD": record["password"],
         "POSTGRES_DB": record["database"],
         "POSTGRES_HOST_AUTH_METHOD": "md5",
+        # COPY and UNLOAD reach oblako's S3 on the host, as on the single node
+        "OBLAKO_S3_ENDPOINT": f"http://host.docker.internal:{ports.S3}",
     }
+    volumes = {f"{name}-data": {"bind": PGDATA, "mode": "rw"}}
     leader_alias = endpoint_address(cluster_id, record["region"])
     computes = [_compute_alias(cluster_id, n) for n in range(record["nodes"])]
     if node is None:
@@ -191,18 +196,24 @@ def _run_node(client, network, cluster_id: str, record: dict, node: int | None):
             OBLAKO_CITUS_COORDINATOR_HOST=leader_alias,
             OBLAKO_CITUS_WORKERS=",".join(computes),
         )
-        ports = {"5439/tcp": record["port"]}
+        published = {"5439/tcp": record["port"]}
         aliases = [leader_alias]
+        # Redshift ML trains CREATE MODELs in containers on the host daemon
+        volumes["/var/run/docker.sock"] = {
+            "bind": "/var/run/docker.sock",
+            "mode": "rw",
+        }
     else:
         environment["OBLAKO_CITUS_ROLE"] = "worker"
-        ports = {}
+        published = {}
         aliases = [computes[node]]
     container = client.containers.create(
         IMAGE,
         name=name,
         environment=environment,
-        ports=ports,
-        volumes={f"{name}-data": {"bind": PGDATA, "mode": "rw"}},
+        ports=published,
+        volumes=volumes,
+        extra_hosts={"host.docker.internal": "host-gateway"},
         labels={
             "oblako.service": "redshift-node",
             "oblako.redshift.cluster": cluster_id,

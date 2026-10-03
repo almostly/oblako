@@ -2,9 +2,7 @@
 
 from oblako.services.redshift import append_cert_to_bundle
 
-CERT = (
-    "-----BEGIN CERTIFICATE-----\nMIIBoblakoTESTcert==\n-----END CERTIFICATE-----"
-)
+CERT = "-----BEGIN CERTIFICATE-----\nMIIBoblakoTESTcert==\n-----END CERTIFICATE-----"
 
 
 def test_append_is_idempotent(tmp_path):
