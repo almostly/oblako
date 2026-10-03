@@ -36,7 +36,7 @@ RUN echo "shared_preload_libraries = 'citus,oblako_redshift'" \
         >> /usr/share/postgresql/postgresql.conf.sample
 
 # CREATE EXTENSION citus runs before the single-node init scripts (00_...).
-COPY 000_citus.sql /docker-entrypoint-initdb.d/
+COPY 000_citus.sql 13_svv_table_info.sql /docker-entrypoint-initdb.d/
 
 # On Citus the engine must NOT spoof server_version (it breaks CREATE EXTENSION
 # citus), so the in-engine spoof is off and the wire proxy presents Redshift's

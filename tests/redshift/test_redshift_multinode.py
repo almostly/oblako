@@ -87,6 +87,19 @@ def test_multi_node_cluster(redshift):
             f"{CLUSTER}-compute-0",
             f"{CLUSTER}-compute-1",
         ]
+        conn.execute("CREATE TABLE regions (region varchar(16)) DISTSTYLE ALL")
+        conn.execute("INSERT INTO regions VALUES ('r0'), ('r1')")
+        info = dict(
+            (row[0], row[1:])
+            for row in conn.execute(
+                'SELECT "table", diststyle, sortkey1, tbl_rows FROM svv_table_info'
+                " WHERE \"table\" IN ('sales', 'regions')"
+            ).fetchall()
+        )
+        assert info == {
+            "sales": ("KEY(region)", "id", 10000),
+            "regions": ("ALL", None, 2),
+        }
 
     with pytest.raises(psycopg.OperationalError):
         _connect(endpoint, password="wrong")
