@@ -191,3 +191,28 @@ def test_cloudformation_creates_and_deletes_a_workgroup(serverless):
     assert WORKGROUP not in names
     with pytest.raises(serverless.exceptions.ResourceNotFoundException):
         serverless.get_namespace(namespaceName=NAMESPACE)
+
+
+def test_tags_on_namespaces_and_workgroups(serverless):
+    ns = serverless.create_namespace(
+        namespaceName=NAMESPACE, tags=[{"key": "team", "value": "data"}]
+    )["namespace"]
+    try:
+        arn = ns["namespaceArn"]
+        assert serverless.list_tags_for_resource(resourceArn=arn)["tags"] == [
+            {"key": "team", "value": "data"}
+        ]
+        serverless.tag_resource(resourceArn=arn, tags=[{"key": "env", "value": "dev"}])
+        serverless.untag_resource(resourceArn=arn, tagKeys=["team"])
+        assert serverless.list_tags_for_resource(resourceArn=arn)["tags"] == [
+            {"key": "env", "value": "dev"}
+        ]
+        assert (
+            "tags" not in serverless.get_namespace(namespaceName=NAMESPACE)["namespace"]
+        )
+        with pytest.raises(serverless.exceptions.ResourceNotFoundException):
+            serverless.list_tags_for_resource(
+                resourceArn="arn:aws:redshift-serverless:us-east-1:1:namespace/nope"
+            )
+    finally:
+        serverless.delete_namespace(namespaceName=NAMESPACE)
