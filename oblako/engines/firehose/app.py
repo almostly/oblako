@@ -468,14 +468,15 @@ class FirehoseExecutor:
             "created": _now(),
             "lock": threading.Lock(),
         }
+        # positioned before create returns, so the next record put is read; done
+        # before registering, so a missing source stream leaves nothing behind
+        iterators = self._latest_iterators(stream) if stream["source"] else {}
         with self._lock:
             self._streams[name] = stream
         if persist:
             self._persist()
         threading.Thread(target=self._deliver_loop, args=(name,), daemon=True).start()
         if stream["source"]:
-            # positioned before create returns, so the next record put is read
-            iterators = self._latest_iterators(stream)
             threading.Thread(
                 target=self._consume_kinesis, args=(name, iterators), daemon=True
             ).start()

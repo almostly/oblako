@@ -1,6 +1,7 @@
 """Unit tests for Firehose object naming, prefix rules and the Redshift COPY."""
 
 import datetime
+import importlib
 
 import pytest
 
@@ -76,3 +77,34 @@ def test_copy_statement():
         "CREDENTIALS 'aws_iam_role=arn:aws:iam::123456789012:role/firehose' "
         "JSON 'auto' GZIP"
     )
+
+
+def test_missing_kinesis_source_registers_nothing(tmp_path, monkeypatch):
+    """A create that fails on its source stream leaves no stream behind."""
+    # the package exports its ASGI app as `app`, so import the module by name
+    firehose_app = importlib.import_module("oblako.engines.firehose.app")
+
+    class NoStreams:
+        def describe_stream(self, StreamName):
+            raise RuntimeError(f"Stream {StreamName} not found")
+
+    monkeypatch.setattr(firehose_app, "_kinesis_client", NoStreams)
+    executor = firehose_app.FirehoseExecutor(state_path=tmp_path / "streams.json")
+    role = "arn:aws:iam::123456789012:role/firehose"
+    with pytest.raises(RuntimeError):
+        executor.create_delivery_stream(
+            {
+                "DeliveryStreamName": "from-nowhere",
+                "DeliveryStreamType": "KinesisStreamAsSource",
+                "KinesisStreamSourceConfiguration": {
+                    "KinesisStreamARN": "arn:aws:kinesis:us-east-1:123456789012:stream/nope",
+                    "RoleARN": role,
+                },
+                "ExtendedS3DestinationConfiguration": {
+                    "RoleARN": role,
+                    "BucketARN": "arn:aws:s3:::bucket",
+                },
+            }
+        )
+    assert executor.list_delivery_streams()["DeliveryStreamNames"] == []
+    assert not (tmp_path / "streams.json").exists()
