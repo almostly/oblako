@@ -22,7 +22,7 @@ import re
 import secrets
 from pathlib import Path
 
-from oblako import config
+from oblako import config, ports
 
 ENDPOINT_PREFIX = "AWS_ENDPOINT_URL_"
 
@@ -95,6 +95,9 @@ def write_profile(name: str = "oblako") -> dict[str, str]:
     )
     profile = (
         f"region = {config.region()}\n"
+        # any service the services section does not list goes to moto, never
+        # to AWS: a tool that calls one would otherwise leave oblako
+        f"endpoint_url = http://localhost:{ports.MOTO}\n"
         f"services = {name}\n"
         "request_checksum_calculation = when_required\n"
         "response_checksum_validation = when_required\n"

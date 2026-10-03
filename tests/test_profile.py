@@ -62,3 +62,13 @@ def test_new_credentials_file_is_private(aws_files):
     _, credentials = aws_files
     write_profile()
     assert credentials.stat().st_mode & 0o777 == 0o600
+
+
+def test_unlisted_services_go_to_moto_not_aws(aws_files):
+    # the profile-wide endpoint_url catches services the services section
+    # does not list, so no call leaves oblako
+    write_profile()
+    session = boto3.Session(profile_name="oblako")
+    for service in ("ec2", "cloudtrail", "route53"):
+        client = session.client(service)
+        assert client.meta.endpoint_url == f"http://localhost:{ports.MOTO}", service
