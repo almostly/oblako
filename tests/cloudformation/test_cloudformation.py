@@ -20,6 +20,7 @@ from oblako.engines.cloudformation.engine import (
 )
 from oblako.engines.cloudformation.transform import is_sam, transform_sam
 from oblako.services import DynamoDBService, S3ProxyService
+from tests.ports import free_port
 
 CREDS = dict(
     region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"
@@ -264,7 +265,11 @@ def _engines_up() -> bool:
 @pytest.mark.integration
 @pytest.mark.skipif(not _engines_up(), reason="S3Proxy + DynamoDB Local not running")
 def test_deploy_lifecycle_provisions_real_engines():
-    cfn = boto3.client("cloudformation", endpoint_url=start_in_thread(), **CREDS)
+    cfn = boto3.client(
+        "cloudformation",
+        endpoint_url=start_in_thread(free_port(), StackStore()),
+        **CREDS,
+    )
     s3 = S3ProxyService().get_client()
     ddb = DynamoDBService(host_port=8001).get_client()
 
@@ -336,7 +341,11 @@ def test_deploy_lifecycle_provisions_real_engines():
 def test_update_change_set_adds_and_removes_real_resources():
     # Redeploying a changed template to an existing stack must apply a diff:
     # leave the unchanged bucket alone, drop the removed table, status UPDATE_*.
-    cfn = boto3.client("cloudformation", endpoint_url=start_in_thread(), **CREDS)
+    cfn = boto3.client(
+        "cloudformation",
+        endpoint_url=start_in_thread(free_port(), StackStore()),
+        **CREDS,
+    )
     s3 = S3ProxyService().get_client()
     ddb = DynamoDBService(host_port=8001).get_client()
 
@@ -421,7 +430,11 @@ def _moto_up() -> bool:
 @pytest.mark.integration
 @pytest.mark.skipif(not _moto_up(), reason="moto + DynamoDB Local not running")
 def test_sam_deploy_function_to_moto_and_table_to_dynamodb():
-    cfn = boto3.client("cloudformation", endpoint_url=start_in_thread(), **CREDS)
+    cfn = boto3.client(
+        "cloudformation",
+        endpoint_url=start_in_thread(free_port(), StackStore()),
+        **CREDS,
+    )
     lam, iam = _moto_client("lambda"), _moto_client("iam")
     ddb = DynamoDBService(host_port=8001).get_client()
 
@@ -502,7 +515,11 @@ def test_deploy_statemachine_and_opensearch_domain():
 
     from oblako.services import StepFunctionsService
 
-    cfn = boto3.client("cloudformation", endpoint_url=start_in_thread(), **CREDS)
+    cfn = boto3.client(
+        "cloudformation",
+        endpoint_url=start_in_thread(free_port(), StackStore()),
+        **CREDS,
+    )
     sfn = StepFunctionsService().get_client()
     asl = json.dumps(
         {"StartAt": "Done", "States": {"Done": {"Type": "Pass", "End": True}}}
@@ -578,7 +595,11 @@ def test_deploy_all_resource_types_one_stack():
     """
     from oblako.services import StepFunctionsService
 
-    cfn = boto3.client("cloudformation", endpoint_url=start_in_thread(), **CREDS)
+    cfn = boto3.client(
+        "cloudformation",
+        endpoint_url=start_in_thread(free_port(), StackStore()),
+        **CREDS,
+    )
     s3 = S3ProxyService().get_client()
     ddb = DynamoDBService(host_port=8001).get_client()
     sfn = StepFunctionsService().get_client()
@@ -687,3 +708,110 @@ def test_deploy_all_resource_types_one_stack():
     assert "cfnall-db" not in [
         d["DBInstanceIdentifier"] for d in rds_.describe_db_instances()["DBInstances"]
     ]
+
+
+def test_template_summary_lists_parameters_types_and_capabilities():
+    template = json.dumps(
+        {
+            "Transform": "AWS::Serverless-2016-10-31",
+            "Parameters": {
+                "Password": {"Type": "String", "NoEcho": True},
+                "Env": {"Type": "String", "Default": "dev"},
+            },
+            "Resources": {
+                "Role": {
+                    "Type": "AWS::IAM::Role",
+                    "Properties": {"RoleName": "r", "AssumeRolePolicyDocument": {}},
+                },
+                "B": {"Type": "AWS::S3::Bucket"},
+            },
+        }
+    )
+    summary = StackStore().template_summary(template)
+    params = {p["ParameterKey"]: p for p in summary["Parameters"]}
+    assert params["Password"]["NoEcho"] and "DefaultValue" not in params["Password"]
+    assert params["Env"]["DefaultValue"] == "dev"
+    assert summary["ResourceTypes"] == ["AWS::IAM::Role", "AWS::S3::Bucket"]
+    assert summary["Capabilities"] == ["CAPABILITY_NAMED_IAM"]
+    assert summary["DeclaredTransforms"] == ["AWS::Serverless-2016-10-31"]
+
+
+def test_stacks_survive_a_restart(tmp_path):
+    path = tmp_path / "stacks.json"
+    StackStore(path).create_change_set("s", '{"Resources": {}}', {}, "cs", "CREATE")
+    revived = StackStore(path)
+    assert revived.exists("s")
+    events = revived.describe_stack_events("s")
+    assert events[0]["Timestamp"].tzinfo is not None
+
+
+def test_times_are_milliseconds_and_strictly_increasing():
+    from oblako.engines.cloudformation.engine import tick
+
+    times = [tick() for _ in range(50)]
+    assert all(t.microsecond % 1000 == 0 for t in times)
+    assert all(b > a for a, b in zip(times, times[1:]))
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not _engines_up(), reason="S3Proxy + DynamoDB Local not running")
+def test_failed_create_rolls_back_and_can_only_be_deleted():
+    s3 = S3ProxyService().get_client()
+    store = StackStore()
+    template = {
+        "Resources": {
+            "Kept": {"Type": "AWS::S3::Bucket", "Properties": {"BucketName": "rb-1"}},
+            "Bad": {"Type": "AWS::Nope::Thing", "DependsOn": "Kept"},
+        }
+    }
+    store.create_change_set("rb", json.dumps(template), {}, "cs", "CREATE")
+    store.execute_change_set("rb", "cs")  # no exception: the stack records it
+    stack = store.get("rb")
+    assert stack["StackStatus"] == "ROLLBACK_COMPLETE"
+    assert "rb-1" not in [b["Name"] for b in s3.list_buckets()["Buckets"]]
+    statuses = [e["ResourceStatus"] for e in store.describe_stack_events("rb")]
+    assert "CREATE_FAILED" in statuses and "ROLLBACK_IN_PROGRESS" in statuses
+    with pytest.raises(ValueError, match="ROLLBACK_COMPLETE"):
+        store.create_change_set("rb", json.dumps(template), {}, "cs2", "UPDATE")
+    store.delete_stack("rb")
+    assert not store.exists("rb")
+
+
+def test_stack_events_carry_the_stack_arn():
+    store = StackStore()
+    store.create_change_set("s", '{"Resources": {}}', {}, "cs", "CREATE")
+    store.execute_change_set("s", "cs")
+    for event in store.describe_stack_events("s"):
+        assert event["PhysicalResourceId"] == store.get("s")["StackId"]
+
+
+def test_describe_stacks_returns_the_fields_aws_always_returns():
+    store = StackStore()
+    template = {
+        "Description": "probe",
+        "Parameters": {"Secret": {"Type": "String", "NoEcho": True}},
+        "Resources": {},
+    }
+    store.create_change_set("s", json.dumps(template), {"Secret": "x"}, "cs", "CREATE")
+    store.execute_change_set("s", "cs")
+    cfn = boto3.client(
+        "cloudformation", endpoint_url=start_in_thread(free_port(), store), **CREDS
+    )
+    stack = cfn.describe_stacks(StackName="s")["Stacks"][0]
+    assert stack["EnableTerminationProtection"] is False
+    assert stack["DisableRollback"] is False
+    assert stack["DriftInformation"]["StackDriftStatus"] == "NOT_CHECKED"
+    assert stack["Description"] == "probe"
+    assert stack["Parameters"] == [{"ParameterKey": "Secret", "ParameterValue": "****"}]
+
+
+def test_get_template_returns_the_submitted_body():
+    store = StackStore()
+    body = "Resources: {}\n# a comment that only the original keeps\n"
+    store.create_change_set("s", body, {}, "cs", "CREATE")
+    cfn = boto3.client(
+        "cloudformation", endpoint_url=start_in_thread(free_port(), store), **CREDS
+    )
+    original = cfn.get_template(StackName="s")
+    assert "a comment" in str(original["TemplateBody"])
+    assert original["StagesAvailable"] == ["Original", "Processed"]

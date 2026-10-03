@@ -21,7 +21,7 @@ This page lists what each one provides and where it diverges from AWS.
 
 | Service | Description | Limitations |
 |---|---|---|
-| **S3** | S3 API over the local filesystem (S3Proxy), plus object / bucket tagging, S3 Inventory, bucket policies and event notifications (to Lambda, SQS, SNS, EventBridge). | No flexible-checksum / `aws-chunked`; oblako sets checksum calc `when_required`. Tagging, Inventory, policies and notifications need `oblako up s3` on a Docker-API backend; policies are stored, not enforced. |
+| **S3** | S3 API over the local filesystem (S3Proxy), plus object / bucket tagging, S3 Inventory, bucket policies and event notifications (to Lambda, SQS, SNS, EventBridge). Path-style and virtual-hosted (`bucket.localhost:9000`) addressing, UTF-8 keys, and S3 Control's tag API for buckets (`AWS_ENDPOINT_URL_S3_CONTROL`), which Terraform and Pulumi use. | No flexible-checksum / `aws-chunked`; oblako sets checksum calc `when_required`. Tagging, Inventory, policies and notifications need `oblako up s3` on a Docker-API backend; policies are stored, not enforced. |
 | **S3 Tables** | `s3tables` control plane (table buckets, namespaces, tables, `GetTableMetadataLocation`) mapped onto the local **Iceberg REST catalog**; `CreateTable` writes real Iceberg metadata, so the tables are queryable by Athena / Trino / pyiceberg. The **S3 Tables Iceberg REST endpoint** is served at `http://localhost:8013/iceberg`: configure PyIceberg (or Spark) exactly as for AWS, `type=rest`, `warehouse=<table bucket ARN>`, SigV4 on, and change only the `uri`. | Single-warehouse catalog: a table bucket + namespace map to a `[bucket, namespace]` Iceberg namespace prefix; managed maintenance (compaction, snapshot expiry) is not modelled. |
 | **S3 Vectors** | `s3vectors`: vector buckets → indexes (dimension + distance metric) → `PutVectors` / `QueryVectors` (k-NN) with Mongo-style metadata filters. Fed by Bedrock embeddings. | Brute-force k-NN (cosine / euclidean), not ANN; vectors are in-memory (not persisted across restart). |
 | **DynamoDB** | Amazon's DynamoDB Local behind an oblako proxy on `http://localhost:8007` (`AWS_ENDPOINT_URL_DYNAMODB`), which adds AWS's native **vector search** (boto3 1.43.64+): `VectorIndexes` on `CreateTable` / `VectorIndexUpdates` on `UpdateTable` with `SearchSchema` (a `HASH` vector index partition key, `INLINE_FILTER` attributes), and `SearchVectors` with equality `SearchConditionExpression`, `ProjectionExpression` and the index projection; writes with a vector of the wrong dimensions are rejected. It also adds **tagging** (`TagResource`, `ListTagsOfResource`), which Feast's DynamoDB online store uses. **DynamoDB Streams** are DynamoDB Local's own (`AWS_ENDPOINT_URL_DYNAMODB_STREAMS`, `localhost:8001`). | Single local instance; no Streams→Lambda wiring. `SearchVectors` is exact brute-force k-NN (a full scan), not ANN, and is immediately consistent; `ConsumedCapacity` is not reported. `UpdateItem` isn't checked against vector dimensions. Stream and table ARNs carry DynamoDB Local's region and account (`ddblocal`, `000000000000`). |
@@ -58,7 +58,7 @@ This page lists what each one provides and where it diverges from AWS.
 
 | Service | Description | Limitations |
 |---|---|---|
-| **CloudFormation** | `cloudformation` (+ `aws cloudformation deploy` / `sam deploy`, or `CreateStack`) provisions **real** oblako resources, including a full ECS Fargate + ALB stack and Redshift Serverless. | Subset of resource types (S3, DynamoDB, Redshift, Redshift Serverless, RDS, ECS, ELBv2, …). |
+| **CloudFormation** | `cloudformation` (+ `aws cloudformation deploy` / `sam deploy`, or `CreateStack`) provisions **real** oblako resources, including a full ECS Fargate + ALB stack and Redshift Serverless. Stacks persist across restarts; a failed resource rolls the stack back (`ROLLBACK_COMPLETE`) as on AWS; `GetTemplate`, `GetTemplateSummary` and `CreateStack` are supported, so `sam deploy` / `sam delete` run end to end. | Subset of resource types (S3, DynamoDB, Redshift, Redshift Serverless, RDS, ECS, ELBv2, …). |
 | **IAM / STS** | moto control plane + oblako's policy evaluator. | Policy evaluation is a best-effort reimplementation. |
 | **EC2** | moto control plane + real container-backed instances. | `describe_*` fidelity; instances are containers, not VMs. |
 | **OpenSearch** | OpenSearch single-node (Knowledge Bases / RAG). | Security plugin disabled for local use. |
@@ -69,6 +69,19 @@ This page lists what each one provides and where it diverges from AWS.
 ---
 
 The deep dives below cover the services with the most local-specific behavior.
+
+## Infrastructure as code
+
+CloudFormation and SAM run on oblako's CloudFormation engine. Terraform and Pulumi
+call each service's API directly, and reach oblako through the profile that
+`oblako configure` writes: with `AWS_PROFILE=oblako`, the AWS provider of both
+takes every endpoint from the profile's `services` section, with no
+provider-specific settings. Checked with Terraform 1.16.4 and its AWS provider
+6.67.0, Pulumi 3.267.0 with `pulumi-aws` 7.48.0, and SAM CLI 1.166.2: each
+created, re-planned without changes, and destroyed an S3 bucket, an IAM role and a
+Redshift Serverless namespace and workgroup. The Go SDK they use addresses
+buckets as `bucket.localhost:9000` and reads bucket tags through S3 Control, which
+is why oblako serves both.
 
 ## MWAA (Airflow)
 
@@ -262,7 +275,8 @@ rss.get_workgroup(workgroupName="analytics")["workgroup"]["endpoint"]
 workgroup uses the namespace (`ConflictException`). The Data API takes
 `WorkgroupName` in place of `ClusterIdentifier`, and CloudFormation creates
 `AWS::RedshiftServerless::Namespace` and `::Workgroup` with their `GetAtt`
-attributes (`Workgroup.Endpoint.Address`, ...). Base and maximum capacity, VPC
+attributes (`Workgroup.Endpoint.Address`, ...), and `TagResource`, `UntagResource` and
+`ListTagsForResource` work on namespaces and workgroups. Base and maximum capacity, VPC
 settings, snapshots, usage limits and `GetCredentials` are not simulated: a
 workgroup has the engine's resources, and the API accepts and reports the
 capacity and network settings it is given.
