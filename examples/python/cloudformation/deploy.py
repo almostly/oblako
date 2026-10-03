@@ -7,8 +7,8 @@ DynamoDB Local. Supported types: S3::Bucket, DynamoDB::Table, Redshift::Cluster
 
 This is the same wire protocol the AWS CLI and SAM speak, so the CLI works too:
 
-    oblako cloudformation                                   # start the server (:5601)
-    export AWS_ENDPOINT_URL_CLOUDFORMATION=http://localhost:5601
+    oblako cloudformation                                   # start the server (:8017)
+    export AWS_ENDPOINT_URL_CLOUDFORMATION=http://localhost:8017
     aws cloudformation deploy --template-file t.yaml --stack-name demo
     sam deploy ...                                          # for plain CFN resources
 

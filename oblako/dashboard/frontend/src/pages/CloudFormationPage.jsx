@@ -127,7 +127,7 @@ export default function CloudFormationPage() {
       <Header
         variant="h1"
         actions={<Button onClick={fetchStacks} iconName="refresh">Refresh</Button>}
-        description="Stacks deployed to oblako's local CloudFormation (:5601) — resources are provisioned into the real engines."
+        description="Stacks deployed to oblako's local CloudFormation (:8017) — resources are provisioned into the real engines."
       >
         AWS CloudFormation
       </Header>
@@ -143,7 +143,7 @@ export default function CloudFormationPage() {
           { id: 'outputs', header: 'Outputs', cell: item => item.outputCount },
           { id: 'created', header: 'Created', cell: item => item.creationTime },
         ]}
-        empty={<Box textAlign="center">No stacks. Deploy one: <Box variant="code">aws cloudformation deploy --endpoint-url http://localhost:5601</Box></Box>}
+        empty={<Box textAlign="center">No stacks. Deploy one: <Box variant="code">aws cloudformation deploy --endpoint-url http://localhost:8017</Box></Box>}
       />
     </SpaceBetween>
   )

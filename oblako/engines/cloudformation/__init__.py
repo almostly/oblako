@@ -5,7 +5,7 @@ Speaks the `cloudformation` wire protocol so a real boto3 client — and therefo
 AWS_ENDPOINT_URL_CLOUDFORMATION) — provisions actual oblako resources:
 
     import boto3
-    cfn = boto3.client("cloudformation", endpoint_url="http://localhost:5601",
+    cfn = boto3.client("cloudformation", endpoint_url="http://localhost:8017",
                        region_name="us-east-1",
                        aws_access_key_id="test", aws_secret_access_key="test")
 
@@ -19,6 +19,7 @@ from __future__ import annotations
 import threading
 import time
 
+from oblako import ports
 from oblako.engines.identity import claim_port, identify, is_engine
 
 from .app import app, create_app
@@ -34,7 +35,7 @@ __all__ = [
     "is_running",
 ]
 
-DEFAULT_PORT = 5601
+DEFAULT_PORT = ports.CLOUDFORMATION
 
 _servers: dict[int, "object"] = {}
 _lock = threading.Lock()
