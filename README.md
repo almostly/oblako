@@ -84,7 +84,7 @@ for you).
 | `oblako up [service] [--timeout S]` | Start all services, or one (a container service like `s3`, or an API engine like `s3vectors`), and wait up to `S` seconds (default 120) for each to be ready; exits 1 if any is not, so a CI step fails there |
 | `oblako down [service]` | Stop all services (or a specific one) |
 | `oblako status` | Show service status |
-| `oblako configure [--profile NAME]` | Write an AWS profile (default `oblako`) whose per-service endpoints are oblako's, with generated keys, to `~/.aws/config` and `~/.aws/credentials`; then `export AWS_PROFILE=oblako` points boto3 and the AWS CLI at oblako, and another profile at AWS. Other profiles are left as they are |
+| `oblako configure [--profile NAME]` | Write an AWS profile (default `oblako`) whose per-service endpoints are oblako's, with generated keys, to `~/.aws/config` and `~/.aws/credentials`; then `export AWS_PROFILE=oblako` points boto3 and the AWS CLI at oblako, and another profile at AWS. Services without their own entry go to moto, so no call leaves oblako. Other profiles are left as they are |
 | `oblako dashboard [-p PORT]` | Start the web dashboard (default: 8000) |
 | `oblako notebook [-p PORT]` | Launch JupyterLab wired to oblako (default: 8888) |
 | `oblako redshift-data [-p PORT]` | Start the Redshift Data API server (default: 8002) |

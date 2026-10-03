@@ -46,6 +46,7 @@ ENDPOINTS = {
     "AWS_ENDPOINT_URL_RDS": _local(ports.RDS_CONTROL),
     "AWS_ENDPOINT_URL_RDS_DATA": _local(ports.RDS_DATA),
     "AWS_ENDPOINT_URL_LAMBDA": _local(ports.MOTO),
+    "AWS_ENDPOINT_URL_EC2": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_IAM": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_API_GATEWAY": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_SNS": _local(ports.MOTO),
