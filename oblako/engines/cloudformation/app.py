@@ -7,6 +7,7 @@ their templates provisioned into oblako's real engines.
 
 from __future__ import annotations
 
+import json
 import urllib.parse
 import uuid
 from xml.sax.saxutils import escape
@@ -16,15 +17,20 @@ from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 from starlette.routing import Route
 
-from .engine import StackNotFound, StackStore
+from .engine import STATE, StackNotFound, StackStore
 
 NS = "http://cloudformation.amazonaws.com/doc/2010-05-15/"
 
 
-def _now():
-    import datetime
+def _iso(moment) -> str:
+    """Serialize a time as CloudFormation does, to the millisecond."""
+    return moment.isoformat(timespec="milliseconds")
 
-    return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+def _now():
+    from .engine import tick
+
+    return _iso(tick())
 
 
 def _el(tag, value):
@@ -43,18 +49,48 @@ def _outputs_xml(outputs):
     return f"<Outputs>{members}</Outputs>"
 
 
+def _parameters_xml(stack):
+    """Return a stack's parameters as DescribeStacks lists them, NoEcho values masked."""
+    specs = stack["template"].get("Parameters", {})
+    values = {key: spec["Default"] for key, spec in specs.items() if "Default" in spec}
+    values.update(stack.get("params") or {})
+    members = "".join(
+        "<member>"
+        + _el("ParameterKey", key)
+        + _el(
+            "ParameterValue",
+            "****" if specs.get(key, {}).get("NoEcho") else str(value),
+        )
+        + "</member>"
+        for key, value in values.items()
+    )
+    return f"<Parameters>{members}</Parameters>"
+
+
 def _stack_xml(stack):
+    description = stack["template"].get("Description")
+    updated = stack.get("LastUpdatedTime")
     return (
         "<member>"
         + _el("StackId", stack["StackId"])
         + _el("StackName", stack["StackName"])
+        + (_el("Description", description) if description else "")
+        + _parameters_xml(stack)
         + _el("StackStatus", stack["StackStatus"])
-        + _el("CreationTime", stack["CreationTime"].isoformat())
+        + _el("CreationTime", _iso(stack["CreationTime"]))
+        + (_el("LastUpdatedTime", _iso(updated)) if updated else "")
         + (
             _el("StackStatusReason", stack["StackStatusReason"])
             if stack.get("StackStatusReason")
             else ""
         )
+        # fields AWS returns for every stack, which clients read unconditionally
+        + _el("DisableRollback", "false")
+        + _el("EnableTerminationProtection", "false")
+        + "<NotificationARNs/><Tags/>"
+        + "<DriftInformation>"
+        + _el("StackDriftStatus", "NOT_CHECKED")
+        + "</DriftInformation>"
         + _outputs_xml(stack["Outputs"])
         + "</member>"
     )
@@ -135,12 +171,15 @@ class CfnApp:
         raw = (await request.body()).decode()
         form = dict(urllib.parse.parse_qsl(raw))
         action = form.get("Action", "")
-        try:
-            return getattr(self, f"op_{action}")(form)
-        except StackNotFound as e:
-            return _error(str(e))
-        except AttributeError:
+        # looked up first, so an AttributeError inside a handler is not mistaken
+        # for an unsupported action
+        handler = getattr(self, f"op_{action}", None)
+        if handler is None:
             return _error(f"unsupported action: {action}", code="InvalidAction")
+        try:
+            return handler(form)
+        except (StackNotFound, ValueError) as e:
+            return _error(str(e))
         except Exception as e:
             return _error(str(e), code="InternalFailure", status=500)
 
@@ -199,6 +238,55 @@ class CfnApp:
         self.store.execute_change_set(form["StackName"], "oblako-create")
         return _ok("CreateStack", _el("StackId", out["StackId"]))
 
+    def op_GetTemplate(self, form):
+        """Handle GetTemplate: the template as submitted, or after transforms."""
+        stack = self.store.get(form["StackName"])
+        if form.get("TemplateStage") == "Processed":
+            body = json.dumps(stack["template"])
+        else:
+            body = stack.get("template_body") or json.dumps(stack["template"])
+        stages = "<member>Original</member><member>Processed</member>"
+        return _ok(
+            "GetTemplate",
+            _el("TemplateBody", body) + f"<StagesAvailable>{stages}</StagesAvailable>",
+        )
+
+    def op_GetTemplateSummary(self, form):
+        """Handle GetTemplateSummary for a template body, a template URL or a stack."""
+        body = form.get("TemplateBody")
+        if body is None and form.get("TemplateURL"):
+            body = _fetch_template_url(form["TemplateURL"])
+        summary = self.store.template_summary(body, form.get("StackName"))
+
+        def members(items):
+            return "".join(_el("member", i) for i in items)
+
+        params = "".join(
+            "<member>"
+            + _el("ParameterKey", p["ParameterKey"])
+            + (_el("DefaultValue", p["DefaultValue"]) if "DefaultValue" in p else "")
+            + _el("ParameterType", p["ParameterType"])
+            + _el("NoEcho", str(p["NoEcho"]).lower())
+            + (_el("Description", p["Description"]) if "Description" in p else "")
+            + "</member>"
+            for p in summary["Parameters"]
+        )
+        return _ok(
+            "GetTemplateSummary",
+            f"<Parameters>{params}</Parameters>"
+            + (
+                _el("Description", summary["Description"])
+                if summary["Description"]
+                else ""
+            )
+            + f"<Capabilities>{members(summary['Capabilities'])}</Capabilities>"
+            + f"<ResourceTypes>{members(summary['ResourceTypes'])}</ResourceTypes>"
+            + _el("Version", summary["Version"])
+            + "<DeclaredTransforms>"
+            + members(summary["DeclaredTransforms"])
+            + "</DeclaredTransforms>",
+        )
+
     def op_DescribeChangeSet(self, form):
         """Handle DescribeChangeSet and return XML for the requested change set."""
         cs = self.store.describe_change_set(form["StackName"], form["ChangeSetName"])
@@ -242,7 +330,7 @@ class CfnApp:
             + _el("LogicalResourceId", e["LogicalResourceId"])
             + _el("PhysicalResourceId", e["PhysicalResourceId"])
             + _el("ResourceType", e["ResourceType"])
-            + _el("Timestamp", e["Timestamp"].isoformat())
+            + _el("Timestamp", _iso(e["Timestamp"]))
             + _el("ResourceStatus", e["ResourceStatus"])
             + (
                 _el("ResourceStatusReason", e["ResourceStatusReason"])
@@ -257,7 +345,7 @@ class CfnApp:
 
 def create_app(store: StackStore | None = None) -> Starlette:
     """Build and return the Starlette ASGI app for the CloudFormation service."""
-    handler = CfnApp(store or StackStore())
+    handler = CfnApp(store or StackStore(STATE))
 
     async def health(_request):
         return PlainTextResponse("ok")

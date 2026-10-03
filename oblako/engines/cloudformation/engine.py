@@ -10,6 +10,7 @@ import datetime
 import json
 import threading
 import uuid
+from pathlib import Path
 
 import yaml
 
@@ -17,6 +18,42 @@ from oblako import config
 
 from .providers import PROVIDERS
 from .transform import is_sam, transform_sam
+
+
+STATE = Path.home() / ".oblako" / "cloudformation" / "stacks.json"
+
+
+def _encode(value):
+    if isinstance(value, datetime.datetime):
+        return {"__time__": value.isoformat()}
+    raise TypeError(f"cannot store {type(value).__name__}")
+
+
+def _revive(obj: dict):
+    if set(obj) == {"__time__"}:
+        return datetime.datetime.fromisoformat(obj["__time__"])
+    return obj
+
+
+_clock_lock = threading.Lock()
+_last_tick = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+
+
+def tick() -> datetime.datetime:
+    """Return the current time at millisecond precision, later than the last one.
+
+    CloudFormation reports times in milliseconds, and clients wait for events
+    newer than their change set (``sam deploy``, ``aws cloudformation deploy``);
+    a stack oblako creates within one millisecond would otherwise never show one.
+    """
+    global _last_tick
+    with _clock_lock:
+        now = datetime.datetime.now(datetime.timezone.utc)
+        now = now.replace(microsecond=now.microsecond // 1000 * 1000)
+        if now <= _last_tick:
+            now = _last_tick + datetime.timedelta(milliseconds=1)
+        _last_tick = now
+        return now
 
 
 class StackNotFound(Exception):
@@ -168,10 +205,27 @@ def _ordered(resources):
 class StackStore:
     """In-memory store for CloudFormation stacks and their associated change sets."""
 
-    def __init__(self):
-        """Initialize the store with an empty stacks dict and a reentrant lock."""
+    def __init__(self, state_path: Path | None = None):
+        """Load stacks from ``state_path``, or keep them in memory when it is None.
+
+        The engine persists to ``~/.oblako/cloudformation/stacks.json``, so a
+        restart keeps track of the resources its stacks own.
+        """
         self._stacks: dict[str, dict] = {}
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
+        self.state_path = state_path
+        if state_path is not None and state_path.exists():
+            self._stacks = json.loads(state_path.read_text(), object_hook=_revive)
+
+    def save(self) -> None:
+        """Write every stack to the state file (no-op for an in-memory store)."""
+        if self.state_path is None:
+            return
+        with self._lock:
+            self.state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.state_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(self._stacks, default=_encode))
+            tmp.replace(self.state_path)
 
     def get(self, name):
         """Return the named stack dict, raising StackNotFound if it does not exist."""
@@ -211,7 +265,7 @@ class StackStore:
             "StackId": f"arn:aws:cloudformation:{config.region()}:{config.account_id()}:stack/{name}/{uuid.uuid4()}",
             "StackName": name,
             "StackStatus": "REVIEW_IN_PROGRESS",
-            "CreationTime": datetime.datetime.now(datetime.timezone.utc),
+            "CreationTime": tick(),
             "template": template,
             "params": params,
             "resources": {},
@@ -233,6 +287,12 @@ class StackStore:
         if is_sam(template):
             template = transform_sam(template)  # expand SAM to base CFN resources
         with self._lock:
+            current = self._stacks.get(name)
+            if current is not None and current["StackStatus"] == "ROLLBACK_COMPLETE":
+                raise ValueError(
+                    f"Stack:{current['StackId']} is in ROLLBACK_COMPLETE state and "
+                    "can not be updated."
+                )
             creating = name not in self._stacks
             if creating:
                 self._stacks[name] = self._new_stack(name, template, params)
@@ -277,6 +337,7 @@ class StackStore:
                     )
             # Adopt the new template + params only after diffing the old one.
             stack["template"] = template
+            stack["template_body"] = template_body or "{}"
             stack["params"] = params
             cs_id = f"arn:aws:cloudformation:{config.region()}:{config.account_id()}:changeSet/{cs_name}/{uuid.uuid4()}"
             stack["change_sets"][cs_name] = {
@@ -284,6 +345,7 @@ class StackStore:
                 "changes": changes,
                 "type": cs_type,
             }
+            self.save()
             return {"Id": cs_id, "StackId": stack["StackId"]}
 
     def _find_cs(self, stack, ref):
@@ -342,6 +404,7 @@ class StackStore:
             ctx["physical"][rid] = res["PhysicalId"]
             ctx["attrs"][rid] = res.get("Attributes", {})
 
+        stack["_before"] = dict.fromkeys(stack["resources"])
         changes = cs["changes"]
         to_apply = [
             c["LogicalResourceId"] for c in changes if c["Action"] in ("Add", "Modify")
@@ -350,9 +413,13 @@ class StackStore:
 
         if is_update:
             stack["StackStatus"] = "UPDATE_IN_PROGRESS"
+            stack["LastUpdatedTime"] = tick()
+        added: list[str] = []  # created by this run, removed again on rollback
+        current = None
         try:
             # Adds + Modifies, in intra-template dependency order.
             for rid in _ordered({rid: resources[rid] for rid in to_apply}):
+                current = rid
                 r = resources[rid]
                 rtype = r["Type"]
                 if rtype not in PROVIDERS:
@@ -378,6 +445,8 @@ class StackStore:
                     "Properties": props,
                     "Attributes": attrs,
                 }
+                if rid not in stack.get("_before", {}):
+                    added.append(rid)
                 stack["events"].append(
                     _event(stack, rid, rtype, physical, f"{verb}_COMPLETE")
                 )
@@ -409,19 +478,93 @@ class StackStore:
                 )
             )
         except Exception as e:
-            stack["StackStatus"] = f"{verb}_FAILED"
-            stack["StackStatusReason"] = str(e)
+            self._roll_back(stack, name, verb, current, added, str(e))
+        stack.pop("_before", None)
+        self.save()
+
+    def _roll_back(self, stack, name, verb, failed, added, reason):
+        """Record the failure and remove what this run created, as CloudFormation does.
+
+        The stack ends in ``ROLLBACK_COMPLETE`` after a failed create, which can
+        only be deleted, or ``UPDATE_ROLLBACK_COMPLETE`` after a failed update.
+        ``ExecuteChangeSet`` itself succeeds; clients see the outcome in the
+        stack's status and events.
+        """
+        stack_type = "AWS::CloudFormation::Stack"
+        resources = stack["template"].get("Resources", {})
+        if failed is not None:
+            rtype = resources.get(failed, {}).get("Type", "")
             stack["events"].append(
-                _event(
-                    stack,
-                    name,
-                    "AWS::CloudFormation::Stack",
-                    name,
-                    f"{verb}_FAILED",
-                    str(e),
-                )
+                _event(stack, failed, rtype, "", f"{verb}_FAILED", reason)
             )
-            raise
+        rolling = (
+            "ROLLBACK_IN_PROGRESS"
+            if verb == "CREATE"
+            else "UPDATE_ROLLBACK_IN_PROGRESS"
+        )
+        stack["events"].append(_event(stack, name, stack_type, name, rolling, reason))
+        for rid in reversed(added):
+            res = stack["resources"].pop(rid, None)
+            if res is None:
+                continue
+            try:
+                PROVIDERS[res["Type"]][1](res["PhysicalId"], res["Properties"])
+            except Exception:  # keep rolling back the rest
+                continue
+            stack["events"].append(
+                _event(stack, rid, res["Type"], res["PhysicalId"], "DELETE_COMPLETE")
+            )
+        done = "ROLLBACK_COMPLETE" if verb == "CREATE" else "UPDATE_ROLLBACK_COMPLETE"
+        stack["StackStatus"] = done
+        stack["StackStatusReason"] = reason
+        stack["events"].append(_event(stack, name, stack_type, name, done))
+
+    def template_summary(self, template_body=None, stack_name=None):
+        """Return GetTemplateSummary's view of a template, or of a stack's template."""
+        if template_body is not None:
+            template = parse_template(template_body)
+        else:
+            template = self.get(stack_name)["template"]
+        transforms = template.get("Transform", [])
+        if isinstance(transforms, str):
+            transforms = [transforms]
+        if is_sam(template):
+            template = transform_sam(template)
+        resources = template.get("Resources", {})
+        types = sorted({r.get("Type", "") for r in resources.values()})
+        capabilities = (
+            ["CAPABILITY_NAMED_IAM"]
+            if any(
+                r.get("Type", "").startswith("AWS::IAM::")
+                and any(k.endswith("Name") for k in r.get("Properties", {}))
+                for r in resources.values()
+            )
+            else ["CAPABILITY_IAM"]
+            if any(t.startswith("AWS::IAM::") for t in types)
+            else []
+        )
+        parameters = [
+            {
+                "ParameterKey": key,
+                "ParameterType": spec.get("Type", "String"),
+                "NoEcho": bool(spec.get("NoEcho", False)),
+                **({"DefaultValue": str(spec["Default"])} if "Default" in spec else {}),
+                **(
+                    {"Description": spec["Description"]}
+                    if "Description" in spec
+                    else {}
+                ),
+            }
+            for key, spec in template.get("Parameters", {}).items()
+        ]
+        return {
+            "Parameters": parameters,
+            "Description": template.get("Description"),
+            "Capabilities": capabilities,
+            "ResourceTypes": types,
+            "Version": template.get("AWSTemplateFormatVersion", "2010-09-09"),
+            "DeclaredTransforms": transforms,
+        }
 
     def delete_stack(self, name):
         """Delete the named stack, destroying all provisioned resources in reverse order."""
@@ -433,6 +576,7 @@ class StackStore:
                 PROVIDERS[res["Type"]][1](res["PhysicalId"], res["Properties"])
             stack["StackStatus"] = "DELETE_COMPLETE"
             self._stacks.pop(name, None)
+            self.save()
 
     def describe_stack_events(self, name):
         """Return the list of stack events recorded for the named stack."""
@@ -440,6 +584,10 @@ class StackStore:
 
 
 def _event(stack, logical, rtype, physical, status, reason=None):
+    if rtype == "AWS::CloudFormation::Stack":
+        # as on AWS: a stack's own events carry its ARN, which clients such as
+        # sam deploy use to tell them from its resources' events
+        physical = stack["StackId"]
     return {
         "StackId": stack["StackId"],
         "EventId": uuid.uuid4().hex,
@@ -447,7 +595,7 @@ def _event(stack, logical, rtype, physical, status, reason=None):
         "LogicalResourceId": logical,
         "PhysicalResourceId": physical,
         "ResourceType": rtype,
-        "Timestamp": datetime.datetime.now(datetime.timezone.utc),
+        "Timestamp": tick(),
         "ResourceStatus": status,
         **({"ResourceStatusReason": reason} if reason else {}),
     }
