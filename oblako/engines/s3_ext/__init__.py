@@ -47,6 +47,7 @@ __all__ = ["create_app", "start_in_thread", "is_running", "Store"]
 
 DEFAULT_PORT = ports.S3_EXT
 NS = "http://s3.amazonaws.com/doc/2006-03-01/"
+CONTROL_NS = "http://awss3control.amazonaws.com/doc/2018-08-20/"
 MAX_TAGS = 10
 
 
@@ -361,7 +362,8 @@ def create_app(store: Store | None = None) -> Starlette:
             return recorded[2]
         pending = store.take_pending(bucket, key)  # a completed multipart upload
         if pending is not None:
-            store.set_object_tags(bucket, key, *version, pending)
+            etag, modified = version
+            store.set_object_tags(bucket, key, etag, modified, pending)
             return pending
         if recorded:  # tags of an overwritten version: gone, as on S3
             store.delete_object_tags(bucket, key)
@@ -407,7 +409,8 @@ def create_app(store: Store | None = None) -> Starlette:
             problem = check_tags(tags)
             if problem:
                 return _error(400, "InvalidTag", problem, resource)
-            store.set_object_tags(bucket, key, *version, tags)
+            etag, modified = version
+            store.set_object_tags(bucket, key, etag, modified, tags)
             return Response(status_code=200)
         if request.method == "DELETE":
             store.delete_object_tags(bucket, key)
@@ -577,8 +580,47 @@ def create_app(store: Store | None = None) -> Starlette:
             return relay(resp)
         version = await current(client, bucket, key)
         if version is not None:
-            store.set_object_tags(bucket, key, *version, tags)
+            etag, modified = version
+            store.set_object_tags(bucket, key, etag, modified, tags)
         return relay(resp)
+
+    async def control_tags(request: Request) -> Response:
+        """S3 Control's TagResource / UntagResource / ListTagsForResource on a bucket.
+
+        The same tags as Get/PutBucketTagging: the AWS SDKs for Go (Terraform,
+        Pulumi) read and write a bucket's tags through S3 Control.
+        """
+        arn = urllib.parse.unquote(request.path_params["arn"])
+        if ":::" in arn:
+            bucket = arn.split(":::", 1)[1]
+        else:
+            bucket = arn.rsplit("/", 1)[-1]
+        tags = store.bucket_tags(bucket) or []
+        if request.method == "GET":
+            inner = "".join(
+                f"<Tag><Key>{_esc(t['Key'])}</Key><Value>{_esc(t['Value'])}</Value></Tag>"
+                for t in tags
+            )
+            return _xml(
+                f'<ListTagsForResourceResult xmlns="{CONTROL_NS}">'
+                f"<Tags>{inner}</Tags></ListTagsForResourceResult>"
+            )
+        if request.method == "POST":
+            new = parse_tagset(await request.body())
+            merged = {t["Key"]: t["Value"] for t in tags}
+            merged.update({t["Key"]: t["Value"] for t in new})
+            tags = [{"Key": k, "Value": v} for k, v in merged.items()]
+        else:  # DELETE
+            gone = set(request.query_params.getlist("tagKeys"))
+            tags = [t for t in tags if t["Key"] not in gone]
+        problem = check_tags(tags)
+        if problem:
+            return _error(400, "InvalidTag", problem)
+        if tags:
+            store.set_bucket_tags(bucket, tags)
+        else:
+            store.delete_bucket_tags(bucket)
+        return Response(status_code=204)
 
     async def handle(request: Request) -> Response:
         bucket, key = _split(request.url.path)
@@ -606,6 +648,11 @@ def create_app(store: Store | None = None) -> Starlette:
     methods = ["GET", "PUT", "POST", "DELETE", "HEAD"]
     app = Starlette(
         routes=[
+            Route(
+                "/v20180820/tags/{arn:path}",
+                control_tags,
+                methods=["GET", "POST", "DELETE"],
+            ),
             Route("/", handle, methods=methods),
             Route("/{path:path}", handle, methods=methods),
         ]

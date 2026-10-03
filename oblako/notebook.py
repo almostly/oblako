@@ -29,6 +29,8 @@ def _local(port: int) -> str:
 # drift from the Service defaults / docker-compose.
 ENDPOINTS = {
     "AWS_ENDPOINT_URL_S3": _local(ports.S3),
+    # S3 Control: the Go SDKs (Terraform, Pulumi) read bucket tags through it
+    "AWS_ENDPOINT_URL_S3_CONTROL": _local(ports.S3),
     # the proxy adds vector search and tags; Streams talk to DynamoDB Local
     "AWS_ENDPOINT_URL_DYNAMODB": _local(ports.DYNAMODB_VECTORS),
     "AWS_ENDPOINT_URL_DYNAMODB_STREAMS": _local(ports.DYNAMODB),
