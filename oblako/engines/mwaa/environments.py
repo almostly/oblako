@@ -33,6 +33,7 @@ import socket
 import subprocess
 import threading
 import time
+import uuid
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -473,11 +474,71 @@ def sync_loop(stop: threading.Event) -> None:
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
+def defaults(name: str, req: dict) -> dict:
+    """Return the settings AWS reports for an environment created without them.
+
+    Observed on MWAA (mw1.micro, Airflow 3.3.1): one worker, scheduler and
+    webserver for mw1.micro, task logs on and the others off, service-managed
+    endpoints. oblako records and reports these; it does not enforce them.
+    """
+    micro = req.get("EnvironmentClass", "mw1.small") == "mw1.micro"
+    region, account = config.region(), config.account_id()
+    log_group = f"arn:aws:logs:{region}:{account}:log-group:airflow-{name}"
+    logs = {
+        kind: {"Enabled": False, "LogLevel": "INFO"}
+        for kind in (
+            "DagProcessingLogs",
+            "SchedulerLogs",
+            "WebserverLogs",
+            "WorkerLogs",
+        )
+    }
+    logs["TaskLogs"] = {
+        "Enabled": True,
+        "LogLevel": "INFO",
+        "CloudWatchLogGroupArn": f"{log_group}-Task",
+    }
+    return {
+        "EnvironmentClass": "mw1.small",
+        "MinWorkers": 1,
+        "MaxWorkers": 1 if micro else 10,
+        "Schedulers": 1 if micro else 2,
+        "MinWebservers": 1 if micro else 2,
+        "MaxWebservers": 1 if micro else 2,
+        "WebserverAccessMode": "PRIVATE_ONLY",
+        "EndpointManagement": "SERVICE",
+        "WeeklyMaintenanceWindowStart": "SUN:03:00",
+        "LoggingConfiguration": logs,
+        "ServiceRoleArn": (
+            f"arn:aws:iam::{account}:role/aws-service-role/"
+            "airflow.amazonaws.com/AWSServiceRoleForAmazonMWAA"
+        ),
+        "CeleryExecutorQueue": (
+            f"arn:aws:sqs:{region}:{account}:airflow-celery-{uuid.uuid4()}"
+        ),
+        "Tags": {},
+    }
+
+
+def _without_nulls(value):
+    """Drop null fields from Airflow's responses, as InvokeRestApi does."""
+    if isinstance(value, dict):
+        return {k: _without_nulls(v) for k, v in value.items() if v is not None}
+    if isinstance(value, list):
+        return [_without_nulls(v) for v in value]
+    return value
+
+
 def _in_background(name: str, work, done_status: str = "AVAILABLE") -> None:
     def run():
         try:
             work()
-            _update(name, {"Status": done_status, "error": None, "LastUpdate": None})
+            done = {
+                "Status": "SUCCESS",
+                "CreatedAt": _now(),
+                "WorkerReplacementStrategy": "FORCED",
+            }
+            _update(name, {"Status": done_status, "error": None, "LastUpdate": done})
         except Exception as e:
             failed = "CREATE_FAILED" if done_status == "AVAILABLE" else "UPDATE_FAILED"
             current = get(name)
@@ -503,6 +564,7 @@ def create(name: str, req: dict) -> dict:
             raise MwaaError("ValidationException", f"Environment {name} already exists")
         port = _free_port()
         fields = {
+            **defaults(name, req),
             **req,
             "Name": name,
             "Arn": arn(name),
@@ -538,7 +600,7 @@ def update(name: str, req: dict) -> dict:
     record = get(name)
     if record is None:
         raise MwaaError(
-            "ResourceNotFoundException", f"Environment {name} not found", 404
+            "ResourceNotFoundException", f"Environment {name} not found.", 404
         )
     if record["Status"] not in ("AVAILABLE", "UPDATE_FAILED"):
         raise MwaaError(
@@ -572,7 +634,7 @@ def delete(name: str) -> None:
 
     if get(name) is None:
         raise MwaaError(
-            "ResourceNotFoundException", f"Environment {name} not found", 404
+            "ResourceNotFoundException", f"Environment {name} not found.", 404
         )
     _update(name, {"Status": "DELETING"})
     client = _docker()
@@ -597,7 +659,7 @@ def invoke_rest_api(name: str, req: dict) -> tuple[int, object]:
     record = get(name)
     if record is None:
         raise MwaaError(
-            "ResourceNotFoundException", f"Environment {name} not found", 404
+            "ResourceNotFoundException", f"Environment {name} not found.", 404
         )
     if record["Status"] != "AVAILABLE":
         raise MwaaError(
@@ -626,7 +688,7 @@ def invoke_rest_api(name: str, req: dict) -> tuple[int, object]:
         timeout=60,
     )
     try:
-        body: object = resp.json()
+        body: object = _without_nulls(resp.json())
     except ValueError:
         body = {"detail": resp.text}
     return resp.status_code, body
