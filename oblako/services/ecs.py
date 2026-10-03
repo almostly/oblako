@@ -20,6 +20,7 @@ a stack-provisioned task is just as real as a hand-launched one.
 
 from __future__ import annotations
 
+import json
 import socket
 import uuid
 
@@ -86,6 +87,80 @@ def _env_list_to_dict(pairs) -> dict[str, str]:
     return {p["name"]: p["value"] for p in (pairs or [])}
 
 
+# Fargate task sizes, as AWS accepts them: cpu units -> allowed memory in MiB
+FARGATE_SIZES: dict[int, tuple[int, ...] | range] = {
+    256: (512, 1024, 2048),
+    512: range(1024, 4097, 1024),
+    1024: range(2048, 8193, 1024),
+    2048: range(4096, 16385, 1024),
+    4096: range(8192, 30721, 1024),
+    8192: range(16384, 61441, 4096),
+    16384: range(32768, 122881, 8192),
+}
+
+
+def _units(value, unit: str) -> int | None:
+    """Read ``"1024"``, ``1024``, ``"1 vCPU"`` or ``"2 GB"`` as CPU units or MiB."""
+    text = str(value).strip()
+    if text.isdigit():
+        return int(text)
+    number, _, suffix = text.partition(" ")
+    try:
+        amount = float(number)
+    except ValueError:
+        return None
+    return int(amount * 1024) if suffix.strip().lower() == unit else None
+
+
+def fargate_size_error(task_definition: dict) -> str | None:
+    """Return AWS's ClientException message if a Fargate task size is invalid."""
+    if "FARGATE" not in (task_definition.get("requiresCompatibilities") or []):
+        return None
+    cpu_raw, memory_raw = task_definition.get("cpu"), task_definition.get("memory")
+    if cpu_raw is None or memory_raw is None:
+        return "Fargate requires that 'cpu' be defined at the task level."
+    cpu, memory = _units(cpu_raw, "vcpu"), _units(memory_raw, "gb")
+    if memory not in FARGATE_SIZES.get(cpu or 0, ()):
+        return (
+            f"No Fargate configuration exists for given values: {cpu_raw} CPU, "
+            f"{memory_raw} memory. See the Amazon ECS documentation for the valid values."
+        )
+    return None
+
+
+def _secret_value(value_from: str, endpoint_url: str) -> str:
+    """Resolve a container secret's ``valueFrom`` from SSM or Secrets Manager.
+
+    Accepts an SSM parameter name or ARN, and a Secrets Manager ARN with the
+    optional ``:json-key:version-stage:version-id`` suffix, as ECS does.
+    """
+    if value_from.startswith("arn:aws:secretsmanager:"):
+        parts = value_from.split(":")
+        arn, extra = ":".join(parts[:7]), parts[7:] + ["", "", ""]
+        json_key, stage, version = extra[:3]
+        kwargs: dict = {"SecretId": arn}
+        if stage:
+            kwargs["VersionStage"] = stage
+        if version:
+            kwargs["VersionId"] = version
+        secret = client("secretsmanager", endpoint_url).get_secret_value(**kwargs)
+        text = secret.get("SecretString", "")
+        return str(json.loads(text)[json_key]) if json_key else text
+    ssm = client("ssm", endpoint_url)
+    names = [value_from]
+    if value_from.startswith("arn:aws:ssm:"):
+        path = value_from.split(":parameter", 1)[1]
+        names = [path, path.lstrip("/")]
+    for name in names:
+        try:
+            return ssm.get_parameter(Name=name, WithDecryption=True)["Parameter"][
+                "Value"
+            ]
+        except ssm.exceptions.ParameterNotFound:
+            continue
+    raise LookupError(f"parameter {value_from} not found")
+
+
 def _container_name(task_id: str, container: str) -> str:
     return f"oblako-ecs-{task_id[:12]}-{container}"
 
@@ -115,6 +190,9 @@ class EcsService(BotoService):
     # Control-plane convenience (everything else: use get_client() directly)
     def register_task_definition(self, **kwargs) -> str:
         """Register a task definition in moto, returning its ARN."""
+        error = fargate_size_error(kwargs)
+        if error:
+            raise ValueError(error)
         resp = self.get_client().register_task_definition(**kwargs)
         return resp["taskDefinition"]["taskDefinitionArn"]
 
@@ -289,6 +367,16 @@ class EcsService(BotoService):
             f"{meta_base}/v4/{task_id}/{cdef['name']}"
         )
         env.update(_env_list_to_dict(cdef.get("environment")))
+        for secret in cdef.get("secrets") or []:
+            try:
+                env[secret["name"]] = _secret_value(
+                    secret["valueFrom"], self.endpoint_url
+                )
+            except Exception as e:  # missing parameter or secret, as AWS reports it
+                raise RuntimeError(
+                    "ResourceInitializationError: unable to pull secrets or registry "
+                    f"auth: unable to retrieve secret {secret['valueFrom']}: {e}"
+                ) from e
 
         port_bindings, bindings = {}, []
         for pm in cdef.get("portMappings", []):
