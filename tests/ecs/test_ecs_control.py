@@ -10,6 +10,7 @@ import uuid
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 
 from oblako.engines import ecs_control
 from tests.ecs.test_ecs import _ecs_up
@@ -89,3 +90,69 @@ def test_other_calls_go_to_moto_and_unknown_tasks_are_missing(ecs):
     missing = "arn:aws:ecs:us-east-1:123456789012:task/x/none"
     resp = client.describe_tasks(cluster=cluster, tasks=[missing])
     assert resp["tasks"] == [] and resp["failures"][0]["reason"] == "MISSING"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not _ecs_up(), reason="moto + Docker not running")
+def test_register_refuses_a_size_fargate_does_not_offer(ecs):
+    client, _ = ecs
+    with pytest.raises(ClientError) as err:
+        client.register_task_definition(
+            family="too-big",
+            requiresCompatibilities=["FARGATE"],
+            networkMode="awsvpc",
+            cpu="256",
+            memory="4096",
+            containerDefinitions=[{"name": "job", "image": IMAGE}],
+        )
+    assert err.value.response["Error"]["Code"] == "ClientException"
+    assert "No Fargate configuration exists" in err.value.response["Error"]["Message"]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not _ecs_up(), reason="moto + Docker not running")
+def test_secrets_reach_the_container_from_ssm_and_secrets_manager(ecs):
+    client, cluster = ecs
+    suffix = uuid.uuid4().hex[:6]
+    kwargs = {
+        "endpoint_url": "http://localhost:5500",
+        "region_name": "us-east-1",
+        "aws_access_key_id": "test",
+        "aws_secret_access_key": "test",
+    }
+    ssm = boto3.client("ssm", **kwargs)
+    secrets = boto3.client("secretsmanager", **kwargs)
+    parameter = f"/ecs-test/{suffix}/db_password"
+    ssm.put_parameter(Name=parameter, Value="s3cret", Type="SecureString")
+    secret_arn = secrets.create_secret(
+        Name=f"ecs-test-{suffix}", SecretString='{"api_key": "k1"}'
+    )["ARN"]
+    try:
+        client.register_task_definition(
+            family="with-secrets",
+            requiresCompatibilities=["FARGATE"],
+            networkMode="awsvpc",
+            cpu="256",
+            memory="512",
+            containerDefinitions=[
+                {
+                    "name": "job",
+                    "image": IMAGE,
+                    "essential": True,
+                    "command": [
+                        "sh",
+                        "-c",
+                        'test "$DB_PASSWORD" = s3cret && test "$API_KEY" = k1',
+                    ],
+                    "secrets": [
+                        {"name": "DB_PASSWORD", "valueFrom": parameter},
+                        {"name": "API_KEY", "valueFrom": f"{secret_arn}:api_key::"},
+                    ],
+                }
+            ],
+        )
+        task = _run(client, cluster, "with-secrets")
+        assert task["containers"][0]["exitCode"] == 0
+    finally:
+        ssm.delete_parameter(Name=parameter)
+        secrets.delete_secret(SecretId=secret_arn, ForceDeleteWithoutRecovery=True)

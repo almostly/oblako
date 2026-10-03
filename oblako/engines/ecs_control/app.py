@@ -26,6 +26,7 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from oblako import ports
+from oblako.services.ecs import fargate_size_error
 
 TARGET = "AmazonEC2ContainerServiceV20141113."
 HANDLED = {"RunTask", "DescribeTasks", "ListTasks", "StopTask"}
@@ -100,6 +101,14 @@ async def handle(request: Request) -> Response:
         except Exception as e:  # moto refused the task definition, Docker failed
             return _error("ClientException", str(e))
         return JSONResponse(result, media_type="application/x-amz-json-1.1")
+    if operation == "RegisterTaskDefinition":
+        # moto accepts any cpu/memory pair; AWS refuses sizes Fargate does not offer
+        try:
+            error = fargate_size_error(json.loads(body or b"{}"))
+        except json.JSONDecodeError:
+            error = None
+        if error:
+            return _error("ClientException", error)
     headers = {
         k: v
         for k, v in request.headers.items()
