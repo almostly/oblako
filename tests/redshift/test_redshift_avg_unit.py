@@ -7,15 +7,16 @@ _PATH = (
     pathlib.Path(__file__).parents[2] / "oblako/images/redshift/proxy/integer_avg.py"
 )
 _spec = importlib.util.spec_from_file_location("_integer_avg", _PATH)
+assert _spec and _spec.loader
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 rewrite_avg = _mod.rewrite_avg
 
 
 def test_calls_are_qualified():
-    assert rewrite_avg("SELECT avg(x) FROM t") == "SELECT redshift_compat.avg(x) FROM t"
+    assert rewrite_avg("SELECT avg(x) FROM t") == "SELECT pg_oblako.avg(x) FROM t"
     assert rewrite_avg("SELECT AVG ( x ) OVER () FROM t") == (
-        "SELECT redshift_compat.avg ( x ) OVER () FROM t"
+        "SELECT pg_oblako.avg ( x ) OVER () FROM t"
     )
 
 

@@ -7,6 +7,14 @@
 -- a jsonb path by the wire proxy, since PostgreSQL parses `a.b.c` as table.column.
 CREATE DOMAIN super AS jsonb;
 
+-- Redshift's built-ins live in pg_catalog, so these are created there (see
+-- 99_system_catalog.sql); allow_system_table_mods permits it (superuser).
+SET allow_system_table_mods = on;
+-- every node creates these itself; Citus must not replay them (a worker refuses
+-- pg_catalog and pg_ schemas from a replay). A placeholder without Citus.
+SET citus.enable_ddl_propagation = off;
+SET search_path = pg_catalog, public;
+
 -- JSON_PARSE('...') -> SUPER: parse (and validate) JSON text into a SUPER value.
 CREATE OR REPLACE FUNCTION json_parse(s text)
 RETURNS super IMMUTABLE AS $$
@@ -57,3 +65,8 @@ try:
 except Exception:
     return False
 $$ LANGUAGE plpython3u;
+
+-- back to the session defaults, for whoever runs this file next in the session
+RESET search_path;
+RESET allow_system_table_mods;
+RESET citus.enable_ddl_propagation;

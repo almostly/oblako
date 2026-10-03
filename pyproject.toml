@@ -32,6 +32,7 @@ dev = [
     "opensearch-py>=2.0",  # test_opensearch.py uses the OpenSearch client
     "redshift_connector>=2.1",  # test_redshift_proxy.py drives the redshift-connector driver
     "sqlalchemy-redshift>=0.8",  # test_redshift_sqlalchemy.py drives the dialect's reflection
+    "alembic>=1.13",  # test_redshift_sqlalchemy.py runs autogenerate's comparison
     "pyarrow>=14",  # test_redshift_copy_unload.py verifies the COPY/UNLOAD <-> S3 bridge
     "awswrangler>=3",  # test_redshift_copy_unload.py exercises wr.redshift.copy/unload
     "sqlglot>=25",  # test_redshift_pivot_unit.py + the proxy's PIVOT/UNPIVOT rewrite

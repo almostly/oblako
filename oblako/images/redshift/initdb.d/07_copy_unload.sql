@@ -7,6 +7,14 @@
 -- lifting and type handling live in the importable `copy_unload` module (on the
 -- server's PYTHONPATH), keeping these wrappers thin and shared with the proxy.
 
+-- Redshift's built-ins live in pg_catalog, so these are created there (see
+-- 99_system_catalog.sql); allow_system_table_mods permits it (superuser).
+SET allow_system_table_mods = on;
+-- every node creates these itself; Citus must not replay them (a worker refuses
+-- pg_catalog and pg_ schemas from a replay). A placeholder without Citus.
+SET citus.enable_ddl_propagation = off;
+SET search_path = pg_catalog, public;
+
 CREATE EXTENSION IF NOT EXISTS plpython3u;
 
 -- UNLOAD ('query') TO 's3://prefix/' [FORMAT AS PARQUET|CSV]: run the query and
@@ -26,3 +34,8 @@ RETURNS bigint AS $$
 import copy_unload
 return copy_unload.do_copy(plpy, tbl, uri, cols, fmt, opts)
 $$ LANGUAGE plpython3u;
+
+-- back to the session defaults, for whoever runs this file next in the session
+RESET search_path;
+RESET allow_system_table_mods;
+RESET citus.enable_ddl_propagation;

@@ -3,6 +3,14 @@
 -- string per row, so they run at native speed (real Redshift's are native C too).
 -- Redshift returns '' for a missing path, so we COALESCE.
 
+-- Redshift's built-ins live in pg_catalog, so these are created there (see
+-- 99_system_catalog.sql); allow_system_table_mods permits it (superuser).
+SET allow_system_table_mods = on;
+-- every node creates these itself; Citus must not replay them (a worker refuses
+-- pg_catalog and pg_ schemas from a replay). A placeholder without Citus.
+SET citus.enable_ddl_propagation = off;
+SET search_path = pg_catalog, public;
+
 -- NB: `json_array` can't be a parameter name on PG16 (JSON_ARRAY is now a
 -- reserved SQL/JSON keyword), so the array params are named `arr`.
 CREATE OR REPLACE FUNCTION json_extract_array_element_text(arr text, array_index int)
@@ -41,3 +49,8 @@ DROP AGGREGATE IF EXISTS median(numeric);
 CREATE AGGREGATE median(numeric) (
 	SFUNC=array_append, STYPE=numeric[], FINALFUNC=_final_median, INITCOND='{}'
 );
+
+-- back to the session defaults, for whoever runs this file next in the session
+RESET search_path;
+RESET allow_system_table_mods;
+RESET citus.enable_ddl_propagation;

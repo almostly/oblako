@@ -49,6 +49,7 @@ import os
 import re
 import ssl
 import struct
+import sys
 
 # The COPY/UNLOAD <-> S3 bridge. Optional: if its deps (pydantic/boto3/pyarrow)
 # aren't present the proxy still runs, just without COPY/UNLOAD rewriting.
@@ -75,7 +76,7 @@ try:
 except Exception:  # any import failure disables the feature
     datepart = None
 
-# AVG(...) -> redshift_compat.avg(...): BIGINT for integer arguments. Pure-stdlib.
+# AVG(...) -> pg_oblako.avg(...): BIGINT for integer arguments. Pure-stdlib.
 try:
     import integer_avg
 except Exception:  # any import failure disables the feature
@@ -295,7 +296,7 @@ def rewrite_sql(sql: str) -> str:
     if datepart is not None:
         s = datepart.rewrite_dateparts(s)  # DATEADD(month, ..) -> ('month', ..)
     if integer_avg is not None:
-        s = integer_avg.rewrite_avg(s)  # avg( -> redshift_compat.avg( (BIGINT for ints)
+        s = integer_avg.rewrite_avg(s)  # avg( -> pg_oblako.avg( (BIGINT for ints)
     s = _VARCHAR_MAX.sub("text", s)
     s = _CREATEUSER.sub("SUPERUSER", s)
     s = _PASSWORD_DISABLE.sub("PASSWORD NULL", s)
@@ -460,7 +461,7 @@ async def _distribute(commands: list[str]) -> None:
 def _rewrite_parameter_status(body: bytes) -> bytes:
     """Rewrite a ParameterStatus ('S') body if it reports server_version."""
     i = body.index(b"\x00")
-    if body[:i] != b"server_version":
+    if PROXY_SERVER_VERSION is None or body[:i] != b"server_version":
         return b"S" + struct.pack("!I", len(body) + 4) + body
     new = b"server_version\x00" + PROXY_SERVER_VERSION.encode() + b"\x00"
     return b"S" + struct.pack("!I", len(new) + 4) + new
@@ -513,7 +514,7 @@ async def _pipe_server(
 
 async def _negotiate_startup(
     reader: asyncio.StreamReader, writer: asyncio.StreamWriter
-) -> bytes | None:
+) -> bytes:
     """Answer the client's SSL/GSS negotiation, then return its StartupMessage.
 
     On ``SSLRequest`` the proxy terminates TLS itself (reply 'S' + start_tls with
@@ -533,6 +534,8 @@ async def _negotiate_startup(
             if is_ssl and SSL_CTX is not None:
                 writer.write(b"S")
                 await writer.drain()
+                if sys.version_info < (3, 11):  # StreamWriter.start_tls is 3.11+
+                    raise RuntimeError("TLS termination needs Python 3.11 or later")
                 await writer.start_tls(SSL_CTX)  # client<->proxy now encrypted
             else:
                 writer.write(b"N")  # no TLS (or GSS, which we don't offer)

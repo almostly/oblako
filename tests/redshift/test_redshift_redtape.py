@@ -212,8 +212,8 @@ def test_compat_layer_reaches_the_postgres_database():
     conn.autocommit = True
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT to_regprocedure('public.redshift_acl(aclitem[],text)') IS NOT NULL,"
-            " to_regclass('public.svv_external_schemas') IS NOT NULL"
+            "SELECT to_regprocedure('pg_catalog.redshift_acl(aclitem[],text)') IS NOT NULL,"
+            " to_regclass('pg_catalog.svv_external_schemas') IS NOT NULL"
         )
         assert cur.fetchone() == (True, True)
     conn.close()

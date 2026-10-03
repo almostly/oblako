@@ -2,7 +2,7 @@
 -- So `SELECT avg(load_ms)` over an INTEGER column gives 2095 on Redshift and
 -- 2095.0000000000000000 here. The return type depends on the argument's type,
 -- which the wire proxy can't see, so the proxy rewrites every unqualified avg( to
--- redshift_compat.avg( (proxy/integer_avg.py) and the engine picks the overload:
+-- pg_oblako.avg( (proxy/integer_avg.py) and the engine picks the overload:
 --
 --   SMALLINT, INTEGER, BIGINT  -> BIGINT: the sum divided by the count in integer
 --                                 arithmetic (truncated toward zero), as Redshift
@@ -13,55 +13,61 @@
 -- unqualified CREATE. Idempotent: entrypoint.sh re-applies it to every database on
 -- each start, which also reaches databases created before this file existed.
 
-CREATE SCHEMA IF NOT EXISTS redshift_compat;
-GRANT USAGE ON SCHEMA redshift_compat TO PUBLIC;
+-- pg_ marks the schema as the system's (see 99_system_catalog.sql); creating one
+-- needs allow_system_table_mods, even with IF NOT EXISTS.
+SET allow_system_table_mods = on;
+-- every node creates these itself; Citus must not replay them (a worker refuses
+-- pg_catalog and pg_ schemas from a replay). A placeholder without Citus.
+SET citus.enable_ddl_propagation = off;
+CREATE SCHEMA IF NOT EXISTS pg_oblako;
+GRANT USAGE ON SCHEMA pg_oblako TO PUBLIC;
 
-CREATE OR REPLACE FUNCTION redshift_compat._avg_int_final(state int8[])
+CREATE OR REPLACE FUNCTION pg_oblako._avg_int_final(state int8[])
 RETURNS bigint IMMUTABLE STRICT PARALLEL SAFE AS $$
     SELECT CASE WHEN state[1] = 0 THEN NULL ELSE state[2] / state[1] END;
 $$ LANGUAGE sql;
 
 -- BIGINT sums can overflow int8, so their state is numeric {count, sum}.
-CREATE OR REPLACE FUNCTION redshift_compat._avg_int8_accum(state numeric[], v int8)
+CREATE OR REPLACE FUNCTION pg_oblako._avg_int8_accum(state numeric[], v int8)
 RETURNS numeric[] IMMUTABLE STRICT PARALLEL SAFE AS $$
     SELECT ARRAY[state[1] + 1, state[2] + v];
 $$ LANGUAGE sql;
 
-CREATE OR REPLACE FUNCTION redshift_compat._avg_int8_combine(a numeric[], b numeric[])
+CREATE OR REPLACE FUNCTION pg_oblako._avg_int8_combine(a numeric[], b numeric[])
 RETURNS numeric[] IMMUTABLE STRICT PARALLEL SAFE AS $$
     SELECT ARRAY[a[1] + b[1], a[2] + b[2]];
 $$ LANGUAGE sql;
 
-CREATE OR REPLACE FUNCTION redshift_compat._avg_int8_final(state numeric[])
+CREATE OR REPLACE FUNCTION pg_oblako._avg_int8_final(state numeric[])
 RETURNS bigint IMMUTABLE STRICT PARALLEL SAFE AS $$
     SELECT CASE WHEN state[1] = 0 THEN NULL ELSE trunc(state[2] / state[1])::bigint END;
 $$ LANGUAGE sql;
 
 -- SMALLINT and INTEGER reuse PostgreSQL's own accumulators ({count, sum} as int8[]),
 -- so they are as fast as the built-ins and run in parallel.
-CREATE OR REPLACE AGGREGATE redshift_compat.avg(smallint) (
+CREATE OR REPLACE AGGREGATE pg_oblako.avg(smallint) (
     SFUNC = int2_avg_accum,
     STYPE = int8[],
     COMBINEFUNC = int4_avg_combine,
-    FINALFUNC = redshift_compat._avg_int_final,
+    FINALFUNC = pg_oblako._avg_int_final,
     INITCOND = '{0,0}',
     PARALLEL = SAFE
 );
 
-CREATE OR REPLACE AGGREGATE redshift_compat.avg(integer) (
+CREATE OR REPLACE AGGREGATE pg_oblako.avg(integer) (
     SFUNC = int4_avg_accum,
     STYPE = int8[],
     COMBINEFUNC = int4_avg_combine,
-    FINALFUNC = redshift_compat._avg_int_final,
+    FINALFUNC = pg_oblako._avg_int_final,
     INITCOND = '{0,0}',
     PARALLEL = SAFE
 );
 
-CREATE OR REPLACE AGGREGATE redshift_compat.avg(bigint) (
-    SFUNC = redshift_compat._avg_int8_accum,
+CREATE OR REPLACE AGGREGATE pg_oblako.avg(bigint) (
+    SFUNC = pg_oblako._avg_int8_accum,
     STYPE = numeric[],
-    COMBINEFUNC = redshift_compat._avg_int8_combine,
-    FINALFUNC = redshift_compat._avg_int8_final,
+    COMBINEFUNC = pg_oblako._avg_int8_combine,
+    FINALFUNC = pg_oblako._avg_int8_final,
     INITCOND = '{0,0}',
     PARALLEL = SAFE
 );
@@ -100,8 +106,12 @@ BEGIN
         IF a.proparallel = 's' THEN
             opts := opts || ', PARALLEL = SAFE';
         END IF;
-        EXECUTE format('CREATE OR REPLACE AGGREGATE redshift_compat.avg(%s) (%s)',
+        EXECUTE format('CREATE OR REPLACE AGGREGATE pg_oblako.avg(%s) (%s)',
                        a.argtype, opts);
     END LOOP;
 END
 $mirror$;
+
+-- back to the session default, for whoever runs this file next in the session
+RESET allow_system_table_mods;
+RESET citus.enable_ddl_propagation;

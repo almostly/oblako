@@ -148,7 +148,7 @@ Redshift **date/time functions** PostgreSQL lacks: `getdate`, `sysdate`,
 `dateadd`, `datediff` (boundary-crossing semantics), `add_months`, `last_day`,
 `months_between`, `trunc(timestamp)`, `convert_timezone`. `AVG` of a SMALLINT,
 INTEGER or BIGINT column returns BIGINT, truncated, as Redshift's does (PostgreSQL
-returns NUMERIC): the proxy routes `avg(` to aggregates in schema `redshift_compat`,
+returns NUMERIC): the proxy routes `avg(` to aggregates in schema `pg_oblako`,
 which copy PostgreSQL's `avg` for every other type. The date parts must be
 quoted (`dateadd('day', 7, ts)`), as most SQL generators emit them. It also adds
 the Redshift **catalog views** BI tools and dbt query for metadata, mapped onto
@@ -160,9 +160,14 @@ PostgreSQL's catalogs: `pg_table_def`, `svv_tables`, `svv_columns`,
 (`redshift+redshift_connector://…`) reflects too: its introspection reads
 Redshift-only catalog columns (`reldiststyle`, `attencodingtype`, …) and filters
 by output-column aliases in `WHERE`, neither of which stock PostgreSQL has, so the
-proxy answers them. `get_columns`, table autoload, `has_table`, and thus **Alembic
+proxy answers them. `get_columns`, table autoload, `has_table`, ORM models with
+`redshift_diststyle`/`redshift_distkey`/`redshift_sortkey`, and **Alembic
 autogenerate** work against the engine (the driver is a client dependency, nothing
-is added to the image).
+is added to the image). As on Redshift, the system tables, `svv_*` views and
+built-in functions live in `pg_catalog` and oblako's internals in the `pg_oblako`
+schema, so `public` holds only your objects: reflection lists no `stl_*`/`svv_*`
+relations, and autogenerate, with or without `include_schemas`, proposes no change
+to them. Data volumes from older images are migrated on start.
 
 **Access management as code.** Redshift tools that manage users, groups, and
 privileges declaratively run against the engine too.
