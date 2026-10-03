@@ -9,6 +9,14 @@
 -- accepts the bare keyword form DATEADD(day, 7, ts), which PostgreSQL would parse
 -- as a column; the wire proxy quotes it (proxy/datepart.py), so both forms work.
 
+-- Redshift's built-ins live in pg_catalog, so these are created there (see
+-- 99_system_catalog.sql); allow_system_table_mods permits it (superuser).
+SET allow_system_table_mods = on;
+-- every node creates these itself; Citus must not replay them (a worker refuses
+-- pg_catalog and pg_ schemas from a replay). A placeholder without Citus.
+SET citus.enable_ddl_propagation = off;
+SET search_path = pg_catalog, public;
+
 -- Normalize Redshift datepart names/abbreviations to a canonical unit.
 -- Note: per Redshift, 'm' is MINUTE (month is 'mon'/'mons'/'mm').
 CREATE OR REPLACE FUNCTION _redshift_datepart(p text)
@@ -122,3 +130,8 @@ CREATE OR REPLACE FUNCTION convert_timezone(target_tz text, ts timestamp)
 RETURNS timestamp IMMUTABLE LANGUAGE sql AS $$
     SELECT (ts AT TIME ZONE 'UTC') AT TIME ZONE target_tz
 $$;
+
+-- back to the session defaults, for whoever runs this file next in the session
+RESET search_path;
+RESET allow_system_table_mods;
+RESET citus.enable_ddl_propagation;

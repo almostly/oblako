@@ -7,9 +7,16 @@
 -- asynchronously with SageMaker. Idempotent, so 10_ re-applies it per database.
 
 CREATE EXTENSION IF NOT EXISTS plpython3u;
-CREATE SCHEMA IF NOT EXISTS oblako_ml;
+-- pg_ marks the schema as the system's, as Redshift's own internal schemas are,
+-- so SQLAlchemy, Alembic and schema browsers leave it out; creating one needs
+-- allow_system_table_mods (superuser).
+SET allow_system_table_mods = on;
+-- every node creates these itself; Citus must not replay them (a worker refuses
+-- pg_catalog and pg_ schemas from a replay). A placeholder without Citus.
+SET citus.enable_ddl_propagation = off;
+CREATE SCHEMA IF NOT EXISTS pg_oblako;
 
-CREATE TABLE IF NOT EXISTS oblako_ml.models (
+CREATE TABLE IF NOT EXISTS pg_oblako.models (
     schema_name       text NOT NULL,
     model_name        text NOT NULL,
     owner             text NOT NULL,
@@ -36,8 +43,13 @@ CREATE TABLE IF NOT EXISTS oblako_ml.models (
 -- The functions below run as the caller, so the training query is checked
 -- against the caller's own privileges; users record and drop models, and only
 -- the agent (superuser) updates them.
-GRANT USAGE ON SCHEMA oblako_ml TO PUBLIC;
-GRANT SELECT, INSERT, DELETE ON oblako_ml.models TO PUBLIC;
+GRANT USAGE ON SCHEMA pg_oblako TO PUBLIC;
+GRANT SELECT, INSERT, DELETE ON pg_oblako.models TO PUBLIC;
+
+-- The functions and svv_ml_model_info are Redshift's built-ins, so they go to
+-- pg_catalog (see 99_system_catalog.sql). The agent re-runs this file on every
+-- start, after the entrypoint's migration, so it must not create them in public.
+SET search_path = pg_catalog, public;
 
 CREATE OR REPLACE FUNCTION oblako_ml_create_model(stmt text)
 RETURNS void AS $$
@@ -77,4 +89,9 @@ SELECT current_database()::char(128) AS database_name,
             WHEN 'TRAINING' THEN 'TRAINING'
             ELSE coalesce(failure_reason, model_state)
         END)::char(128)              AS model_state
-FROM oblako_ml.models;
+FROM pg_oblako.models;
+
+-- back to the session defaults, for whoever runs this file next in the session
+RESET search_path;
+RESET allow_system_table_mods;
+RESET citus.enable_ddl_propagation;

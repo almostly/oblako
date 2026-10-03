@@ -7,6 +7,15 @@
 -- Replaces the single-node definition (05_catalog_views.sql), keeping its columns
 -- and order and adding skew_rows, as Redshift has it.
 
+-- Redshift's built-ins live in pg_catalog, so these are created there, replacing
+-- the single-node view in place (see the base image's 99_system_catalog.sql);
+-- allow_system_table_mods permits it (superuser).
+SET allow_system_table_mods = on;
+-- every node creates these itself; Citus must not replay them (a worker refuses
+-- pg_catalog and pg_ schemas from a replay). A placeholder without Citus.
+SET citus.enable_ddl_propagation = off;
+SET search_path = pg_catalog, public;
+
 CREATE OR REPLACE FUNCTION oblako_node_rows(t regclass)
 RETURNS TABLE (node text, rows bigint)
 LANGUAGE sql STABLE AS $$
@@ -64,3 +73,8 @@ LEFT JOIN key_rows k ON k.logicalrelid = c.oid
 WHERE c.relkind IN ('r', 'p')
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'citus')
   AND NOT c.relname ~ '_[0-9]+$';  -- shard tables on the leader, if any
+
+-- back to the session defaults, for whoever runs this file next in the session
+RESET search_path;
+RESET allow_system_table_mods;
+RESET citus.enable_ddl_propagation;

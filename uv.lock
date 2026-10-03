@@ -3944,6 +3944,7 @@ agentcore = [
     { name = "bedrock-agentcore" },
 ]
 dev = [
+    { name = "alembic" },
     { name = "awswrangler" },
     { name = "commitizen" },
     { name = "opensearch-py" },
@@ -3987,6 +3988,7 @@ sagemaker = [
 
 [package.metadata]
 requires-dist = [
+    { name = "alembic", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "awswrangler", marker = "extra == 'dev'", specifier = ">=3" },
     { name = "bedrock-agentcore", marker = "extra == 'agentcore'", specifier = ">=0.1" },
     { name = "boto3", specifier = ">=1.43.64" },

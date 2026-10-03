@@ -3,7 +3,7 @@
 Redshift's AVG of a SMALLINT, INTEGER or BIGINT returns BIGINT (the fraction is
 dropped); PostgreSQL's returns NUMERIC. Which one applies depends on the
 argument's type, which the proxy can't see, so the proxy doesn't decide: it
-rewrites each unqualified ``avg(`` call to ``redshift_compat.avg(``, and the engine
+rewrites each unqualified ``avg(`` call to ``pg_oblako.avg(``, and the engine
 resolves the overload. That schema holds BIGINT-returning aggregates for the
 integer types and exact copies of PostgreSQL's own for every other type
 (initdb.d/11_integer_avg.sql), so non-integer averages are unchanged.
@@ -14,7 +14,7 @@ calls (``x.avg(``) alone, and doesn't touch ``CREATE FUNCTION/AGGREGATE avg``.
 
 from __future__ import annotations
 
-_TARGET = "redshift_compat.avg"
+_TARGET = "pg_oblako.avg"
 _NAME_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789_$"
 
 
@@ -44,7 +44,7 @@ def _previous_word(s: str, end: int) -> str:
 
 
 def rewrite_avg(sql: str) -> str:
-    """Rewrite unqualified ``avg(`` calls in ``sql`` to ``redshift_compat.avg(``."""
+    """Rewrite unqualified ``avg(`` calls in ``sql`` to ``pg_oblako.avg(``."""
     if "avg" not in sql.lower():
         return sql
     out: list[str] = []

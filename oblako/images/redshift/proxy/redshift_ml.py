@@ -13,7 +13,7 @@ It behaves the way Redshift does:
    functions in initdb.d/09_redshift_ml.sql (``rewrite_ml``).
 2. CREATE MODEL validates synchronously (clauses, the 500-row minimum for AUTO
    OFF, the target column, numeric features), records the model as TRAINING in
-   ``oblako_ml.models`` and returns. Training is asynchronous.
+   ``pg_oblako.models`` and returns. Training is asynchronous.
 3. The agent (``python3 redshift_ml.py agent``, started as root by the entrypoint
    next to the proxy) picks up TRAINING models and runs a real training container
    on the host Docker daemon through the mounted /var/run/docker.sock, following
@@ -39,6 +39,7 @@ import tarfile
 import threading
 import time
 import uuid
+from typing import Any
 
 MIN_ROWS = 500  # Redshift ML's training-set minimum (enforced for AUTO OFF)
 MODEL_TYPES = ("XGBOOST", "MLP", "LINEAR_LEARNER")
@@ -398,7 +399,7 @@ def udf_sql(
 import json, math
 key = "rsml_{version}"
 if key not in GD:
-    rv = plpy.execute("SELECT model FROM oblako_ml.models WHERE version = '{version}'")
+    rv = plpy.execute("SELECT model FROM pg_oblako.models WHERE version = '{version}'")
     if not rv:
         plpy.error("Redshift ML model for {function} not found (dropped?)")
     GD[key] = json.loads(rv[0]["model"])
@@ -499,7 +500,7 @@ def _resolve(plpy, qualified: str) -> tuple[str, str]:
 
 def _find(plpy, schema: str, name: str):
     plan = plpy.prepare(
-        "SELECT * FROM oblako_ml.models WHERE schema_name = $1 AND model_name = $2",
+        "SELECT * FROM pg_oblako.models WHERE schema_name = $1 AND model_name = $2",
         ["text", "text"],
     )
     rows = plan.execute([schema, name])
@@ -568,7 +569,7 @@ def create_model(plpy, stmt: str) -> None:
         plpy.error("the training query returned no rows")
 
     plan = plpy.prepare(
-        "INSERT INTO oblako_ml.models (schema_name, model_name, owner, function_name, "
+        "INSERT INTO pg_oblako.models (schema_name, model_name, owner, function_name, "
         "target, query, features, spec, model_state, version, training_job_name) "
         "VALUES ($1, $2, current_user, $3, $4, $5, $6, $7, $8, $9, $10)",
         ["text"] * 10,
@@ -609,7 +610,7 @@ def drop_model(plpy, qualified: str, if_exists: bool) -> None:
         plpy.error(f'Model "{schema}.{name}" does not exist')
     _drop_functions(row, plpy.execute)
     plan = plpy.prepare(
-        "DELETE FROM oblako_ml.models WHERE schema_name = $1 AND model_name = $2",
+        "DELETE FROM pg_oblako.models WHERE schema_name = $1 AND model_name = $2",
         ["text", "text"],
     )
     plan.execute([schema, name])
@@ -681,7 +682,7 @@ def show_model(plpy, qualified: str) -> list[tuple[str, str]]:
 def show_models(plpy) -> list[tuple[str, str]]:
     """SHOW MODEL ALL: every model in this database."""
     rows = plpy.execute(
-        "SELECT schema_name, model_name FROM oblako_ml.models ORDER BY 1, 2"
+        "SELECT schema_name, model_name FROM pg_oblako.models ORDER BY 1, 2"
     )
     return [(r["schema_name"], r["model_name"]) for r in rows]
 
@@ -725,7 +726,10 @@ def _run_training(client, image: str, rows_csv: bytes, hp: dict, timeout: int) -
             raise RuntimeError(f"training container exited {code}: {logs[-1500:]}")
         bits, _ = container.get_archive("/opt/ml/model/model.json")
         with tarfile.open(fileobj=io.BytesIO(b"".join(bits))) as tar:
-            return json.loads(tar.extractfile(tar.getmembers()[0]).read())
+            member = tar.extractfile(tar.getmembers()[0])
+            if member is None:
+                raise RuntimeError("the training container wrote no model.json")
+            return json.loads(member.read())
     finally:
         try:
             container.remove(force=True)
@@ -785,7 +789,7 @@ def train_one(conn, row: dict) -> None:
     client = docker.DockerClient(base_url=f"unix://{DOCKER_SOCKET}")
     image = _ensure_train_image(client)
     timeout = int(spec["settings"].get("max_runtime", 5400))
-    candidates = []
+    candidates: list[dict[str, Any]] = []
     if spec["autopilot"]:
         best = None
         for model_type in MODEL_TYPES:
@@ -800,6 +804,8 @@ def train_one(conn, row: dict) -> None:
             candidates.append({"model_type": model_type, "val_score": score})
             if best is None or score > best[0]:
                 best = (score, model_type, trained)
+        if best is None:
+            raise RuntimeError("AutoML trained no candidate model")
         _, model_type, model = best
     else:
         model_type = spec["model_type"]
@@ -824,7 +830,7 @@ def train_one(conn, row: dict) -> None:
             "SELECT to_regtype('super') IS NOT NULL AS ok"
         ).fetchone()["ok"]
         cur.execute(
-            "UPDATE oblako_ml.models SET model = %s, model_type = %s, problem_type = %s, "
+            "UPDATE pg_oblako.models SET model = %s, model_type = %s, problem_type = %s, "
             "metrics = %s, train_seconds = %s WHERE version = %s",
             (
                 json.dumps(model),
@@ -857,7 +863,7 @@ def train_one(conn, row: dict) -> None:
                 f"({', '.join(['float8'] * n)}) OWNER TO {_q(row['owner'])}"
             )
         cur.execute(
-            "UPDATE oblako_ml.models SET model_state = %s, trained_at = now() "
+            "UPDATE pg_oblako.models SET model_state = %s, trained_at = now() "
             "WHERE version = %s",
             (READY, row["version"]),
         )
@@ -866,9 +872,10 @@ def train_one(conn, row: dict) -> None:
 
 def _connect(dbname: str):
     import psycopg
-    from psycopg.rows import dict_row
+    from psycopg.rows import DictRow, dict_row
 
-    return psycopg.connect(
+    # Connection[DictRow] names the row type that row_factory=dict_row gives
+    return psycopg.Connection[DictRow].connect(
         host=os.environ.get("OBLAKO_PG_SOCKET_DIR", "/var/run/postgresql"),
         port=int(os.environ.get("OBLAKO_PG_PORT", "5433")),
         user=os.environ.get("POSTGRES_USER", "postgres"),
@@ -885,7 +892,7 @@ def _job(dbname: str, row: dict) -> None:
             except Exception as err:  # surfaces in model_state
                 conn.rollback()
                 conn.execute(
-                    "UPDATE oblako_ml.models SET model_state = %s, "
+                    "UPDATE pg_oblako.models SET model_state = %s, "
                     "failure_reason = %s WHERE version = %s",
                     (FAILED, str(err).strip()[:2000], row["version"]),
                 )
@@ -897,14 +904,14 @@ def _job(dbname: str, row: dict) -> None:
 def _claim(dbname: str) -> list[dict]:
     with _connect(dbname) as conn:
         if (
-            conn.execute("SELECT to_regclass('oblako_ml.models')").fetchone()[
+            conn.execute("SELECT to_regclass('pg_oblako.models')").fetchone()[
                 "to_regclass"
             ]
             is None
         ):
             return []
         rows = conn.execute(
-            "UPDATE oblako_ml.models SET claimed_at = now() "
+            "UPDATE pg_oblako.models SET claimed_at = now() "
             "WHERE model_state = %s AND claimed_at IS NULL RETURNING *",
             (TRAINING,),
         ).fetchall()
@@ -927,7 +934,7 @@ def _install(dbname: str) -> None:
     with _connect(dbname) as conn:
         conn.execute(ddl)
         conn.execute(
-            "UPDATE oblako_ml.models SET claimed_at = NULL WHERE model_state = %s",
+            "UPDATE pg_oblako.models SET claimed_at = NULL WHERE model_state = %s",
             (TRAINING,),
         )
 

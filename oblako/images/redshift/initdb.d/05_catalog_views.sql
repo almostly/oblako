@@ -1,8 +1,16 @@
 -- Amazon Redshift catalog views that BI tools / dbt query for metadata
 -- (PostgreSQL has no pg_table_def or svv_* views). Mapped onto PostgreSQL's own
--- catalogs / information_schema. They live in the public schema and resolve
--- unqualified, since none of these names exist in pg_catalog. Pure SQL views, so
--- they also seed template1 for databases created later.
+-- catalogs / information_schema. They live in pg_catalog, as on Redshift, and
+-- resolve unqualified. Pure SQL views, so they also seed template1 for databases
+-- created later.
+
+-- Redshift's built-ins live in pg_catalog, so these are created there (see
+-- 99_system_catalog.sql); allow_system_table_mods permits it (superuser).
+SET allow_system_table_mods = on;
+-- every node creates these itself; Citus must not replay them (a worker refuses
+-- pg_catalog and pg_ schemas from a replay). A placeholder without Citus.
+SET citus.enable_ddl_propagation = off;
+SET search_path = pg_catalog, public;
 
 -- PG_TABLE_DEF: one row per column of each user table/view.
 CREATE OR REPLACE VIEW pg_table_def AS
@@ -119,16 +127,8 @@ CREATE OR REPLACE FUNCTION pg_get_late_binding_view_cols()
 -- Access-management compat: the below let Redshift access tools (e.g. redtape,
 -- which manages users/groups/grants as code) introspect on oblako unchanged.
 
--- LIKE_ESCAPE: Redshift rewrites a LIKE pattern's custom escape char to the
--- engine's backslash escape, e.g. like_escape('pg!_temp!_%', '!') -> 'pg\_temp\_%'.
--- redtape's table introspection uses it to flag temp schemas.
-CREATE OR REPLACE FUNCTION like_escape(pattern text, escape_char text)
-    RETURNS text LANGUAGE sql IMMUTABLE AS $$
-    SELECT replace(replace(replace(
-             pattern, escape_char || '_', E'\\_'),
-             escape_char || '%', E'\\%'),
-             escape_char || escape_char, escape_char);
-$$;
+-- LIKE_ESCAPE, which redtape's table introspection uses to flag temp schemas, is
+-- PostgreSQL's own pg_catalog.like_escape(text, text) and needs nothing here.
 
 -- PG_GET_SHARED_REDSHIFT_SCHEMAS / PG_GET_ALL_EXTERNAL_SCHEMAS: Redshift data-
 -- sharing and external (Spectrum) schema catalogs. oblako has neither, so both
@@ -179,3 +179,8 @@ $$;
 -- owned by real users, and tools that map a schema's owner to a user (redtape)
 -- fail on an owner that isn't in pg_user. CURRENT_USER is the bootstrap admin.
 ALTER SCHEMA public OWNER TO CURRENT_USER;
+
+-- back to the session defaults, for whoever runs this file next in the session
+RESET search_path;
+RESET allow_system_table_mods;
+RESET citus.enable_ddl_propagation;

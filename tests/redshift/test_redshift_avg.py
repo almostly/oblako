@@ -1,7 +1,7 @@
 """Integration tests: AVG of an integer column returns BIGINT, as on Redshift.
 
 Requires the engine (docker compose up redshift) built from this repo's image: the
-wire proxy rewrites avg( to redshift_compat.avg( (proxy/integer_avg.py), whose
+wire proxy rewrites avg( to pg_oblako.avg( (proxy/integer_avg.py), whose
 overloads return BIGINT for integers and mirror PostgreSQL's avg otherwise
 (initdb.d/11_integer_avg.sql).
 """
