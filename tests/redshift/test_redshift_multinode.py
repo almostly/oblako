@@ -133,8 +133,7 @@ def test_redshift_connector_ddl_is_distributed(redshift):
         database="dev",
         user="admin",
         password=PASSWORD,
-        ssl=True,
-        sslmode="require",
+        ssl=False,  # CI has no `oblako trust` for the self-signed cert
     )
     conn.autocommit = True
     try:
