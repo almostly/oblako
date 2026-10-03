@@ -78,7 +78,7 @@ def test_front_routes_only_tagging_inventory_and_tagged_writes():
     assert "server @HOST@:8020" in conf
     # query parameter *names*, so prefix=tagging stays on S3Proxy
     assert '"~(^|&)(tagging|inventory|policy|policyStatus|notification)(=|&|$)"' in conf
-    assert '"0::" s3proxy;' in conf
+    assert '"0:0::" s3proxy;' in conf
     assert "client_max_body_size 0;" in conf
 
 

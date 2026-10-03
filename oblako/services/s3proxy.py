@@ -67,7 +67,7 @@ http {{
         default 0;
     }}
     log_format s3_writes escape=json '{{"method":"$request_method",'
-        '"uri":"$request_uri","status":"$status","etag":"$upstream_http_etag",'
+        '"uri":"$s3_path","status":"$status","etag":"$upstream_http_etag",'
         '"length":"$content_length","copy":"$http_x_amz_copy_source"}}';
     upstream s3proxy {{ server {up}:{backend_port}; keepalive 32; }}
     upstream s3ext {{ server {up}:{ext_port}; keepalive 8; }}
@@ -75,9 +75,25 @@ http {{
         "~(^|&)(tagging|inventory|policy|policyStatus|notification)(=|&|$)" 1;
         default 0;
     }}
-    map "$ext_query:$http_x_amz_tagging:$http_x_amz_copy_source" $s3_upstream {{
-        "0::" s3proxy;
+    # S3 Control (its tag API, at /v20180820/) is answered by the extensions engine
+    map $uri $s3_control {{
+        "~^/v20180820/" 1;
+        default 0;
+    }}
+    map "$s3_control:$ext_query:$http_x_amz_tagging:$http_x_amz_copy_source" $s3_upstream {{
+        "0:0::" s3proxy;
         default s3ext;
+    }}
+    # virtual-hosted addressing (bucket.localhost:9000/key), the AWS SDKs'
+    # default outside Python: the bucket moves into the path, so everything
+    # behind the front sees path-style requests
+    map "$s3_control:$http_host" $vhost_bucket {{
+        "~^0:(?<bucket>[a-z0-9][a-z0-9.-]*[a-z0-9])\\.localhost(:[0-9]+)?$" $bucket;
+        default "";
+    }}
+    map $vhost_bucket $s3_path {{
+        "" $request_uri;
+        default /$vhost_bucket$request_uri;
     }}
     server {{
         listen 80;
@@ -91,7 +107,8 @@ http {{
             # newer AWS SDKs ask ListObjectsV2 for RestoreStatus with this;
             # S3Proxy 501s it (Trino, Spark/Glue S3A); unset, S3 omits the field
             proxy_set_header X-Amz-Optional-Object-Attributes "";
-            proxy_pass http://$s3_upstream;
+            # $request_uri keeps the client's percent-encoding of the key
+            proxy_pass http://$s3_upstream$s3_path;
         }}
     }}
 }}
@@ -140,6 +157,10 @@ class S3ProxyService(Service):
                 # Browsers (dashboard / DuckDB-Wasm) need CORS to fetch parquet
                 # from S3Proxy cross-origin; permissive is fine for local dev.
                 "S3PROXY_CORS_ALLOW_ALL": "true",
+                # file names are object keys: without a UTF-8 locale the JVM
+                # cannot store a key such as "café.txt", which S3 accepts
+                "LANG": "C.UTF-8",
+                "JAVA_TOOL_OPTIONS": "-Dsun.jnu.encoding=UTF-8 -Dfile.encoding=UTF-8",
             },
             volumes={"oblako-s3-data": {"bind": "/data", "mode": "rw"}},
             backend=backend,
