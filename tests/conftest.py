@@ -5,6 +5,7 @@ CI is then:
   integration: pytest -m integration
   kubernetes:  pytest -m kubernetes
   cluster:     pytest -m cluster   (Redshift multi-node, needs the cluster image)
+  mwaa:        pytest -m mwaa      (MWAA, builds AWS's Airflow image; local only)
 
 Adding a new integration test = drop it into one of the integration dirs / files
 listed below; no need to touch ci.yml.
@@ -77,3 +78,9 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.kubernetes)
         if rel in _CLUSTER_FILES:
             item.add_marker(pytest.mark.cluster)
+        # MWAA builds AWS's Airflow image and runs an environment per test module,
+        # too slow for CI: it runs only when asked for (pytest -m mwaa)
+        if item.get_closest_marker("mwaa") and "mwaa" not in (
+            config.option.markexpr or ""
+        ):
+            item.add_marker(pytest.mark.skip(reason="MWAA runs with: pytest -m mwaa"))
