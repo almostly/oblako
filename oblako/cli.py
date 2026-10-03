@@ -304,6 +304,18 @@ def cmd_test_integration(args):
     sys.exit(subprocess.call(cmd))
 
 
+def cmd_configure(args):
+    """Write an AWS profile whose endpoints are oblako's (see oblako.profile)."""
+    from oblako.profile import write_profile
+
+    out = write_profile(args.profile)
+    print(
+        f"profile {out['profile']}: {out['services']} service endpoints in "
+        f"{out['config']}, keys in {out['credentials']}"
+    )
+    print(f"Use it with: export AWS_PROFILE={out['profile']}")
+
+
 def cmd_trust(args):
     """Trust redshift-local's TLS cert in a venv's redshift-connector bundle."""
     import subprocess
@@ -415,6 +427,15 @@ def main():
         "-p", "--port", type=int, default=8002, help="Port (default: 8002)"
     )
     p_rsd.set_defaults(func=cmd_redshift_data)
+
+    p_configure = sub.add_parser(
+        "configure",
+        help="Write an AWS profile (default: oblako) that points the SDKs and CLI at oblako",
+    )
+    p_configure.add_argument(
+        "--profile", default="oblako", help="Profile name (default: oblako)"
+    )
+    p_configure.set_defaults(func=cmd_configure)
 
     p_trust = sub.add_parser(
         "trust",
