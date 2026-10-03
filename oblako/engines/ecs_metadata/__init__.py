@@ -8,6 +8,10 @@ no 169.254.170.2 link-local hack is needed - the URI is a plain URL). The metada
 is what oblako knows about the task from moto + the launched container; ``register``
 is called by ``ECSService.run_task`` right after it starts each task.
 
+Tasks are recorded as files under ``~/.oblako/ecs/metadata``, not in memory: the
+process that serves the endpoint (whichever claimed the port first) is often not
+the one that ran the task (the ECS engine, the CloudFormation engine, a script).
+
     ECS_CONTAINER_METADATA_URI    = http://host.docker.internal:8011/<task>/<container>
     ECS_CONTAINER_METADATA_URI_V4 = http://host.docker.internal:8011/v4/<task>/<container>
     GET <uri>       -> that container's metadata
@@ -16,8 +20,10 @@ is called by ``ECSService.run_task`` right after it starts each task.
 
 from __future__ import annotations
 
+import json
 import threading
 import time
+from pathlib import Path
 
 from oblako import ports
 from oblako.engines.identity import claim_port, identify, is_engine
@@ -28,38 +34,50 @@ from starlette.routing import Route
 
 DEFAULT_PORT = ports.ECS_METADATA
 
-# task_id -> {"task": <task metadata>, "containers": {name: <container metadata>}}
-_TASKS: dict[str, dict] = {}
-_lock = threading.Lock()
+# one file per task: {"task": <task metadata>, "containers": {name: <metadata>}}
+STATE = Path.home() / ".oblako" / "ecs" / "metadata"
 _servers: dict[int, object] = {}
+_lock = threading.Lock()
+
+
+def _path(task_id: str) -> Path:
+    # task ids are hex (uuid4), but never let a request path escape the folder
+    return STATE / f"{Path(task_id).name}.json"
 
 
 def register(task_id: str, task_metadata: dict, containers: dict[str, dict]) -> None:
     """Record a running task's metadata so its containers can read it."""
-    with _lock:
-        _TASKS[task_id] = {"task": task_metadata, "containers": containers}
+    STATE.mkdir(parents=True, exist_ok=True)
+    path = _path(task_id)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"task": task_metadata, "containers": containers}))
+    tmp.replace(path)
 
 
 def deregister(task_id: str) -> None:
     """Drop a stopped task's metadata (idempotent)."""
-    with _lock:
-        _TASKS.pop(task_id, None)
+    _path(task_id).unlink(missing_ok=True)
+
+
+def _entry(task_id: str) -> dict | None:
+    try:
+        return json.loads(_path(task_id).read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return None
 
 
 def _container(task_id: str, container: str):
-    with _lock:
-        entry = _TASKS.get(task_id)
-        return (
-            dict(entry["containers"][container])
-            if entry and container in entry["containers"]
-            else None
-        )
+    entry = _entry(task_id)
+    return (
+        dict(entry["containers"][container])
+        if entry and container in entry["containers"]
+        else None
+    )
 
 
 def _task(task_id: str):
-    with _lock:
-        entry = _TASKS.get(task_id)
-        return dict(entry["task"]) if entry else None
+    entry = _entry(task_id)
+    return dict(entry["task"]) if entry else None
 
 
 async def _get_container(request: Request) -> JSONResponse:

@@ -32,6 +32,9 @@ TASK_LABEL = "oblako.ecs.task-arn"
 CLUSTER_LABEL = "oblako.ecs.cluster"
 SERVICE_NAME_LABEL = "oblako.ecs.service"
 SERVICE_LABEL = "oblako.service"
+CONTAINER_LABEL = "oblako.ecs.container"  # the container's name in its task definition
+TASK_DEFINITION_LABEL = "oblako.ecs.task-definition"
+LAUNCH_TYPE_LABEL = "oblako.ecs.launch-type"
 
 
 def _docker():
@@ -151,13 +154,22 @@ class EcsService(BotoService):
         tasks = []
         for _ in range(count):
             task_id = uuid.uuid4().hex
-            task_arn = f"arn:aws:ecs:{region}:000000000000:task/{cluster}/{task_id}"
+            account = config.account_id()
+            task_arn = f"arn:aws:ecs:{region}:{account}:task/{cluster}/{task_id}"
             containers = []
             container_metas: dict[str, dict] = {}
             for cdef in td.get("containerDefinitions", []):
                 if backed:
                     bindings, meta = self._run_container(
-                        task_id, task_arn, cluster, cdef, service_name
+                        task_id,
+                        task_arn,
+                        cluster,
+                        cdef,
+                        service_name,
+                        {
+                            TASK_DEFINITION_LABEL: td["taskDefinitionArn"],
+                            LAUNCH_TYPE_LABEL: launch_type,
+                        },
                     )
                     container_metas[cdef["name"]] = meta
                 else:
@@ -258,6 +270,7 @@ class EcsService(BotoService):
         cluster: str,
         cdef: dict,
         service_name: str | None = None,
+        extra_labels: dict[str, str] | None = None,
     ) -> tuple[list[dict], dict]:
         """Run one container of a task; return (networkBindings, container metadata)."""
         client = _docker()
@@ -292,7 +305,13 @@ class EcsService(BotoService):
                 }
             )
 
-        labels = {SERVICE_LABEL: "ecs", TASK_LABEL: task_arn, CLUSTER_LABEL: cluster}
+        labels = {
+            SERVICE_LABEL: "ecs",
+            TASK_LABEL: task_arn,
+            CLUSTER_LABEL: cluster,
+            CONTAINER_LABEL: cdef["name"],
+            **(extra_labels or {}),
+        }
         if service_name:
             labels[SERVICE_NAME_LABEL] = service_name
         container = client.containers.run(
@@ -429,25 +448,49 @@ class EcsService(BotoService):
     def describe_tasks(
         self, cluster: str = "default", tasks: list[str] | None = None
     ) -> dict:
-        """Reflect real container state back as ECS task descriptions."""
+        """Reflect real container state back as ECS task descriptions.
+
+        One entry per task, with each container's name, status and exit code; a
+        task is RUNNING while any of its containers runs, then STOPPED, as on ECS.
+        """
         wanted = set(tasks or [])
-        out = []
+        by_task: dict[str, list] = {}
         for c in self._task_containers():
             arn = c.labels.get(TASK_LABEL)
-            if wanted and arn not in wanted:
+            if not arn or (wanted and arn not in wanted):
                 continue
-            status = "RUNNING" if c.status == "running" else "STOPPED"
-            out.append(
-                {
-                    "taskArn": arn,
-                    "clusterArn": c.labels.get(CLUSTER_LABEL, cluster),
-                    "lastStatus": status,
-                    "desiredStatus": "RUNNING",
-                    "containers": [{"name": c.name, "lastStatus": status}],
-                    "attachments": self._eni_by_task.get(arn, []),
+            by_task.setdefault(arn, []).append(c)
+        out = []
+        for arn, containers in by_task.items():
+            labels = containers[0].labels
+            running = any(c.status == "running" for c in containers)
+            status = "RUNNING" if running else "STOPPED"
+            described = []
+            for c in containers:
+                entry = {
+                    "name": c.labels.get(CONTAINER_LABEL, c.name),
+                    "lastStatus": "RUNNING" if c.status == "running" else "STOPPED",
                 }
-            )
-        return {"tasks": out, "failures": []}
+                if c.status != "running":
+                    entry["exitCode"] = c.attrs.get("State", {}).get("ExitCode")
+                described.append(entry)
+            task = {
+                "taskArn": arn,
+                "clusterArn": labels.get(CLUSTER_LABEL, cluster),
+                "taskDefinitionArn": labels.get(TASK_DEFINITION_LABEL, ""),
+                "launchType": labels.get(LAUNCH_TYPE_LABEL, "FARGATE"),
+                "lastStatus": status,
+                "desiredStatus": "RUNNING" if running else "STOPPED",
+                "containers": described,
+                "attachments": self._eni_by_task.get(arn, []),
+            }
+            if not running:
+                task["stopCode"] = "EssentialContainerExited"
+                task["stoppedReason"] = "Essential container in task exited"
+            out.append(task)
+        found = {t["taskArn"] for t in out}
+        failures = [{"arn": arn, "reason": "MISSING"} for arn in wanted - found]
+        return {"tasks": out, "failures": failures}
 
     def list_tasks(self, cluster: str = "default") -> list[str]:
         """Task ARNs of all oblako ECS task containers in the cluster."""
