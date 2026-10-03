@@ -60,8 +60,12 @@ def test_invoke_endpoint_async_writes_result_to_s3():
     from oblako.services import SageMakerService
 
     svc = SageMakerService()
-    svc.build_image(path=str(EXAMPLES / "train_image"), tag="oblako-sagemaker-train:latest")
-    svc.build_image(path=str(EXAMPLES / "serve_image"), tag="oblako-sagemaker-serve:latest")
+    svc.build_image(
+        path=str(EXAMPLES / "train_image"), tag="oblako-sagemaker-train:latest"
+    )
+    svc.build_image(
+        path=str(EXAMPLES / "serve_image"), tag="oblako-sagemaker-serve:latest"
+    )
     s3 = _s3()
     try:
         s3.create_bucket(Bucket=BUCKET)

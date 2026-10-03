@@ -61,7 +61,7 @@ _ADDQUOTES = re.compile(r"(?i)\baddquotes\b")
 
 
 def has_s3_copy_or_unload(sql: str) -> bool:
-    """Cheap gate: does this SQL carry a COPY-from-s3 or UNLOAD-to-s3 anywhere?"""
+    """Return whether this SQL carries a COPY from S3 or an UNLOAD to S3 (a cheap gate)."""
     if "s3://" not in sql:
         return False
     upper = sql.upper()
@@ -157,7 +157,7 @@ def _detect_format(opts: str) -> str:
 
 
 def _unescape_delim(d: str) -> str:
-    """Turn a literal ``\\t`` in a DELIMITER value into a real tab."""
+    r"""Turn a literal ``\t`` in a DELIMITER value into a real tab."""
     return d.encode().decode("unicode_escape") if "\\" in d else d
 
 
@@ -172,7 +172,9 @@ class CopyCommand(BaseModel):
     null_as: str | None = None
     quote: str | None = None
     ignore_header: int = 0
-    json_arg: str | None = None  # 'auto' | 'auto ignorecase' | 'noshred' | jsonpaths s3 uri
+    json_arg: str | None = (
+        None  # 'auto' | 'auto ignorecase' | 'noshred' | jsonpaths s3 uri
+    )
     compression: str | None = None  # gzip | bzip2 | zstd
 
     @field_validator("fmt")
@@ -181,7 +183,7 @@ class CopyCommand(BaseModel):
         return v.upper()
 
     def options(self) -> dict:
-        """The non-parquet read options, as passed to the engine function."""
+        """Return the non-parquet read options, as passed to the engine function."""
         return {
             "delimiter": self.delimiter,
             "null_as": self.null_as,
@@ -216,7 +218,7 @@ class UnloadCommand(BaseModel):
         return v.upper()
 
     def options(self) -> dict:
-        """The non-parquet write options, as passed to the engine function."""
+        """Return the non-parquet write options, as passed to the engine function."""
         return {
             "delimiter": self.delimiter,
             "null_as": self.null_as,
@@ -397,7 +399,7 @@ def _from_pg(value, oid: int):
 
 
 def _delimiter_for(fmt: str, opts: dict) -> str:
-    """The field delimiter: the given one, else ',' for CSV and '|' for TEXT."""
+    """Return the field delimiter: the given one, else ',' for CSV and '|' for TEXT."""
     if opts.get("delimiter"):
         return opts["delimiter"]
     return "," if fmt == "CSV" else "|"
@@ -477,7 +479,7 @@ def _csv_cell(value) -> str:
 
 
 def _target_columns(plpy, table: str) -> list[str]:
-    """The table's columns in definition order (for positional CSV/TEXT COPY)."""
+    """Return the table's columns in definition order (for positional CSV/TEXT COPY)."""
     q = plpy.execute(
         "SELECT attname FROM pg_attribute "
         f"WHERE attrelid = {plpy.quote_literal(table)}::regclass "
@@ -487,7 +489,7 @@ def _target_columns(plpy, table: str) -> list[str]:
 
 
 def _target_column_types(plpy, table: str, columns: list[str]) -> list[str]:
-    """The PostgreSQL type of each target column, for a typed prepared INSERT."""
+    """Return the PostgreSQL type of each target column, for a typed prepared INSERT."""
     q = plpy.execute(
         "SELECT attname, format_type(atttypid, atttypmod) AS t "
         f"FROM pg_attribute WHERE attrelid = {plpy.quote_literal(table)}::regclass "
@@ -524,8 +526,11 @@ def _insert_rows(plpy, table: str, columns: list[str], rows) -> int:
 
 # --- JSON COPY (FORMAT JSON 'auto' | 'auto ignorecase' | 'noshred' | jsonpaths) ---
 def _decompress(data: bytes, compression: str | None) -> bytes:
-    """Decompress a COPY body. Honors the COPY token, and also auto-detects a gzip
-    magic header so a Firehose-written ``.gz`` object loads without the keyword."""
+    """Decompress a COPY body.
+
+    Honors the COPY token, and also auto-detects a gzip magic header so a
+    Firehose-written ``.gz`` object loads without the keyword.
+    """
     comp = (compression or "").lower()
     if comp == "gzip" or (not comp and data[:2] == b"\x1f\x8b"):
         import gzip
@@ -543,8 +548,11 @@ def _decompress(data: bytes, compression: str | None) -> bytes:
 
 
 def _iter_json_records(data: bytes):
-    """Yield JSON objects from a COPY JSON body: a top-level array of objects, or
-    concatenated / newline-separated objects (Redshift and Firehose both occur)."""
+    """Yield JSON objects from a COPY JSON body.
+
+    The body is a top-level array of objects, or concatenated / newline-separated
+    objects (Redshift and Firehose both occur).
+    """
     text = data.decode("utf-8").strip()
     if not text:
         return
@@ -676,8 +684,13 @@ def do_copy(
         # Shred JSON per the FORMAT JSON option; nested values go to SUPER columns.
         target_cols = list(columns) if columns else _target_columns(plpy, table)
         rows = _json_rows(
-            plpy, s3, bucket, keys, target_cols,
-            options.get("json_arg"), options.get("compression"),
+            plpy,
+            s3,
+            bucket,
+            keys,
+            target_cols,
+            options.get("json_arg"),
+            options.get("compression"),
         )
         return _insert_rows(plpy, table, target_cols, rows)
 

@@ -1,4 +1,5 @@
 """Pipeline step 2: read step 1's output and double every value."""
+
 import os
 
 values = [float(x) for x in open("/opt/ml/processing/input/data.csv").read().split()]

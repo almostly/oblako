@@ -249,9 +249,7 @@ class SageMakerApp:
 
     def op_AddTags(self, req: dict) -> Response:
         """Attach tags to a resource; return the resulting tag set."""
-        tags = self.executor.add_tags(
-            _require(req, "ResourceArn"), req.get("Tags", [])
-        )
+        tags = self.executor.add_tags(_require(req, "ResourceArn"), req.get("Tags", []))
         return _json_response({"Tags": tags})
 
     def op_DeleteTags(self, req: dict) -> Response:
@@ -367,7 +365,11 @@ class SageMakerApp:
 
     def op_CreateFeatureGroup(self, req: dict) -> Response:
         """Register a feature group (Feature Store control plane)."""
-        for field in ("FeatureGroupName", "RecordIdentifierFeatureName", "EventTimeFeatureName"):
+        for field in (
+            "FeatureGroupName",
+            "RecordIdentifierFeatureName",
+            "EventTimeFeatureName",
+        ):
             if not req.get(field):
                 return _error("ValidationException", f"{field} is required")
         return _json_response(
@@ -376,9 +378,7 @@ class SageMakerApp:
 
     def op_DescribeFeatureGroup(self, req: dict) -> Response:
         """Return a feature group's definition."""
-        group = self.executor.describe_feature_group(
-            _require(req, "FeatureGroupName")
-        )
+        group = self.executor.describe_feature_group(_require(req, "FeatureGroupName"))
         if group is None:
             raise _NotFound(f"FeatureGroup {req.get('FeatureGroupName')} not found")
         return _json_response(group)
@@ -453,9 +453,7 @@ class SageMakerApp:
 
     def op_DeleteModelPackageGroup(self, req: dict) -> Response:
         """Delete a model package group."""
-        self.executor.delete_model_package_group(
-            _require(req, "ModelPackageGroupName")
-        )
+        self.executor.delete_model_package_group(_require(req, "ModelPackageGroupName"))
         return _json_response({})
 
     def op_CreateModelPackage(self, req: dict) -> Response:
@@ -538,9 +536,7 @@ class SageMakerApp:
 
         body = await request.body()
         identifiers = (json.loads(body) if body else {}).get("Identifiers", [])
-        result = await run_in_threadpool(
-            self.executor.batch_get_record, identifiers
-        )
+        result = await run_in_threadpool(self.executor.batch_get_record, identifiers)
         return _rest_json(result)
 
     async def invoke_async(self, request: Request) -> Response:

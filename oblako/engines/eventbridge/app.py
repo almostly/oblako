@@ -52,7 +52,8 @@ class EventBridgeProxy:
         """Fire ScheduleExpression rules (rate(...)) on their cadence, every 1s."""
         import boto3
 
-        while not time.sleep(1.0):
+        while True:
+            time.sleep(1.0)
             try:
                 events = boto3.client("events", endpoint_url=self.backend, **_creds())
                 self._fire_scheduled(events, time.monotonic())
@@ -165,8 +166,8 @@ def _event_envelope(entry: dict) -> dict:
         "detail-type": entry.get("DetailType"),
         "source": entry.get("Source"),
         "account": _ACCOUNT,
-        "time": entry.get("Time") or datetime.datetime.now(datetime.timezone.utc)
-        .strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "time": entry.get("Time")
+        or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "region": _REGION,
         "resources": entry.get("Resources", []),
         "detail": detail,
@@ -239,7 +240,9 @@ def _deliver(target: dict, event: dict, moto_url: str) -> None:
             sns.publish(TopicArn=arn, Message=payload)
         elif ":lambda:" in arn:
             lam = boto3.client("lambda", endpoint_url=moto_url, **_creds())
-            lam.invoke(FunctionName=arn.split(":function:")[-1], Payload=payload.encode())
+            lam.invoke(
+                FunctionName=arn.split(":function:")[-1], Payload=payload.encode()
+            )
     except Exception:
         pass  # best-effort delivery, like a dead-letter would swallow
 
@@ -283,7 +286,9 @@ def _cluster_from_arn(arn: str) -> str | None:
 
 def _rate_seconds(expression: str) -> int | None:
     """Parse ``rate(N unit)`` into seconds (locally we honor a seconds unit too)."""
-    match = re.fullmatch(r"rate\((\d+)\s+(second|minute|hour|day)s?\)", expression.strip())
+    match = re.fullmatch(
+        r"rate\((\d+)\s+(second|minute|hour|day)s?\)", expression.strip()
+    )
     if not match:
         return None
     value, unit = int(match.group(1)), match.group(2)

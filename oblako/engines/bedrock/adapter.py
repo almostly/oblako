@@ -53,7 +53,7 @@ class BedrockAdapter:
     # -------------------------------------------------------------------------
     @staticmethod
     def _is_embedding_request(model_id: str, request: dict) -> bool:
-        """True if this is an embedding invocation (by model id or body shape)."""
+        """Return True if this is an embedding invocation (by model id or body shape)."""
         return (
             "inputText" in request
             or "texts" in request
@@ -64,7 +64,9 @@ class BedrockAdapter:
     def _invoke_embedding(self, model_id: str, request: dict) -> dict:
         """Embed the input text and return the model family's response shape."""
         texts = request.get("texts")
-        text = " ".join(texts) if isinstance(texts, list) else request.get("inputText", "")
+        text = (
+            " ".join(texts) if isinstance(texts, list) else request.get("inputText", "")
+        )
         result = self.backend.embed(model_id, text)
         embedding = result["embedding"]
         if model_id.startswith("cohere."):
@@ -139,7 +141,11 @@ class BedrockAdapter:
             "type": "message_start",
             "message": {"role": "assistant", "content": [], "model": model_id},
         }
-        yield {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}
+        yield {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "text", "text": ""},
+        }
         output_tokens = input_tokens = 0
         for piece in self.backend.chat_stream(
             model_id,

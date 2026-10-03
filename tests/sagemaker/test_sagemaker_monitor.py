@@ -61,9 +61,15 @@ def test_data_capture_and_monitoring_schedule():
     from oblako.services import SageMakerService
 
     svc = SageMakerService()
-    svc.build_image(path=str(EXAMPLES / "train_image"), tag="oblako-sagemaker-train:latest")
-    svc.build_image(path=str(EXAMPLES / "serve_image"), tag="oblako-sagemaker-serve:latest")
-    svc.build_image(path=str(EXAMPLES / "monitor_image"), tag="oblako-sagemaker-monitor:latest")
+    svc.build_image(
+        path=str(EXAMPLES / "train_image"), tag="oblako-sagemaker-train:latest"
+    )
+    svc.build_image(
+        path=str(EXAMPLES / "serve_image"), tag="oblako-sagemaker-serve:latest"
+    )
+    svc.build_image(
+        path=str(EXAMPLES / "monitor_image"), tag="oblako-sagemaker-monitor:latest"
+    )
     s3 = _s3()
     try:
         s3.create_bucket(Bucket=BUCKET)
@@ -155,9 +161,9 @@ def test_data_capture_and_monitoring_schedule():
         captured = _wait(
             lambda: {
                 "n": len(
-                    s3.list_objects_v2(
-                        Bucket=BUCKET, Prefix="capture/mon-ep/"
-                    ).get("Contents", [])
+                    s3.list_objects_v2(Bucket=BUCKET, Prefix="capture/mon-ep/").get(
+                        "Contents", []
+                    )
                 )
             },
             "n",
@@ -218,9 +224,7 @@ def test_data_capture_and_monitoring_schedule():
         )
         sched = _wait(
             lambda: {
-                "s": sm.describe_monitoring_schedule(
-                    MonitoringScheduleName="mon-sched"
-                )
+                "s": sm.describe_monitoring_schedule(MonitoringScheduleName="mon-sched")
                 .get("LastMonitoringExecutionSummary", {})
                 .get("MonitoringExecutionStatus")
             },

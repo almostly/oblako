@@ -82,7 +82,9 @@ def test_invoke_model_ollama_prefixed_embedding():
     # a raw embed model via the ollama. passthrough (not in the catalog) is
     # still detected as an embedding by its body / name
     adapter = _make_adapter()
-    result = adapter.invoke_model("ollama.mxbai-embed-large", json.dumps({"inputText": "x"}))
+    result = adapter.invoke_model(
+        "ollama.mxbai-embed-large", json.dumps({"inputText": "x"})
+    )
     assert result["embedding"] == [0.1, 0.2, 0.3]
 
 
