@@ -88,7 +88,7 @@ oblako down s3vectors
 
 | Command | Description |
 |---|---|
-| `oblako up [service]` | Start all services, or one (a container service like `s3`, or an API engine like `s3vectors`) |
+| `oblako up [service] [--timeout S]` | Start all services, or one (a container service like `s3`, or an API engine like `s3vectors`), and wait up to `S` seconds (default 120) for each to be ready; exits 1 if any is not, so a CI step fails there |
 | `oblako down [service]` | Stop all services (or a specific one) |
 | `oblako status` | Show service status |
 | `oblako dashboard [-p PORT]` | Start the web dashboard (default: 8000) |
