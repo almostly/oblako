@@ -1,7 +1,10 @@
 name: CI
 
+# Pull requests, and main after a merge. Pushes to feature branches don't run it
+# on their own: their pull request does, so each commit runs once, not twice.
 on:
   push:
+    branches: [main]
   pull_request:
 
 jobs:

@@ -13,10 +13,14 @@ call to moto and makes the clusters real:
   registered) and ``ClusterNodes`` with each node's role and address.
 * ``RebootCluster`` restarts the nodes; ``DeleteCluster`` removes them and their
   data.
+
+The same port answers the Redshift Serverless API (``X-Amz-Target:
+RedshiftServerless.*``) from ``serverless``: its workgroups are the shared engine.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import uuid
@@ -31,7 +35,7 @@ from starlette.routing import Route
 
 from oblako import ports
 
-from . import clusters
+from . import clusters, serverless
 
 _NS = "http://redshift.amazonaws.com/doc/2012-12-01/"
 _CREDENTIAL = re.compile(r"Credential=[^/]+/\d{8}/([a-z0-9-]+)/")
@@ -187,6 +191,9 @@ class RedshiftControlProxy:
     async def handle(self, request: Request) -> Response:
         """Forward one Redshift call to moto, act on it, and rewrite its endpoints."""
         body = await request.body()
+        target = request.headers.get("x-amz-target", "")
+        if target.startswith("RedshiftServerless."):
+            return await serverless_response(target.split(".", 1)[1], body)
         form = {k: v[0] for k, v in parse_qs(body.decode(errors="replace")).items()}
         action = form.get("Action", "")
         refused = self._precheck(action, form)
@@ -207,6 +214,27 @@ class RedshiftControlProxy:
             status_code=upstream.status_code,
             media_type=upstream.headers.get("content-type", "text/xml"),
         )
+
+
+async def serverless_response(operation: str, body: bytes) -> Response:
+    """Answer one Redshift Serverless call (JSON protocol) from oblako's records."""
+    try:
+        req = json.loads(body or b"{}")
+        result = await run_in_threadpool(serverless.call, operation, req)
+        status = 200
+    except json.JSONDecodeError:
+        result, status = _json_error("ValidationException", "Invalid JSON body"), 400
+    except serverless.ServerlessError as e:
+        result, status = _json_error(e.code, e.message), 400
+    return Response(
+        json.dumps(result),
+        status_code=status,
+        media_type="application/x-amz-json-1.1",
+    )
+
+
+def _json_error(code: str, message: str) -> dict:
+    return {"__type": code, "message": message}
 
 
 def create_app(backend_url: str | None = None) -> Starlette:

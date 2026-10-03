@@ -188,6 +188,17 @@ class CfnApp:
             "CreateChangeSet", _el("Id", out["Id"]) + _el("StackId", out["StackId"])
         )
 
+    def op_CreateStack(self, form):
+        """Handle CreateStack: a change set created and executed in one call."""
+        body = form.get("TemplateBody") or _fetch_template_url(
+            form.get("TemplateURL", "")
+        )
+        out = self.store.create_change_set(
+            form["StackName"], body, _parse_params(form), "oblako-create", "CREATE"
+        )
+        self.store.execute_change_set(form["StackName"], "oblako-create")
+        return _ok("CreateStack", _el("StackId", out["StackId"]))
+
     def op_DescribeChangeSet(self, form):
         """Handle DescribeChangeSet and return XML for the requested change set."""
         cs = self.store.describe_change_set(form["StackName"], form["ChangeSetName"])

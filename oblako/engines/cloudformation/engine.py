@@ -13,11 +13,10 @@ import uuid
 
 import yaml
 
+from oblako import config
+
 from .providers import PROVIDERS
 from .transform import is_sam, transform_sam
-
-REGION = "us-east-1"
-ACCOUNT = "000000000000"
 
 
 class StackNotFound(Exception):
@@ -88,8 +87,8 @@ def _resolve(node, ctx):
 
 def _ref(name, ctx):
     pseudo = {
-        "AWS::Region": REGION,
-        "AWS::AccountId": ACCOUNT,
+        "AWS::Region": config.region(),
+        "AWS::AccountId": config.account_id(),
         "AWS::StackName": ctx["stack"],
         "AWS::Partition": "aws",
         "AWS::URLSuffix": "amazonaws.com",
@@ -209,7 +208,7 @@ class StackStore:
 
     def _new_stack(self, name, template, params):
         return {
-            "StackId": f"arn:aws:cloudformation:{REGION}:{ACCOUNT}:stack/{name}/{uuid.uuid4()}",
+            "StackId": f"arn:aws:cloudformation:{config.region()}:{config.account_id()}:stack/{name}/{uuid.uuid4()}",
             "StackName": name,
             "StackStatus": "REVIEW_IN_PROGRESS",
             "CreationTime": datetime.datetime.now(datetime.timezone.utc),
@@ -279,7 +278,7 @@ class StackStore:
             # Adopt the new template + params only after diffing the old one.
             stack["template"] = template
             stack["params"] = params
-            cs_id = f"arn:aws:cloudformation:{REGION}:{ACCOUNT}:changeSet/{cs_name}/{uuid.uuid4()}"
+            cs_id = f"arn:aws:cloudformation:{config.region()}:{config.account_id()}:changeSet/{cs_name}/{uuid.uuid4()}"
             stack["change_sets"][cs_name] = {
                 "id": cs_id,
                 "changes": changes,
