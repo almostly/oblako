@@ -17,8 +17,8 @@ pytest.importorskip("sqlalchemy_redshift")
 RS_CONFIG = dict(
     host="localhost", port=5439, user="oblako", password="oblako", dbname="oblako"
 )
-# redshift_connector over the dialect; ssl=False isolates this from the TLS path
-# (covered by test_redshift_proxy.py), so it exercises only reflection.
+# redshift_connector over the dialect, with verified TLS (oblako trust has added
+# the cert), as the book connects.
 URL = "redshift+redshift_connector://oblako:oblako@localhost:5439/oblako"
 TABLE = "sa_reflect_probe"
 
@@ -46,7 +46,7 @@ def _catalog_compat_present() -> bool:
 
 @pytest.fixture
 def engine():
-    eng = sa.create_engine(URL, connect_args={"ssl": False})
+    eng = sa.create_engine(URL, connect_args={"sslmode": "verify-ca"})
     with eng.begin() as c:
         c.exec_driver_sql(f"DROP TABLE IF EXISTS {TABLE}")
         # Redshift-flavored DDL: the dialect emits DISTSTYLE/DISTKEY/SORTKEY, the

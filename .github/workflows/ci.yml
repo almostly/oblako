@@ -69,6 +69,11 @@ jobs:
           r = {s.name: s.wait_ready(timeout=180) for s in svcs};
           print('ready:', r); sys.exit(0 if all(r.values()) else 1)"
 
+      # Trust oblako's Redshift TLS cert in the test environment, as a reader does,
+      # so redshift_connector connects with sslmode=verify-ca.
+      - name: Trust the Redshift certificate
+        run: uv run --python 3.12 --extra dev --extra sagemaker oblako trust
+
       # MySQL (test_rds_data mysql cases) isn't started, so those skip; the Step
       # Functions tests use Pass-only state machines (no Lambda).
       - name: Integration tests
@@ -116,6 +121,9 @@ jobs:
             sleep 3
           done
           echo "cluster did not form"; docker compose logs redshift-coordinator | tail -40; exit 1
+
+      - name: Trust the Redshift certificate
+        run: uv run --python 3.12 --extra dev oblako trust
 
       - name: Cluster tests
         run: >

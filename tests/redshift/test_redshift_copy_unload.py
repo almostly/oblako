@@ -123,7 +123,8 @@ def test_extended_protocol_via_redshift_connector(s3):
         database="oblako",
         user="oblako",
         password="oblako",
-        ssl=False,
+        ssl=True,
+        sslmode="verify-ca",  # oblako trust has added the cert
     )
     con.autocommit = True
     try:
@@ -228,7 +229,8 @@ def test_awswrangler_copy_and_unload(s3, monkeypatch, tmp_path):
         database="oblako",
         user="oblako",
         password="oblako",
-        ssl=False,
+        ssl=True,
+        sslmode="verify-ca",  # oblako trust has added the cert
     )
     try:
         df = pd.DataFrame({"id": [10, 20, 30], "name": ["x", "y", "z"]})
