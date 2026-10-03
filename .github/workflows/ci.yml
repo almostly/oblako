@@ -1,13 +1,54 @@
 name: CI
 
-# Pull requests, and main after a merge. Pushes to feature branches don't run it
-# on their own: their pull request does, so each commit runs once, not twice.
+# Pull requests only: a merge to main brings the commits its pull request already
+# tested. "Run workflow" (workflow_dispatch) runs every job on demand.
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# A newer push to the same pull request cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  # Which heavy jobs this change needs: each runs only when its code changed
+  # (or on a manual run), so a docs or example change costs only lint + unit.
+  # A change to this workflow runs no heavy job by itself; check it with
+  # "Run workflow".
+  changes:
+    name: changed areas
+    runs-on: ubuntu-latest
+    # paths-filter lists a pull request's files through the API
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      integration: ${{ steps.filter.outputs.integration }}
+      cluster: ${{ steps.filter.outputs.cluster }}
+      kubernetes: ${{ steps.filter.outputs.kubernetes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            integration:
+              - "oblako/**"
+              - "tests/**"
+              - "pyproject.toml"
+              - "uv.lock"
+              - "docker-compose.yml"
+            cluster:
+              - "oblako/images/redshift/**"
+              - "oblako/images/redshift-cluster/**"
+              - "oblako/engines/redshift_control/**"
+              - "oblako/engines/redshift_data/**"
+              - "tests/redshift/test_redshift_multinode.py"
+            kubernetes:
+              - "oblako/services/backends.py"
+              - "tests/services/test_k8s_backend.py"
+
   unit:
     name: lint + unit tests
     runs-on: ubuntu-latest
@@ -31,6 +72,8 @@ jobs:
 
   integration:
     name: integration tests (Docker services)
+    needs: changes
+    if: needs.changes.outputs.integration == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,6 +133,8 @@ jobs:
 
   redshift-cluster:
     name: redshift MPP cluster (Citus)
+    needs: changes
+    if: needs.changes.outputs.cluster == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,7 +159,7 @@ jobs:
 
       - name: Wait for the workers to register
         run: |
-          for i in $(seq 1 60); do
+          for _ in $(seq 1 60); do
             n=$(docker compose exec -T redshift-coordinator \
                   psql -U oblako -d oblako -h 127.0.0.1 -p 5433 -tAc \
                   "SELECT count(*) FROM pg_dist_node WHERE isactive" 2>/dev/null \
@@ -146,6 +191,8 @@ jobs:
 
   kubernetes:
     name: kubernetes backend (kind)
+    needs: changes
+    if: needs.changes.outputs.kubernetes == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
