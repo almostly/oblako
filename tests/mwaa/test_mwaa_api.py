@@ -77,3 +77,24 @@ def test_cli_token_is_not_simulated(client):
     resp = client.post("/clitoken/etl")
     assert resp.status_code == 400
     assert "InvokeRestApi" in resp.json()["message"]
+
+
+def test_defaults_match_what_mwaa_reports_for_micro():
+    # observed on AWS MWAA: mw1.micro, Airflow 3.3.1, no settings given
+    got = envs.defaults("etl", {"EnvironmentClass": "mw1.micro"})
+    assert (got["MinWorkers"], got["MaxWorkers"], got["Schedulers"]) == (1, 1, 1)
+    assert (got["MinWebservers"], got["MaxWebservers"]) == (1, 1)
+    assert got["EndpointManagement"] == "SERVICE"
+    logs = got["LoggingConfiguration"]
+    assert logs["TaskLogs"]["Enabled"] and not logs["SchedulerLogs"]["Enabled"]
+    assert logs["TaskLogs"]["CloudWatchLogGroupArn"].endswith(":airflow-etl-Task")
+
+
+def test_rest_api_responses_drop_null_fields():
+    body = {"dag_id": "d", "note": None, "conf": {"a": 1, "b": None}, "xs": [None]}
+    assert envs._without_nulls(body) == {"dag_id": "d", "conf": {"a": 1}, "xs": [None]}
+
+
+def test_not_found_message_matches_aws(client):
+    resp = client.get("/environments/nope")
+    assert resp.json()["message"] == "Environment nope not found."

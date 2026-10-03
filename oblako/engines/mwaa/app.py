@@ -79,7 +79,9 @@ async def environments(request: Request) -> Response:
         return result if isinstance(result, Response) else JSONResponse({})
     record = envs.get(name)
     if record is None:
-        return _error("ResourceNotFoundException", f"Environment {name} not found", 404)
+        return _error(
+            "ResourceNotFoundException", f"Environment {name} not found.", 404
+        )
     return JSONResponse({"Environment": _view(record)})
 
 

@@ -107,6 +107,14 @@ systemd-resolved resolve those to the loopback address (the engine listens on
 IPv4 and IPv6); inside a plain container they don't resolve, so code there needs
 `Config(inject_host_prefix=False)`.
 
+`GetEnvironment` reports the settings MWAA reports for an environment created
+without them (one worker, scheduler and webserver for `mw1.micro`; task logs on,
+the others off; `EndpointManagement: SERVICE`), and `InvokeRestApi` drops null
+fields from Airflow's responses, as MWAA does. Both were checked against a real
+MWAA environment (Airflow 3.3.1, `mw1.micro`), which ran the same DAG, returned
+the same `RestApiClientException` codes and messages, and took a similar few
+minutes to list a new DAG file.
+
 The webserver uses Airflow's simple auth manager with every user an admin (AWS's
 `testing` auth type), so it accepts any login. `CreateCliToken`,
 `CreateWebLoginToken` and CloudWatch logging are not simulated; environment class,
