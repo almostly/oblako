@@ -43,6 +43,8 @@ class GlueStore:
                 CREATE TABLE IF NOT EXISTS column_stats (
                     db TEXT, tbl TEXT, vals TEXT, col TEXT, stats TEXT,
                     PRIMARY KEY (db, tbl, vals, col));
+                CREATE TABLE IF NOT EXISTS connections (
+                    name TEXT PRIMARY KEY, input TEXT, created REAL, updated REAL);
                 """
             )
 
@@ -81,6 +83,41 @@ class GlueStore:
         self._q("DELETE FROM partitions WHERE db = ?", (name,))
         self._q("DELETE FROM tables WHERE db = ?", (name,))
         self._q("DELETE FROM databases WHERE name = ?", (name,))
+
+    # -------------------------------------------------------------------------
+    # Connections
+    # -------------------------------------------------------------------------
+    def connection(self, name: str) -> dict | None:
+        """Return a stored connection as Glue returns it, or None."""
+        rows = self._q(
+            "SELECT input, created, updated FROM connections WHERE name = ?", (name,)
+        )
+        if not rows:
+            return None
+        conn_input, created, updated = rows[0]
+        return {
+            **json.loads(conn_input),
+            "CreationTime": created,
+            "LastUpdatedTime": updated,
+        }
+
+    def connections(self) -> list[str]:
+        """Return the names of stored connections."""
+        return [r[0] for r in self._q("SELECT name FROM connections ORDER BY name")]
+
+    def put_connection(self, name: str, conn_input: dict) -> None:
+        """Create or replace a connection."""
+        existing = self.connection(name)
+        now = time.time()
+        created = existing["CreationTime"] if existing else now
+        self._q(
+            "INSERT OR REPLACE INTO connections VALUES (?, ?, ?, ?)",
+            (name, json.dumps(conn_input), created, now),
+        )
+
+    def delete_connection(self, name: str) -> None:
+        """Forget a connection."""
+        self._q("DELETE FROM connections WHERE name = ?", (name,))
 
     # -------------------------------------------------------------------------
     # Tables
