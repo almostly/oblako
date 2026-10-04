@@ -33,6 +33,9 @@ class MotoService(Service):
                 # Function containers must be able to reach moto over the host
                 # Docker network — host.docker.internal works on Docker Desktop.
                 "MOTO_DOCKER_LAMBDA_INVOKE_HOST": "host.docker.internal",
+                # AWS's managed policies (AWSLambdaBasicExecutionRole, ...) exist in
+                # every account; SAM and CloudFormation roles attach them
+                "MOTO_IAM_LOAD_MANAGED_POLICIES": "true",
                 # NOTE: don't set MOTO_DOCKER_LAMBDA_IMAGE — the official AWS
                 # Lambda images use RIE (HTTP server entrypoint) and are not
                 # compatible with moto's one-shot CLI invoke. moto falls back to

@@ -815,3 +815,50 @@ def test_get_template_returns_the_submitted_body():
     original = cfn.get_template(StackName="s")
     assert "a comment" in str(original["TemplateBody"])
     assert original["StagesAvailable"] == ["Original", "Processed"]
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not _moto_up(), reason="moto + DynamoDB Local not running")
+def test_iam_role_keeps_its_policies_and_deletes_cleanly():
+    """AWS::IAM::Role gets its inline Policies and ManagedPolicyArns, as on AWS."""
+    from oblako.engines.cloudformation.providers import _iam_create, _iam_delete
+
+    props = {
+        "AssumeRolePolicyDocument": {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "lambda.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        },
+        "Path": "/app/",
+        "Policies": [
+            {
+                "PolicyName": "read-bucket",
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {"Effect": "Allow", "Action": "s3:GetObject", "Resource": "*"}
+                    ],
+                },
+            }
+        ],
+        "ManagedPolicyArns": [
+            "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+        ],
+    }
+    import uuid
+
+    arn = _iam_create("FnRole", props, {"stack": f"iam-{uuid.uuid4().hex[:8]}"})
+    name = arn.rsplit("/", 1)[-1]
+    iam = _moto_client("iam")
+    assert iam.get_role(RoleName=name)["Role"]["Path"] == "/app/"
+    assert iam.list_role_policies(RoleName=name)["PolicyNames"] == ["read-bucket"]
+    attached = iam.list_attached_role_policies(RoleName=name)["AttachedPolicies"]
+    assert [p["PolicyName"] for p in attached] == ["AWSLambdaBasicExecutionRole"]
+    _iam_delete(arn, props)
+    with pytest.raises(iam.exceptions.NoSuchEntityException):
+        iam.get_role(RoleName=name)

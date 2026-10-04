@@ -118,6 +118,9 @@ services:
     image: motoserver/moto:latest
     ports:
       - "127.0.0.1:5500:5000"
+    environment:
+      # AWS's managed policies exist in every account; SAM roles attach them
+      MOTO_IAM_LOAD_MANAGED_POLICIES: "true"
 
   s3proxy:
     image: andrewgaul/s3proxy:s3proxy-4.1.1  # pinned: see oblako/services/s3proxy.py
