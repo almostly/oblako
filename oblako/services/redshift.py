@@ -241,15 +241,17 @@ class RedshiftService(Service):
             dbname=self.database,
         )
 
-    def server_cert(self) -> str | None:
-        """Return the proxy's TLS cert (PEM).
+    def server_certs(self) -> list[str]:
+        """Return every TLS cert (PEM) a Redshift proxy on this machine presents.
 
         oblako's containers, the single-node engine and every node of a multi-node
         cluster, mount this machine's cert (``ensure_cert``), so ``oblako trust``
         works before anything runs and covers them all. A container started by
         ``docker compose`` makes its own, so a running compose ``redshift`` or
-        ``redshift-coordinator`` container's cert comes first.
+        ``redshift-coordinator`` container's cert is added: both kinds can run on
+        one machine, as in CI.
         """
+        certs = [(ensure_cert() / "server.crt").read_text()]
         try:
             containers = self.client.containers.list(
                 filters={"label": "com.docker.compose.service"}
@@ -261,9 +263,9 @@ class RedshiftService(Service):
             if service not in ("redshift", "redshift-coordinator"):
                 continue
             code, out = container.exec_run(["cat", SSL_CERT_PATH])
-            if code == 0:
-                return out.decode()
-        return (ensure_cert() / "server.crt").read_text()
+            if code == 0 and out.decode() not in certs:
+                certs.append(out.decode())
+        return certs
 
     def trust_cert(self, python_exe: str | None = None) -> str:
         """Trust the proxy's cert in a venv's redshift_connector CA bundle.
@@ -279,12 +281,9 @@ class RedshiftService(Service):
         """
         import sys
 
-        cert = self.server_cert()
-        if not cert:
-            raise RuntimeError("couldn't create oblako's Redshift TLS cert")
         bundle = _redshift_connector_bundle(python_exe or sys.executable)
         legacy = remove_certs_from_bundle(bundle, {LEGACY_CERT_SHA256})
-        added = append_cert_to_bundle(bundle, cert)
+        added = sum(append_cert_to_bundle(bundle, cert) for cert in self.server_certs())
         note = (
             " (and removed the certificate older oblako images shared, whose key "
             "is public)"
@@ -292,7 +291,7 @@ class RedshiftService(Service):
             else ""
         )
         return (
-            f"appended this machine's oblako Redshift cert to {bundle}{note}"
+            f"appended {added} oblako Redshift cert(s) to {bundle}{note}"
             if added
             else f"already trusted in {bundle}{note}"
         )
