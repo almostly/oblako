@@ -188,7 +188,13 @@ def _run_node(client, network, cluster_id: str, record: dict, node: int | None):
         # COPY and UNLOAD reach oblako's S3 on the host, as on the single node
         "OBLAKO_S3_ENDPOINT": f"http://host.docker.internal:{ports.S3}",
     }
-    volumes = {f"{name}-data": {"bind": PGDATA, "mode": "rw"}}
+    from oblako.services.redshift import CERT_DIR, ensure_cert
+
+    ensure_cert()  # every node presents this machine's cert (`oblako trust`)
+    volumes = {
+        f"{name}-data": {"bind": PGDATA, "mode": "rw"},
+        str(CERT_DIR): {"bind": "/etc/oblako-redshift", "mode": "ro"},
+    }
     leader_alias = endpoint_address(cluster_id, record["region"])
     computes = [_compute_alias(cluster_id, n) for n in range(record["nodes"])]
     if node is None:
