@@ -201,6 +201,8 @@ class RedshiftService(Service):
                 # S3Proxy on the host (host.docker.internal is substituted for the
                 # host gateway by the backend). Unset, it falls back to real AWS.
                 "OBLAKO_S3_ENDPOINT": f"http://host.docker.internal:{ports.S3}",
+                # the Iceberg REST catalog Redshift's Iceberg tables register in
+                "OBLAKO_ICEBERG_URL": f"http://host.docker.internal:{ports.ICEBERG}",
             },
             volumes={
                 "oblako-redshift-data": {

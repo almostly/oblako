@@ -1,0 +1,315 @@
+"""Integration tests: Redshift's Apache Iceberg tables on redshift-local.
+
+Needs the Redshift engine on 5439, S3Proxy on 9000 and oblako's Iceberg REST
+catalog on 8181. ``CREATE EXTERNAL SCHEMA ... FROM DATA CATALOG`` maps a schema
+to a Glue database; ``CREATE TABLE ... USING ICEBERG`` writes the table to the
+catalog, where PyIceberg, Trino and the Glue API see it, and tables other engines
+create show up in Redshift.
+"""
+
+import os
+import uuid
+from typing import TYPE_CHECKING, cast
+
+import boto3
+import psycopg
+import pytest
+
+from oblako import ports
+
+if TYPE_CHECKING:
+    from typing_extensions import LiteralString
+
+BUCKET = "oblako-iceberg-tests"
+DB = f"rs_iceberg_{uuid.uuid4().hex[:6]}"
+SCHEMA = f"lake_{uuid.uuid4().hex[:6]}"
+
+
+def _catalog():
+    os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required")
+    os.environ.setdefault("AWS_RESPONSE_CHECKSUM_VALIDATION", "when_required")
+    catalog = pytest.importorskip("pyiceberg.catalog")
+    return catalog.load_catalog(
+        "oblako",
+        type="rest",
+        uri=f"http://localhost:{ports.ICEBERG}",
+        **{
+            "py-io-impl": "pyiceberg.io.fsspec.FsspecFileIO",
+            "s3.endpoint": f"http://localhost:{ports.S3}",
+            "s3.access-key-id": "oblako",
+            "s3.secret-access-key": "oblako",
+            "s3.path-style-access": "true",
+            "s3.region": "us-east-1",
+        },
+    )
+
+
+@pytest.fixture(scope="module")
+def cat():
+    try:
+        c = _catalog()
+        c.list_namespaces()
+    except Exception as e:  # no catalog running
+        pytest.skip(f"oblako's Iceberg catalog isn't running: {e}")
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=f"http://localhost:{ports.S3}",
+        aws_access_key_id="oblako",
+        aws_secret_access_key="oblako",
+        region_name="us-east-1",
+    )
+    try:
+        s3.create_bucket(Bucket=BUCKET)
+    except s3.exceptions.BucketAlreadyOwnedByYou:
+        pass
+    return c
+
+
+@pytest.fixture(scope="module")
+def rs(cat):
+    try:
+        conn = psycopg.connect(
+            host="localhost",
+            port=5439,
+            user="oblako",
+            password="oblako",
+            dbname="oblako",
+            sslmode="require",
+            autocommit=True,
+        )
+    except psycopg.OperationalError as e:
+        pytest.skip(f"redshift-local isn't running: {e}")
+    _exec(
+        conn,
+        f"CREATE EXTERNAL SCHEMA {SCHEMA} FROM DATA CATALOG DATABASE '{DB}' "
+        "IAM_ROLE default CREATE EXTERNAL DATABASE IF NOT EXISTS",
+    )
+    yield conn
+    _exec(conn, f"DROP SCHEMA IF EXISTS {SCHEMA} CASCADE")
+    conn.close()
+
+
+def _location(name: str) -> str:
+    return f"s3://{BUCKET}/{DB}/{name}-{uuid.uuid4().hex[:6]}/"
+
+
+def _exec(conn, query: str):
+    # the tests build their SQL from generated names, never from input
+    return conn.execute(cast("LiteralString", query))
+
+
+def _rows(conn, query: str):
+    return _exec(conn, query).fetchall()
+
+
+def test_external_schema_is_listed(rs):
+    assert _rows(
+        rs,
+        f"SELECT databasename FROM svv_external_schemas WHERE schemaname = '{SCHEMA}'",
+    ) == [(DB,)]
+
+
+def test_create_insert_update_delete(rs, cat):
+    _exec(
+        rs,
+        f"CREATE TABLE {SCHEMA}.orders (order_id int, order_date date, "
+        "total decimal(10,2), status varchar(20)) USING ICEBERG "
+        f"LOCATION '{_location('orders')}' PARTITIONED BY (month(order_date)) "
+        "TABLE PROPERTIES ('compression_type'='snappy')",
+    )
+    _exec(
+        rs,
+        f"INSERT INTO {SCHEMA}.orders VALUES (1, '2024-10-30', 299.99, 'new'), "
+        "(2, '2024-11-02', 150.75, 'new')",
+    )
+    _exec(rs, f"UPDATE {SCHEMA}.orders SET status = 'shipped' WHERE order_id = 1")
+    _exec(rs, f"DELETE FROM {SCHEMA}.orders WHERE order_id = 2")
+    assert _rows(rs, f"SELECT order_id, status FROM {SCHEMA}.orders") == [
+        (1, "shipped")
+    ]
+    # the same table, read by another engine
+    table = cat.load_table((DB, "orders")).scan().to_arrow().to_pylist()
+    assert [(r["order_id"], r["status"]) for r in table] == [(1, "shipped")]
+    assert str(cat.load_table((DB, "orders")).spec().fields[0].transform) == "month"
+
+
+def test_rollback_writes_nothing(rs):
+    _exec(
+        rs,
+        f"CREATE TABLE {SCHEMA}.events (id int) USING ICEBERG "
+        f"LOCATION '{_location('events')}'",
+    )
+    with rs.transaction(force_rollback=True):
+        _exec(rs, f"INSERT INTO {SCHEMA}.events VALUES (1)")
+    assert _rows(rs, f"SELECT count(*) FROM {SCHEMA}.events") == [(0,)]
+
+
+def test_one_write_per_transaction(rs):
+    _exec(
+        rs,
+        f"CREATE TABLE {SCHEMA}.once (id int) USING ICEBERG "
+        f"LOCATION '{_location('once')}'",
+    )
+    with pytest.raises(psycopg.Error, match="one write"):
+        with rs.transaction():
+            _exec(rs, f"INSERT INTO {SCHEMA}.once VALUES (1)")
+            _exec(rs, f"INSERT INTO {SCHEMA}.once VALUES (2)")
+    assert _rows(rs, f"SELECT count(*) FROM {SCHEMA}.once") == [(0,)]
+
+
+def test_ctas_and_join_with_a_local_table(rs):
+    _exec(rs, "DROP TABLE IF EXISTS public.iceberg_customers")
+    _exec(rs, "CREATE TABLE public.iceberg_customers (id int, name varchar(20))")
+    _exec(rs, "INSERT INTO public.iceberg_customers VALUES (1, 'Ann'), (2, 'Bo')")
+    _exec(
+        rs,
+        f"CREATE TABLE {SCHEMA}.customers_copy USING ICEBERG "
+        f"LOCATION '{_location('copy')}' AS SELECT * FROM public.iceberg_customers",
+    )
+    assert _rows(
+        rs,
+        f"SELECT c.name FROM {SCHEMA}.customers_copy c "
+        "JOIN public.iceberg_customers l USING (id) ORDER BY 1",
+    ) == [("Ann",), ("Bo",)]
+    _exec(rs, "DROP TABLE public.iceberg_customers")
+
+
+def test_show_table(rs):
+    location = _location("shown")
+    _exec(
+        rs,
+        f"CREATE TABLE {SCHEMA}.shown (id int, price decimal(5, 2)) USING ICEBERG "
+        f"LOCATION '{location}' PARTITIONED BY (bucket(16, id))",
+    )
+    (ddl,) = _rows(rs, f"SHOW TABLE {SCHEMA}.shown")[0]
+    assert f"LOCATION '{location}'" in ddl
+    assert "PARTITIONED BY (bucket(16, id))" in ddl
+    assert "price numeric(5,2)" in ddl
+
+
+def test_a_table_from_another_engine_shows_up(rs, cat):
+    pa = pytest.importorskip("pyarrow")
+    ns = f"{DB}_spark"
+    cat.create_namespace(ns)
+    table = cat.create_table(
+        (ns, "clicks"), schema=pa.schema([("id", pa.int64()), ("page", pa.string())])
+    )
+    table.append(pa.table({"id": pa.array([1, 2], pa.int64()), "page": ["/", "/docs"]}))
+    schema = f"{SCHEMA}_spark"
+    _exec(rs, f"CREATE EXTERNAL SCHEMA {schema} FROM DATA CATALOG DATABASE '{ns}'")
+    try:
+        assert _rows(rs, f"SELECT page FROM {schema}.clicks ORDER BY id") == [
+            ("/",),
+            ("/docs",),
+        ]
+        _exec(rs, f"INSERT INTO {schema}.clicks VALUES (3, '/blog')")
+        assert cat.load_table((ns, "clicks")).scan().to_arrow().num_rows == 3
+        # a table created later appears when the schema is declared again
+        cat.create_table((ns, "later"), schema=pa.schema([("id", pa.int64())]))
+        _exec(
+            rs,
+            f"CREATE EXTERNAL SCHEMA IF NOT EXISTS {schema} "
+            f"FROM DATA CATALOG DATABASE '{ns}'",
+        )
+        assert _rows(rs, f"SELECT count(*) FROM {schema}.later") == [(0,)]
+    finally:
+        _exec(rs, f"DROP SCHEMA {schema} CASCADE")
+
+
+def test_glue_sees_the_table(rs):
+    from oblako.services.glue_catalog import GlueCatalogService
+
+    _exec(
+        rs,
+        f"CREATE TABLE {SCHEMA}.in_glue (id int) USING ICEBERG "
+        f"LOCATION '{_location('in-glue')}'",
+    )
+    glue = GlueCatalogService().get_client()
+    table = glue.get_table(DatabaseName=DB, Name="in_glue")["Table"]
+    assert table["Parameters"]["table_type"].upper() == "ICEBERG"
+
+
+def test_drop_table_keeps_the_files(rs, cat):
+    _exec(
+        rs,
+        f"CREATE TABLE {SCHEMA}.dropped (id int) USING ICEBERG "
+        f"LOCATION '{_location('dropped')}'",
+    )
+    _exec(rs, f"INSERT INTO {SCHEMA}.dropped VALUES (1)")
+    location = cat.load_table((DB, "dropped")).location()
+    _exec(rs, f"DROP TABLE {SCHEMA}.dropped")
+    assert not cat.table_exists((DB, "dropped"))
+    assert _rows(
+        rs, "SELECT count(*) FROM svv_external_tables WHERE tablename = 'dropped'"
+    ) == [(0,)]
+    bucket, _, prefix = location.removeprefix("s3://").partition("/")
+    s3 = boto3.client(
+        "s3",
+        endpoint_url=f"http://localhost:{ports.S3}",
+        aws_access_key_id="oblako",
+        aws_secret_access_key="oblako",
+        region_name="us-east-1",
+    )
+    assert s3.list_objects_v2(Bucket=bucket, Prefix=prefix)["KeyCount"] > 0
+
+
+@pytest.mark.parametrize(
+    "columns, clauses, error",
+    [
+        ("(id int)", "", "needs LOCATION"),
+        ("(id int NOT NULL)", "LOCATION '{loc}'", "no column constraints"),
+        ("(id int, s varchar DEFAULT 'x')", "LOCATION '{loc}'", "DEFAULT"),
+        ("(id int)", "LOCATION '{loc}' TABLE PROPERTIES ('owner'='me')", "property"),
+        (
+            "(id int, d date)",
+            "LOCATION '{loc}' PARTITIONED BY (bucket(4, d), year(d))",
+            "more than one",
+        ),
+    ],
+)
+def test_refused_as_redshift_refuses(rs, columns, clauses, error):
+    clauses = clauses.format(loc=_location("bad"))
+    with pytest.raises(psycopg.Error, match=error):
+        _exec(rs, f"CREATE TABLE {SCHEMA}.bad {columns} USING ICEBERG {clauses}")
+
+
+def test_location_must_be_empty(rs):
+    location = _location("taken")
+    _exec(
+        rs, f"CREATE TABLE {SCHEMA}.taken (id int) USING ICEBERG LOCATION '{location}'"
+    )
+    _exec(rs, f"INSERT INTO {SCHEMA}.taken VALUES (1)")
+    with pytest.raises(psycopg.Error, match="not empty"):
+        _exec(
+            rs,
+            f"CREATE TABLE {SCHEMA}.taken_again (id int) USING ICEBERG "
+            f"LOCATION '{location}'",
+        )
+
+
+def test_redshift_connector_parameters(rs):
+    redshift_connector = pytest.importorskip("redshift_connector")
+    _exec(
+        rs,
+        f"CREATE TABLE {SCHEMA}.params (id int, note varchar(10)) USING ICEBERG "
+        f"LOCATION '{_location('params')}'",
+    )
+    conn = redshift_connector.connect(
+        host="localhost",
+        port=5439,
+        database="oblako",
+        user="oblako",
+        password="oblako",
+        ssl=True,
+        sslmode="verify-ca",
+    )
+    try:
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.executemany(
+            f"INSERT INTO {SCHEMA}.params VALUES (%s, %s)", [(1, "a"), (2, "b")]
+        )
+        cur.execute(f"SELECT note FROM {SCHEMA}.params WHERE id = %s", (2,))
+        assert [list(r) for r in cur.fetchall()] == [["b"]]
+    finally:
+        conn.close()

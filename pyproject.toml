@@ -47,6 +47,7 @@ dev = [
     "awswrangler>=3",  # test_redshift_copy_unload.py exercises wr.redshift.copy/unload
     "sqlglot>=25",  # test_redshift_pivot_unit.py + the proxy's PIVOT/UNPIVOT rewrite
     "commitizen>=4",  # conventional-commit messages + `cz bump` version/changelog
+    "pyiceberg[pyarrow,s3fs]>=0.7",  # test_redshift_iceberg.py reads what Redshift writes
 ]
 agentcore = [
     "bedrock-agentcore>=0.1",

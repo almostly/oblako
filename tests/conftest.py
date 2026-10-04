@@ -48,6 +48,7 @@ _INTEGRATION_FILES = {
     "tests/redshift/test_redshift_psycopg3.py",
     "tests/redshift/test_redshift_sqlalchemy.py",
     "tests/redshift/test_redshift_cluster.py",
+    "tests/redshift/test_redshift_iceberg.py",
     "tests/stepfunctions/test_stepfunctions.py",
     "tests/services/test_ec2.py",
     "tests/services/test_kinesis_streams.py",

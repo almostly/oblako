@@ -343,6 +343,45 @@ SELECT sandbox.credit_predict(f1::float8, f2::float8) FROM sandbox.tape;
 - Features must be numeric (cast them in the `SELECT`); `PREPROCESSORS` other
   than `'none'` are rejected. The model lives in the database it was created in.
 
+**Apache Iceberg tables.** Redshift creates and writes Iceberg tables registered
+in the Glue Data Catalog, and so does redshift-local. oblako's Glue catalog keeps
+Iceberg tables in its Iceberg REST catalog on S3Proxy, so a table Redshift writes
+is the table Athena, Trino, Spark and PyIceberg read, and a table they create
+shows up in Redshift. Start the catalog with `oblako up iceberg` (and `s3`).
+
+```sql
+CREATE EXTERNAL SCHEMA lake FROM DATA CATALOG DATABASE 'sales'
+IAM_ROLE default CREATE EXTERNAL DATABASE IF NOT EXISTS;
+
+CREATE TABLE lake.orders (order_id int, order_date date, total decimal(10,2))
+USING ICEBERG LOCATION 's3://my-lake/orders/'
+PARTITIONED BY (month(order_date))
+TABLE PROPERTIES ('compression_type'='snappy');
+
+INSERT INTO lake.orders VALUES (1, '2024-10-30', 299.99);
+UPDATE lake.orders SET total = 310 WHERE order_id = 1;
+DELETE FROM lake.orders WHERE order_date < '2024-01-01';
+SHOW TABLE lake.orders;
+DROP TABLE lake.orders;  -- removes the catalog entry; the files stay
+```
+
+- `CREATE TABLE ... USING ICEBERG` takes `LOCATION` (required, and empty, as on
+  Redshift), `PARTITIONED BY` with `identity`, `bucket(N, col)`,
+  `truncate(W, col)`, `year`, `month`, `day` and `hour`, and `TABLE PROPERTIES`
+  `compression_type` (`zstd` by default). `CREATE TABLE ... AS SELECT` works too.
+- `SELECT` scans the table, so joins with local tables are plain SQL. `INSERT`,
+  `UPDATE` and `DELETE` work from any client, parameterized statements included.
+  An insert appends; an update or delete rewrites the table's data files.
+- Each write commits as one Iceberg snapshot when its transaction commits, and
+  `ROLLBACK` writes nothing. As on Redshift, a transaction takes one Iceberg write.
+- `svv_external_schemas`, `svv_external_tables` and `svv_external_columns` list
+  the external schemas and their tables.
+- Not yet: Iceberg v3 tables (`'format-version'='3'`) and column `DEFAULT`
+  values, `MERGE` and `ALTER TABLE` on Iceberg tables, the `awsdatacatalog` and
+  `s3tablescatalog` three-part names, and nested Iceberg types in writes. A table
+  another engine creates after `CREATE EXTERNAL SCHEMA` appears once you run
+  `CREATE EXTERNAL SCHEMA IF NOT EXISTS` again.
+
 **Limitations**
 
 - Redshift physical DDL (`DISTSTYLE`/`DISTKEY`/`SORTKEY`/`ENCODE`) is **accepted

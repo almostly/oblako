@@ -28,6 +28,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip3 install --no-cache-dir --break-system-packages \
         boto3 pyarrow pydantic sqlglot \
     && rm -rf /root/.cache
+# pyiceberg writes Redshift's Iceberg tables (CREATE TABLE ... USING ICEBERG) to
+# oblako's Iceberg REST catalog, through s3fs to S3Proxy (see initdb.d/13_iceberg.sql).
+RUN pip3 install --no-cache-dir --break-system-packages "pyiceberg[s3fs,pyiceberg-core]" \
+    && rm -rf /root/.cache
 # docker + psycopg run the Redshift ML training agent (proxy/redshift_ml.py): it
 # reads queued CREATE MODELs over the local socket and trains them in a container
 # on the host Docker daemon (via a mounted /var/run/docker.sock).
@@ -77,6 +81,8 @@ COPY proxy/redshift_ml.py /usr/local/bin/redshift_ml.py
 COPY ml_train/ /usr/local/share/oblako/ml_train/
 # PIVOT/UNPIVOT -> standard SQL (sqlglot-parsed), imported by the proxy.
 COPY proxy/pivot_unpivot.py /usr/local/bin/pivot_unpivot.py
+# Iceberg tables: DDL rewriting (proxy) and the plpython3u catalog work.
+COPY proxy/iceberg_tables.py /usr/local/bin/iceberg_tables.py
 COPY entrypoint.sh /usr/local/bin/oblako-entrypoint.sh
 RUN chmod +x /usr/local/bin/oblako-entrypoint.sh
 
