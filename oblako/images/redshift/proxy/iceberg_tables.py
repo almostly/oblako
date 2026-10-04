@@ -212,6 +212,34 @@ def merge_target(sql: str) -> list[str] | None:
     return split_name(m.group("name")) if m else None
 
 
+_ALTER = re.compile(
+    rf"^\s*alter\s+table\s+(?:if\s+exists\s+)?(?P<name>{_NAME})\s+(?P<action>.+?)\s*;?\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def alter_target(sql: str) -> list[str] | None:
+    """Return the target's name parts if ``sql`` is an ALTER TABLE, else None."""
+    m = _ALTER.match(sql)
+    return split_name(m.group("name")) if m else None
+
+
+def rewrite_alter(sql: str) -> str:
+    """Rewrite an ALTER TABLE on an Iceberg table into a pg_oblako call.
+
+    The proxy calls this only for a target in an external schema: Redshift's
+    Iceberg ALTERs (SET TABLE PROPERTIES, ... PARTITION FIELD) aren't PostgreSQL
+    syntax, and PostgreSQL can't add or drop a view's columns.
+    """
+    m = _ALTER.match(sql)
+    if m is None:
+        return sql
+    return _command(
+        f"pg_oblako.iceberg_alter_table({_literal(m.group('name'))}, "
+        f"{_literal(m.group('action'))})"
+    )
+
+
 def rewrite_merge(sql: str) -> str:
     """Rewrite a MERGE into an Iceberg table into a pg_oblako call.
 
@@ -464,7 +492,7 @@ def pg_type(ice) -> str | None:
     if isinstance(ice, t.BooleanType):
         return "boolean"
     if isinstance(ice, (t.StringType, t.UUIDType)):
-        return "character varying(65535)"
+        return "character varying"  # Redshift shows an Iceberg string as varchar
     if isinstance(ice, t.DateType):
         return "date"
     if isinstance(ice, t.TimestamptzType):
@@ -836,6 +864,227 @@ def _create_table(
 
 
 # -----------------------------------------------------------------------------------------------
+# ALTER TABLE
+# -----------------------------------------------------------------------------------------------
+_A_RENAME = re.compile(
+    rf"^rename\s+(?:column\s+)?(?P<old>{_IDENT})\s+to\s+(?P<new>{_IDENT})$", re.I
+)
+_A_ADD_COLUMN = re.compile(
+    rf"^add\s+(?:column\s+)?(?P<col>{_IDENT})\s+(?P<type>.+)$", re.I
+)
+_A_DROP_COLUMN = re.compile(rf"^drop\s+(?:column\s+)?(?P<col>{_IDENT})$", re.I)
+_A_TYPE = re.compile(
+    rf"^alter\s+(?:column\s+)?(?P<col>{_IDENT})\s+(?:set\s+data\s+)?type\s+(?P<type>.+)$",
+    re.I,
+)
+_A_DEFAULT = re.compile(
+    rf"^alter\s+(?:column\s+)?{_IDENT}\s+(?:set|drop)\s+default\b", re.I
+)
+_A_PROPERTIES = re.compile(
+    r"^set\s+table\s+properties\s*\((?P<props>.*)\)$", re.I | re.S
+)
+_A_PARTITION = re.compile(
+    r"^(?P<op>add|drop|replace)\s+partition\s+field\s+(?P<field>.+?)"
+    r"(?:\s+with\s+(?P<new>.+))?$",
+    re.I | re.S,
+)
+
+
+def _pg_type_of(plpy, type_sql: str) -> str:
+    """Return ``format_type`` for a column type as written (int4, varchar, ...)."""
+    plpy.execute(f"CREATE TEMP TABLE oblako_alter_type (c {type_sql}) ON COMMIT DROP")
+    try:
+        return _columns(plpy, "pg_temp.oblako_alter_type")[0][1]
+    finally:
+        plpy.execute("DROP TABLE pg_temp.oblako_alter_type")
+
+
+def _widens(old, new) -> bool:
+    """Whether Iceberg allows ``old`` -> ``new`` (int->long, float->double, decimal P)."""
+    from pyiceberg import types as t
+
+    if isinstance(old, t.IntegerType) and isinstance(new, t.LongType):
+        return True
+    if isinstance(old, t.FloatType) and isinstance(new, t.DoubleType):
+        return True
+    return (
+        isinstance(old, t.DecimalType)
+        and isinstance(new, t.DecimalType)
+        and new.scale == old.scale
+        and new.precision > old.precision
+    )
+
+
+def _spec_field(ice, item: str):
+    """Find the partition field a PARTITIONED BY item names, or None."""
+    ((col, fn, arg),) = parse_partitions(item)
+    source = ice.schema().find_field(col).field_id
+    want = str(_transform(fn, arg))
+    for pf in ice.spec().fields:
+        if pf.source_id == source and str(pf.transform) == want:
+            return pf
+    return None
+
+
+def _drop_column(ice, database: str, table: str, col: str) -> None:
+    """Drop a column, keeping the table's last column ID as Iceberg requires.
+
+    pyiceberg sends a new schema without ``last-column-id``; the REST catalog then
+    takes the new schema's highest ID, and dropping the newest column lowers it,
+    which the catalog refuses. This commit carries the ID, or switches back to an
+    identical earlier schema, as pyiceberg itself would.
+    """
+    import json
+    import urllib.request
+    from urllib.parse import quote
+
+    update = ice.update_schema()
+    update.delete_column(col)
+    new_schema = update._apply()
+    same = next((s.schema_id for s in ice.metadata.schemas if s == new_schema), None)
+    if same is not None:
+        updates = [{"action": "set-current-schema", "schema-id": same}]
+    else:
+        updates = [
+            {
+                "action": "add-schema",
+                "schema": json.loads(new_schema.model_dump_json(by_alias=True)),
+                "last-column-id": ice.metadata.last_column_id,
+            },
+            {"action": "set-current-schema", "schema-id": -1},
+        ]
+    body = {
+        "requirements": [
+            {
+                "type": "assert-current-schema-id",
+                "current-schema-id": ice.schema().schema_id,
+            }
+        ],
+        "updates": updates,
+    }
+    request = urllib.request.Request(
+        f"{iceberg_url()}/v1/namespaces/{quote(database, safe='')}"
+        f"/tables/{quote(table, safe='')}",
+        data=json.dumps(body).encode(),
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    urllib.request.urlopen(request, timeout=30).close()
+
+
+def _alter_table(plpy, name: str, action: str) -> str:
+    """ALTER TABLE on an Iceberg table: a metadata change, then the view rebuilt."""
+    parts = split_name(name)
+    if len(parts) != 2:
+        _fail(plpy, "name an Iceberg table <external_schema>.<table>")
+    schema, table = parts
+    reg = plpy.execute(
+        "SELECT databasename, location FROM pg_oblako.iceberg_tables WHERE "
+        f"schemaname = {plpy.quote_literal(schema)} AND "
+        f"tablename = {plpy.quote_literal(table)}"
+    )
+    if not reg.nrows():
+        _fail(plpy, f'relation "{schema}.{table}" does not exist')
+    database, location = reg[0]["databasename"], reg[0]["location"]
+    ice = _catalog_or_error(plpy).load_table((database, table))
+    action = " ".join(action.split())
+    partitioned = {pf.source_id for pf in ice.spec().fields}
+    try:
+        # before the column forms: ADD PARTITION FIELD x reads as ADD [COLUMN] too
+        if m := _A_PARTITION.match(action):
+            # validate everything first: pyiceberg commits an update on exit,
+            # even one an error interrupted
+            op, field = m.group("op").lower(), m.group("field")
+            old = None
+            if op in ("drop", "replace"):
+                old = _spec_field(ice, field)
+                if old is None:
+                    _fail(plpy, f"partition field {field} is not in the table's spec")
+            add = None
+            if op in ("add", "replace"):
+                item = m.group("new") if op == "replace" else field
+                if not item:
+                    _fail(plpy, "REPLACE PARTITION FIELD ... WITH ...")
+                ((col, fn, arg),) = parse_partitions(item)
+                source = ice.schema().find_field(col).field_id
+                keep = partitioned - ({old.source_id} if old is not None else set())
+                if source in keep:
+                    _fail(
+                        plpy,
+                        f'"{col}"  used in multiple transform functions for '
+                        '"iceberg" table',
+                    )
+                label = col if fn == "identity" else f"{col}_{fn}"
+                add = (col, _transform(fn, arg), label)
+            with ice.update_spec() as spec:
+                if old is not None:
+                    spec.remove_field(old.name)
+                if add is not None:
+                    spec.add_field(*add)
+        elif m := _A_PROPERTIES.match(action):
+            props = parse_properties(m.group("props"))
+            if "compression_type" not in props:
+                _fail(plpy, "SET TABLE PROPERTIES takes 'compression_type'")
+            with ice.transaction() as tx:
+                tx.set_properties(
+                    {"write.parquet.compression-codec": props["compression_type"]}
+                )
+        elif m := _A_RENAME.match(action):
+            old, new = split_name(m.group("old"))[0], split_name(m.group("new"))[0]
+            with ice.update_schema() as update:
+                update.rename_column(old, new)
+        elif _A_DEFAULT.match(action) or re.search(r"(?i)\bdefault\b", action):
+            _fail(
+                plpy,
+                'Columns constraints and attributes are not supported for an "iceberg" '
+                'table. Default values are only supported with Iceberg version "3".',
+            )
+        elif m := _A_ADD_COLUMN.match(action):
+            col, pgt = split_name(m.group("col"))[0], _pg_type_of(plpy, m.group("type"))
+            if pgt.startswith("character varying("):
+                _fail(
+                    plpy,
+                    f'VARCHAR(N) specifiying length is not supported for column "{col}" '
+                    "in Iceberg table.",
+                )
+            with ice.update_schema() as update:
+                update.add_column(col, iceberg_type(pgt))
+        elif m := _A_DROP_COLUMN.match(action):
+            col = split_name(m.group("col"))[0]
+            field = ice.schema().find_field(col)
+            if field.field_id in partitioned:
+                _fail(
+                    plpy,
+                    f'column "{col}" belongs to the partition spec: drop its partition '
+                    "field first",
+                )
+            _drop_column(ice, database, table, col)
+        elif m := _A_TYPE.match(action):
+            col = split_name(m.group("col"))[0]
+            field = ice.schema().find_field(col)
+            new = iceberg_type(_pg_type_of(plpy, m.group("type")))
+            if field.field_id in partitioned:
+                _fail(plpy, f'column "{col}" belongs to the partition spec')
+            if not _widens(field.field_type, new):
+                _fail(
+                    plpy,
+                    f"cannot change {field.field_type} to {new}: Iceberg widens only "
+                    "int to bigint, float to double, and a decimal's precision",
+                )
+            with ice.update_schema() as update:
+                update.update_column(col, field_type=new)
+        else:
+            _fail(plpy, f"ALTER TABLE {action} is not supported for Iceberg tables")
+    except ValueError as e:
+        _fail(plpy, str(e))
+    # the view and staging table follow the new schema
+    plpy.execute(f"DROP VIEW {_quote(schema)}.{_quote(table)}")
+    ice = _catalog_or_error(plpy).load_table((database, table))
+    _attach(plpy, schema, database, table, ice, location=location)
+    return "ALTER TABLE"
+
+
+# -----------------------------------------------------------------------------------------------
 # MERGE
 # -----------------------------------------------------------------------------------------------
 _TARGET_ALIAS = re.compile(r"\s+(?:as\s+)?(?!using\b)([A-Za-z_][\w$]*)", re.IGNORECASE)
@@ -1121,3 +1370,9 @@ def merge(plpy, stmt: str) -> str:
     """MERGE into an Iceberg table (see ``_merge``)."""
     with _coordinator_only(plpy):
         return _merge(plpy, stmt)
+
+
+def alter_table(plpy, name: str, action: str) -> str:
+    """ALTER TABLE on an Iceberg table (see ``_alter_table``)."""
+    with _coordinator_only(plpy):
+        return _alter_table(plpy, name, action)

@@ -68,6 +68,12 @@ import iceberg_tables
 return iceberg_tables.show_table(plpy, name)
 $$;
 
+CREATE OR REPLACE FUNCTION pg_oblako.iceberg_alter_table_py(name text, action text)
+RETURNS text LANGUAGE plpython3u AS $$
+import iceberg_tables
+return iceberg_tables.alter_table(plpy, name, action)
+$$;
+
 CREATE OR REPLACE FUNCTION pg_oblako.iceberg_merge_py(stmt text)
 RETURNS text LANGUAGE plpython3u AS $$
 import iceberg_tables
@@ -107,6 +113,16 @@ DECLARE m text; h text; c text;
 BEGIN
     RETURN pg_oblako.iceberg_create_table_py(
         name, columns, location, partitioned, properties, if_not_exists, query);
+EXCEPTION WHEN OTHERS THEN
+    GET STACKED DIAGNOSTICS m = MESSAGE_TEXT, h = PG_EXCEPTION_HINT, c = RETURNED_SQLSTATE;
+    PERFORM pg_oblako.raise_clean(m, h, c);
+END $$;
+
+CREATE OR REPLACE FUNCTION pg_oblako.iceberg_alter_table(name text, action text)
+RETURNS text LANGUAGE plpgsql AS $$
+DECLARE m text; h text; c text;
+BEGIN
+    RETURN pg_oblako.iceberg_alter_table_py(name, action);
 EXCEPTION WHEN OTHERS THEN
     GET STACKED DIAGNOSTICS m = MESSAGE_TEXT, h = PG_EXCEPTION_HINT, c = RETURNED_SQLSTATE;
     PERFORM pg_oblako.raise_clean(m, h, c);

@@ -290,7 +290,7 @@ _EXTERNAL_CACHE: tuple[float, set[str]] = (0.0, set())
 def _external_schemas() -> set[str]:
     """Return the external (Data Catalog) schema names of every database.
 
-    Asked only for a MERGE, whose target may be an Iceberg table, and cached for
+    Asked only for a MERGE or ALTER TABLE, whose target may be an Iceberg table, and cached for
     two seconds. Over the trusted Unix socket; empty if anything fails, so the
     MERGE then runs as sent.
     """
@@ -357,6 +357,9 @@ def rewrite_sql(sql: str) -> str:
     if iceberg_tables is not None and (target := iceberg_tables.merge_target(s)):
         if len(target) >= 2 and target[-2] in _external_schemas():
             s = iceberg_tables.rewrite_merge(s)
+    if iceberg_tables is not None and (target := iceberg_tables.alter_target(s)):
+        if len(target) >= 2 and target[-2] in _external_schemas():
+            s = iceberg_tables.rewrite_alter(s)
     if pivot_unpivot is not None:
         s = pivot_unpivot.rewrite_pivot_unpivot(s)  # PIVOT/UNPIVOT -> standard SQL
     if copy_unload is not None and copy_unload.has_s3_copy_or_unload(s):
