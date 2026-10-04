@@ -21,11 +21,11 @@ client = OpenSearch(hosts=[{"host": "localhost", "port": 9200}], use_ssl=False)
 INDEX = "credit-risk-knowledge-base"
 
 # Create k-NN index (same pattern as Bedrock Knowledge Base)
-if client.indices.exists(INDEX):
-    client.indices.delete(INDEX)
+if client.indices.exists(index=INDEX):
+    client.indices.delete(index=INDEX)
 
 client.indices.create(
-    INDEX,
+    index=INDEX,
     body={
         "settings": {"index": {"knn": True}},
         "mappings": {
@@ -135,5 +135,5 @@ results = client.search(index=INDEX, body={"query": {"match": {"text": "Basel"}}
 for hit in results["hits"]["hits"]:
     print(f"  {hit['_source']['text'][:80]}...")
 
-client.indices.delete(INDEX)
+client.indices.delete(index=INDEX)
 print(f"\nCleaned up index: {INDEX}")
