@@ -42,6 +42,10 @@ _SPARK_CONFS = (
     "spark.hadoop.fs.s3a.endpoint.region=us-east-1",
     "spark.hadoop.fs.s3a.path.style.access=true",
     "spark.hadoop.fs.s3a.connection.ssl.enabled=false",
+    # AWS Glue leaves only the data files (checked on Glue 5.0, 2026-10); S3A
+    # would also keep a zero-byte marker per partition directory (day=.../),
+    # which s3fs-based readers fail on. Delete each marker once files land under it.
+    "spark.hadoop.fs.s3a.directory.marker.retention=delete",
 )
 
 
