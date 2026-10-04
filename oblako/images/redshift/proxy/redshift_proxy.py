@@ -58,6 +58,13 @@ try:
 except Exception:  # any import failure disables the feature
     copy_unload = None
 
+# Iceberg tables: CREATE EXTERNAL SCHEMA / CREATE TABLE ... USING ICEBERG / SHOW
+# TABLE -> pg_oblako calls. Pure-stdlib at import; optional all the same.
+try:
+    import iceberg_tables
+except Exception:  # any import failure disables the feature
+    iceberg_tables = None
+
 # SUPER (PartiQL) dot-navigation rewriting. Pure-stdlib; optional all the same.
 try:
     import super_nav
@@ -287,9 +294,14 @@ def rewrite_sql(sql: str) -> str:
     prefix (see ``_ACL_TO_STRING``); Redshift physical-DDL storage clauses (DISTSTYLE/
     DISTKEY/SORTKEY/ENCODE/BACKUP) are stripped from CREATE TABLE; ``COPY``/
     ``UNLOAD`` to/from ``s3://`` are rewritten into oblako_* S3 bridge calls (see
-    ``copy_unload``). Everything else is left untouched.
+    ``copy_unload``); external schemas, ``CREATE TABLE ... USING ICEBERG`` and
+    ``SHOW TABLE`` become pg_oblako calls (see ``iceberg_tables``). Everything
+    else is left untouched.
     """
     s = sql
+    # first, so the rewrites below also reach the column list and AS query
+    if iceberg_tables is not None and iceberg_tables.has_iceberg_ddl(s):
+        s = iceberg_tables.rewrite_iceberg(s)
     if pivot_unpivot is not None:
         s = pivot_unpivot.rewrite_pivot_unpivot(s)  # PIVOT/UNPIVOT -> standard SQL
     if copy_unload is not None and copy_unload.has_s3_copy_or_unload(s):

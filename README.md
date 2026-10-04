@@ -57,6 +57,7 @@ normal `boto3` client (or native driver):
 | Redshift (management API) | moto | boto3 `redshift` control plane: clusters, nodes, endpoints |
 | Redshift Data API | oblako server | boto3 `redshift-data`, real SQL against the engine |
 | Redshift ML | Training container + plpython3u | `CREATE MODEL` from any SQL client, trained asynchronously in a container; prediction function runs in-DB |
+| Redshift Iceberg tables | Iceberg REST catalog + S3Proxy | `CREATE TABLE ... USING ICEBERG`, `INSERT`/`UPDATE`/`DELETE`; the same tables Athena, Trino and Spark see through the Glue catalog |
 | RDS / Aurora | moto + PostgreSQL/MySQL | boto3 `rds` control plane + a real engine |
 | RDS Data API | oblako server | boto3 `rds-data`: synchronous SQL + transactions |
 | CloudFormation | oblako server | boto3 `cloudformation` (+ `aws cloudformation deploy` / `sam deploy`) → **real** oblako resources |

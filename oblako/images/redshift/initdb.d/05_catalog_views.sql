@@ -79,38 +79,59 @@ JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE c.relkind IN ('r', 'p')
   AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast');
 
--- SVV_EXTERNAL_SCHEMAS / SVV_EXTERNAL_TABLES / SVV_EXTERNAL_COLUMNS: Redshift
--- Spectrum. oblako has no external catalog, so these are empty (tools probe
--- them, then find nothing). esowner is present so drivers that join it against
--- pg_user (e.g. sqlalchemy-redshift reflection) parse.
+-- SVV_EXTERNAL_SCHEMAS / SVV_EXTERNAL_TABLES / SVV_EXTERNAL_COLUMNS: external
+-- schemas over the Data Catalog and their Iceberg tables, from oblako's registry
+-- (13_iceberg.sql fills it, and defines the same objects on volumes from before).
+-- esowner is present so drivers that join it against pg_user (e.g.
+-- sqlalchemy-redshift reflection) parse.
+CREATE SCHEMA IF NOT EXISTS pg_oblako;
+
+CREATE TABLE IF NOT EXISTS pg_oblako.external_schemas (
+    schemaname name PRIMARY KEY,
+    databasename name NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pg_oblako.iceberg_tables (
+    schemaname name NOT NULL,
+    tablename name NOT NULL,
+    databasename name NOT NULL,
+    location text,
+    stage text NOT NULL UNIQUE,
+    PRIMARY KEY (schemaname, tablename)
+);
+
 CREATE OR REPLACE VIEW svv_external_schemas AS
 SELECT
-    NULL::integer AS esoid,
-    NULL::name AS schemaname,
-    NULL::name AS databasename,
+    n.oid::integer AS esoid,
+    e.schemaname,
+    e.databasename,
     NULL::text AS esoptions,
-    NULL::oid AS esowner,
+    n.nspowner AS esowner,
     -- external-schema kind; NULL => local (redtape reads it)
-    NULL::smallint AS eskind
-WHERE false;
+    1::smallint AS eskind
+FROM pg_oblako.external_schemas e
+JOIN pg_namespace n ON n.nspname = e.schemaname;
 
 CREATE OR REPLACE VIEW svv_external_tables AS
 SELECT
-    NULL::name AS schemaname,
-    NULL::name AS tablename,
-    NULL::text AS location,
+    t.schemaname,
+    t.tablename,
+    t.location,
     NULL::text AS input_format,
     NULL::text AS output_format
-WHERE false;
+FROM pg_oblako.iceberg_tables t;
 
 CREATE OR REPLACE VIEW svv_external_columns AS
 SELECT
-    NULL::name AS schemaname,
-    NULL::name AS tablename,
-    NULL::name AS columnname,
-    NULL::text AS external_type,
-    NULL::int  AS columnnum
-WHERE false;
+    t.schemaname,
+    t.tablename,
+    a.attname AS columnname,
+    format_type(a.atttypid, a.atttypmod) AS external_type,
+    a.attnum::int AS columnnum
+FROM pg_oblako.iceberg_tables t
+JOIN pg_namespace n ON n.nspname = t.schemaname
+JOIN pg_class c ON c.relnamespace = n.oid AND c.relname = t.tablename
+JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped;
 
 -- FORMAT_ENCODING: Redshift maps a column's compression-encoding id to its name.
 -- oblako's engine has no column encodings, so every column reads back as 'none'.

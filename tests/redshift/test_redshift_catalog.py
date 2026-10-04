@@ -80,8 +80,13 @@ def test_svv_table_info(cursor):
     assert rows >= 0  # never the PG -1 "unknown" sentinel
 
 
-def test_external_views_are_empty(cursor):
-    cursor.execute("SELECT count(*) FROM svv_external_schemas")
-    assert cursor.fetchone()[0] == 0
-    cursor.execute("SELECT count(*) FROM svv_external_tables")
-    assert cursor.fetchone()[0] == 0
+def test_external_views_list_the_registered_schemas_and_tables(cursor):
+    """External schemas and their Iceberg tables, nothing else (see 13_iceberg.sql)."""
+    cursor.execute(
+        "SELECT (SELECT count(*) FROM svv_external_schemas), "
+        "(SELECT count(*) FROM pg_oblako.external_schemas), "
+        "(SELECT count(*) FROM svv_external_tables), "
+        "(SELECT count(*) FROM pg_oblako.iceberg_tables)"
+    )
+    schemas, registered_schemas, tables, registered_tables = cursor.fetchone()
+    assert (schemas, tables) == (registered_schemas, registered_tables)

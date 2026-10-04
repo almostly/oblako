@@ -69,12 +69,12 @@ def test_like_escape(cursor):
 
 
 def test_svv_external_schemas_has_eskind(cursor):
-    """svv_external_schemas exposes eskind (redtape reads it) and is empty."""
+    """svv_external_schemas exposes eskind (redtape reads it): 1, a Data Catalog schema."""
     cursor.execute(
         "SELECT esoid, schemaname, databasename, esoptions, esowner, eskind "
         "FROM svv_external_schemas"
     )
-    assert cursor.fetchall() == []
+    assert all(row[5] == 1 for row in cursor.fetchall())
 
 
 def test_external_schema_functions_are_empty(cursor):

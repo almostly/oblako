@@ -187,6 +187,8 @@ def _run_node(client, network, cluster_id: str, record: dict, node: int | None):
         "POSTGRES_HOST_AUTH_METHOD": "md5",
         # COPY and UNLOAD reach oblako's S3 on the host, as on the single node
         "OBLAKO_S3_ENDPOINT": f"http://host.docker.internal:{ports.S3}",
+        # the Iceberg REST catalog Redshift's Iceberg tables register in
+        "OBLAKO_ICEBERG_URL": f"http://host.docker.internal:{ports.ICEBERG}",
     }
     from oblako.services.redshift import CERT_DIR, ensure_cert
 
