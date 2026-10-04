@@ -21,6 +21,8 @@ import shutil
 import signal
 import subprocess
 
+from oblako import ports as port_registry
+
 # container status normalised across backends
 RUNNING = "running"
 STOPPED = "stopped"
@@ -178,11 +180,19 @@ class DockerBackend(ContainerBackend):
                     r"0\.0\.0\.0:(\d+)", msg
                 )
                 port = m.group(1) if m else "?"
+                registry = port_registry.name_of(int(port)) if port.isdigit() else None
+                move = (
+                    f" Or move oblako's service to a free port: set "
+                    f"OBLAKO_PORT_{registry}=<port> in every shell that runs oblako, "
+                    f"then rerun `oblako configure`."
+                    if registry
+                    else ""
+                )
                 raise PortInUseError(
                     f"Can't start '{name}': host port {port} is already in use. "
                     f"Another container or process holds it — find it with "
                     f"`docker ps --filter publish={port}` (often a stale oblako "
-                    f"container) and stop/remove it, then retry."
+                    f"container) and stop/remove it, then retry.{move}"
                 ) from e
             raise
 
@@ -475,7 +485,7 @@ class AppleContainerBackend(ContainerBackend):
 
     def __init__(self):
         """Locate the `container` binary (PATH, then the Homebrew locations)."""
-        self._bin = shutil.which("container") or next(
+        found = shutil.which("container") or next(
             (
                 p
                 for p in (
@@ -486,11 +496,12 @@ class AppleContainerBackend(ContainerBackend):
             ),
             None,
         )
-        if not self._bin:
+        if not found:
             raise RuntimeError(
                 "Apple `container` CLI not found — install it with "
                 "`brew install container` (needs macOS 26+)."
             )
+        self._bin: str = found
 
     def _cli(self, *args, check=True):
         return subprocess.run(

@@ -4,6 +4,10 @@
 System**, the same components as the real AWS Console, at
 <http://localhost:8000>. It's a read-and-act view over everything that's running.
 
+It listens on `127.0.0.1`, so only your own machine can open it: it has no login,
+and its Notebook page runs Python against your services. `--host` makes it listen
+elsewhere, with a warning; do that only on a network you trust.
+
 ## Pages
 
 - **Services**: status overview of all running services.

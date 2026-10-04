@@ -84,6 +84,31 @@ oblako down s3vectors
 
 (Code that uses oblako's Python API starts these engines on demand.)
 
+### When a port is taken
+
+Every service has a fixed port (`oblako/ports.py`), so code and profiles can rely on
+it. If another program already holds one, a local PostgreSQL on 5432 for example,
+`oblako up` stops with an error that names the port. Stop the other program, or
+move oblako's service with `OBLAKO_PORT_<NAME>`, where `<NAME>` is the port's name
+in `oblako/ports.py`:
+
+```bash
+export OBLAKO_PORT_RDS_PG=5433   # in your shell profile, so every oblako command sees it
+oblako up rds
+oblako configure                 # rewrites the profile's endpoints with the new port
+```
+
+Every oblako process reads the variable, so the service, the engines and the
+profile agree. An unknown name or a value that is not a port fails at once.
+
+### Network exposure
+
+`oblako dashboard` and `oblako notebook` listen on `127.0.0.1` only: neither has a
+login, and both can run code against your services. The service containers, however,
+publish their ports on all of your machine's network interfaces (Docker's default),
+with oblako's fixed local credentials. Use oblako on a trusted network, or block its
+ports in your firewall.
+
 ## CLI reference
 
 | Command | Description |
@@ -92,7 +117,7 @@ oblako down s3vectors
 | `oblako down [service]` | Stop all services (or a specific one) |
 | `oblako status` | Show service status |
 | `oblako configure [--profile NAME]` | Write an AWS profile (default `oblako`) whose per-service endpoints are oblako's, with generated keys, to `~/.aws/config` and `~/.aws/credentials`; then `export AWS_PROFILE=oblako` points boto3 and the AWS CLI at oblako, and another profile at AWS. Services without their own entry go to moto, so no call leaves oblako. Other profiles are left as they are |
-| `oblako dashboard [-p PORT]` | Start the web dashboard (default: 8000) |
+| `oblako dashboard [-p PORT] [--host ADDR]` | Start the web dashboard (default: 8000), on `127.0.0.1` only unless `--host` says otherwise; it has no login |
 | `oblako notebook [-p PORT]` | Launch JupyterLab wired to oblako (default: 8888) |
 | `oblako redshift-data [-p PORT]` | Start the Redshift Data API server (default: 8002) |
 | `oblako bedrock-runtime [-p PORT]` | Start the Bedrock Runtime server (default: 8004) |

@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from oblako.services.platform import Oblako
 from oblako.services import sfn_templates
-from oblako import config
+from oblako import config, ports
 
 oblako = Oblako()
 # The built React app lives alongside this module at oblako/dashboard/frontend/dist.
@@ -20,6 +20,7 @@ DIST_DIR = Path(__file__).parent / "frontend" / "dist"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Start the engines the dashboard's live features need, for the app's lifetime."""
     # Bring up the Lambda shim so Step Functions lambda:invoke tasks (e.g. the
     # Bedrock prompt-chain -> local model) can run live against oblako services.
     try:
@@ -1907,4 +1908,5 @@ if DIST_DIR.exists():
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # local only: the dashboard has no login, and it can read buckets and run SQL
+    uvicorn.run(app, host="127.0.0.1", port=ports.DASHBOARD)

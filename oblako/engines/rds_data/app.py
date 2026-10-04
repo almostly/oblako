@@ -20,6 +20,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from oblako import ports
+
 from .executor import RdsDataExecutor
 
 
@@ -114,7 +116,10 @@ def create_app(executor: RdsDataExecutor | None = None) -> Starlette:
     executor = executor or RdsDataExecutor(
         host=os.environ.get("OBLAKO_RDS_HOST", "localhost"),
         port=int(
-            os.environ.get("OBLAKO_RDS_PORT", "3306" if engine == "mysql" else "5432")
+            os.environ.get(
+                "OBLAKO_RDS_PORT",
+                str(ports.RDS_MYSQL if engine == "mysql" else ports.RDS_PG),
+            )
         ),
         user=os.environ.get("OBLAKO_RDS_USER", "oblako"),
         password=os.environ.get("OBLAKO_RDS_PASSWORD", "oblako"),

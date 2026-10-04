@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from oblako import ports
+
 from .appconfig import AppConfigService
 from .bedrock import BedrockService
 from .caddy import CaddyService
@@ -62,7 +64,7 @@ class Oblako:
         # is a container; the ALB is the elbv2 Caddy proxy). Shares the moto endpoint.
         self.ecs = EcsService(moto=self.moto, elbv2=self.elbv2)
         self.s3 = S3ProxyService()
-        self.dynamodb = DynamoDBService(host_port=8001)
+        self.dynamodb = DynamoDBService(host_port=ports.DYNAMODB)
         self.kinesis = KinesisService()
         # Iceberg REST catalog backed by S3Proxy. On AWS this is "S3 Tables"
         # (boto3.client("s3tables")) — same shape, same Iceberg under the hood.

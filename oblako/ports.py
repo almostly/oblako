@@ -59,3 +59,31 @@ MLFLOW = 5050
 CADDY = 80
 DASHBOARD = 8000
 NOTEBOOK = 8888
+
+
+# Overrides: OBLAKO_PORT_<NAME>=<port> moves one service off its default port, such as
+# RDS_PG when a local PostgreSQL already holds 5432. Every oblako process reads the same
+# variable at import, so `oblako up`, `oblako configure` (which writes the profile's
+# endpoints) and the engines agree; set it in your shell profile to keep it.
+def _apply_overrides() -> None:
+    import os
+
+    names = {k for k, v in globals().items() if k.isupper() and isinstance(v, int)}
+    for var, value in os.environ.items():
+        if not var.startswith("OBLAKO_PORT_"):
+            continue
+        name = var.removeprefix("OBLAKO_PORT_")
+        if name not in names:
+            known = ", ".join(sorted(names))
+            raise ValueError(f"{var}: no port named {name} (known: {known})")
+        if not value.isdigit() or not 0 < int(value) < 65536:
+            raise ValueError(f"{var}={value!r} is not a port number")
+        globals()[name] = int(value)
+
+
+def name_of(port: int) -> str | None:
+    """Return the registry name of a host port, for messages (``5432`` -> ``RDS_PG``)."""
+    return next((k for k, v in globals().items() if k.isupper() and v == port), None)
+
+
+_apply_overrides()
