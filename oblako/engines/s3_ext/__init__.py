@@ -11,6 +11,9 @@ except the ones this engine answers:
   returned (not enforced; S3Proxy has no IAM)
 - ``?notification`` on a bucket: event notifications to Lambda / SQS / SNS /
   EventBridge, fired for the writes nginx logs (see ``notifications``)
+- CreateBucket: in us-east-1 S3 answers 200 for a bucket you already own (a
+  legacy behavior); S3Proxy answers 409 BucketAlreadyOwnedByYou, passed on
+  elsewhere
 - requests carrying ``x-amz-tagging`` (PutObject / CreateMultipartUpload with
   ``Tagging=``) or ``x-amz-copy-source`` (CopyObject, which copies or replaces
   tags): forwarded to S3Proxy without the tagging header, then the tags are
@@ -385,6 +388,23 @@ def create_app(store: Store | None = None) -> Starlette:
         headers = {k: v for k, v in resp.headers.items() if k.lower() not in _HOP}
         return Response(resp.content, status_code=resp.status_code, headers=headers)
 
+    async def create_bucket(request, client, bucket):
+        """CreateBucket, answering for an owned bucket as S3 in us-east-1 does.
+
+        In us-east-1 (no LocationConstraint) S3 answers 200 for a bucket the caller
+        already owns, a legacy behavior other Regions don't share; S3Proxy answers
+        409 BucketAlreadyOwnedByYou everywhere.
+        """
+        resp = await forward(client, request, set())
+        in_us_east_1 = b"LocationConstraint" not in await request.body()
+        if (
+            resp.status_code == 409
+            and b"BucketAlreadyOwnedByYou" in resp.content
+            and in_us_east_1
+        ):
+            return Response(status_code=200, headers={"Location": f"/{bucket}"})
+        return relay(resp)
+
     async def object_tagging(request, client, bucket, key):
         resource = f"/{bucket}/{key}"
         if request.method == "GET":
@@ -628,6 +648,8 @@ def create_app(store: Store | None = None) -> Starlette:
         async with httpx.AsyncClient(timeout=None) as client:
             if not bucket:
                 return relay(await forward(client, request, set()))
+            if request.method == "PUT" and not key and not q:
+                return await create_bucket(request, client, bucket)
             if "tagging" in q:
                 if key:
                     return await object_tagging(request, client, bucket, key)

@@ -400,3 +400,15 @@ def test_object_created_invokes_a_lambda_that_writes_back(s3, bucket):
     finally:
         lam.delete_function(FunctionName=name)
         iam.delete_role(RoleName=name)
+
+
+def test_create_bucket_you_own_succeeds_in_us_east_1(s3):
+    """S3 in us-east-1 answers 200 for a bucket you already own; elsewhere 409."""
+    name = f"owned-{uuid.uuid4().hex[:8]}"
+    s3.create_bucket(Bucket=name)
+    s3.create_bucket(Bucket=name)  # us-east-1: no error, as on S3
+    with pytest.raises(s3.exceptions.BucketAlreadyOwnedByYou):
+        s3.create_bucket(
+            Bucket=name, CreateBucketConfiguration={"LocationConstraint": "eu-west-1"}
+        )
+    s3.delete_bucket(Bucket=name)
