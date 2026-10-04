@@ -57,7 +57,8 @@ ENDPOINTS = {
     "AWS_ENDPOINT_URL_KMS": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_CLOUDWATCH_LOGS": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_CLOUDWATCH": _local(ports.MOTO),
-    "AWS_ENDPOINT_URL_EVENTBRIDGE": _local(ports.MOTO),
+    # the proxy over moto that fires scheduled rules and Redshift Data targets
+    "AWS_ENDPOINT_URL_EVENTBRIDGE": _local(ports.EVENTBRIDGE),
     "AWS_ENDPOINT_URL_ECR": _local(ports.MOTO),
     "AWS_ENDPOINT_URL_ECS": _local(ports.ECS_CONTROL),
     "AWS_ENDPOINT_URL_EKS": _local(ports.MOTO),

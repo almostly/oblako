@@ -47,6 +47,20 @@ class MotoService(Service):
         )
         self.host_port = host_port
 
+    def start(self) -> None:
+        """Start moto, then the EventBridge proxy in front of it.
+
+        moto serves EventBridge's API and delivers PutEvents to SQS, SNS and
+        Lambda, but it never fires scheduled rules or runs Redshift Data targets
+        (the scheduled-query path); the proxy adds both. It is oblako's
+        EventBridge endpoint, so a rule created through it runs.
+        """
+        from oblako.engines import host
+
+        super().start()
+        if self.host_port == ports.MOTO:
+            host.start("eventbridge")
+
     @property
     def endpoint_url(self) -> str:
         """Return the Moto server endpoint URL."""
