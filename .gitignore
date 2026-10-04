@@ -48,3 +48,6 @@ oblako-welcome.ipynb
 
 # SageMaker SDK local-mode working dirs (ModelTrainer local_container_root)
 .sm-local/
+
+# Sphinx output (CI builds it for the docs site)
+docs/_build/
