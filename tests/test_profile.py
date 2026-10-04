@@ -6,7 +6,7 @@ import boto3
 import pytest
 
 from oblako import ports
-from oblako.profile import write_profile
+from oblako.profile import ProfileDowngradeError, write_profile
 
 
 @pytest.fixture
@@ -72,3 +72,26 @@ def test_unlisted_services_go_to_moto_not_aws(aws_files):
     for service in ("ec2", "cloudtrail", "route53"):
         client = session.client(service)
         assert client.meta.endpoint_url == f"http://localhost:{ports.MOTO}", service
+
+
+def test_an_older_oblako_does_not_drop_newer_settings(aws_files):
+    """A profile with settings this oblako wouldn't write is left alone, unless forced."""
+    config, _ = aws_files
+    write_profile()
+    # what a newer oblako might have added: a setting and a service endpoint
+    text = config.read_text()
+    text = text.replace(
+        "[profile oblako]\n", "[profile oblako]\nsigv4a_signing_region_set = *\n"
+    )
+    text = text.replace(
+        "[services oblako]\n",
+        "[services oblako]\nnewservice =\n    endpoint_url = http://localhost:9999\n",
+    )
+    config.write_text(text)
+    with pytest.raises(
+        ProfileDowngradeError, match="newservice, sigv4a_signing_region_set"
+    ):
+        write_profile()
+    assert "newservice" in config.read_text()  # untouched
+    write_profile(force=True)
+    assert "newservice" not in config.read_text()

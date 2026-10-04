@@ -87,8 +87,34 @@ def _existing_keys(path: Path, name: str) -> tuple[str, str] | None:
     return (key, secret) if key and secret else None
 
 
-def write_profile(name: str = "oblako") -> dict[str, str]:
-    """Write the oblako profile and its credentials; return what was written where."""
+class ProfileDowngradeError(RuntimeError):
+    """Writing the profile would drop settings a newer oblako wrote there."""
+
+
+def _section_keys(path: Path, header: str) -> set[str]:
+    """Return the top-level keys of one ``[header]`` section (none if absent)."""
+    if not path.exists():
+        return set()
+    match = re.search(
+        rf"^\[{re.escape(header)}\]\n((?:(?!\[).*\n?)*)", path.read_text(), re.MULTILINE
+    )
+    if match is None:
+        return set()
+    return set(re.findall(r"^([A-Za-z_][\w-]*)\s*=", match.group(1), re.MULTILINE))
+
+
+def _keys_of(body: str) -> set[str]:
+    """Return the top-level keys of a section body this module writes."""
+    return set(re.findall(r"^([A-Za-z_][\w-]*)\s*=", body, re.MULTILINE))
+
+
+def write_profile(name: str = "oblako", force: bool = False) -> dict[str, str]:
+    """Write the oblako profile and its credentials; return what was written where.
+
+    Refuses (``ProfileDowngradeError``) when the profile has settings or service
+    endpoints this oblako would not write, as when an older oblako or branch runs
+    after a newer one wrote the profile; ``force`` writes it anyway.
+    """
     endpoints = "".join(
         f"{service} =\n    endpoint_url = {url}\n"
         for service, url in sorted(service_endpoints().items())
@@ -104,6 +130,17 @@ def write_profile(name: str = "oblako") -> dict[str, str]:
         "s3 =\n"
         "    addressing_style = path\n"
     )
+    if not force:
+        dropped = sorted(
+            (_section_keys(config_path(), f"profile {name}") - _keys_of(profile))
+            | (_section_keys(config_path(), f"services {name}") - _keys_of(endpoints))
+        )
+        if dropped:
+            raise ProfileDowngradeError(
+                f"the {name} profile has settings this oblako would drop: "
+                f"{', '.join(dropped)}. A newer oblako probably wrote it; run "
+                "configure from that one, or pass --force to write this one's"
+            )
     _replace_sections(
         config_path(), {f"profile {name}": profile, f"services {name}": endpoints}
     )
