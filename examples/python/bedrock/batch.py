@@ -35,13 +35,14 @@ for obj in s3.list_objects_v2(Bucket="bedrock-batch-in", Prefix="input/").get(
 ):
     s3.delete_object(Bucket="bedrock-batch-in", Key=obj["Key"])
 
-prompts = ["Name one primary color.", "What is 2+2?", "Say hello in French."]
+prompts = ["Name one primary color.", "What is 2+2?", "Name the capital of France."]
 records = [
     {
         "recordId": f"r{i}",
         "modelInput": {
             "anthropic_version": "bedrock-2023-05-31",
             "max_tokens": 32,
+            "temperature": 0,
             "messages": [{"role": "user", "content": prompt}],
         },
     }

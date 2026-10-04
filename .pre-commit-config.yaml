@@ -26,5 +26,5 @@ repos:
     rev: v1.47.1
     hooks:
       - id: cfn-lint
-        # the only tracked CloudFormation/SAM template (build artifacts are gitignored)
-        files: ^examples/sam/template\.yaml$
+        # the tracked CloudFormation/SAM templates (build artifacts are gitignored)
+        files: ^examples/python/(sam/template|ecs/infra/ecs-fargate-alb)\.yaml$
