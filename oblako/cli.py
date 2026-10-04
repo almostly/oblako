@@ -17,7 +17,7 @@ import argparse
 import importlib.util
 import sys
 
-from oblako import ports
+from oblako import banner, ports
 from oblako.engines import host
 from oblako.services.backends import PortInUseError
 from oblako.services.platform import Oblako
@@ -52,6 +52,8 @@ def cmd_up(args):
         )
         return
     _check_docker()
+    if not args.service:
+        banner.show()
     oblako = Oblako()
     if args.service:
         svc = _get_service(oblako, args.service)
@@ -501,6 +503,7 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
     if not args.command:
+        banner.show()
         parser.print_help()
         sys.exit(1)
     args.func(args)
