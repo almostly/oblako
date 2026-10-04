@@ -251,6 +251,40 @@ def rewrite_merge(sql: str) -> str:
     return _command(f"pg_oblako.iceberg_merge({_literal(sql)})")
 
 
+# Redshift's auto-mounted Data Catalog: awsdatacatalog.<glue database>.<table>
+_AWSDATACATALOG = re.compile(
+    rf"(?i)\bawsdatacatalog\s*\.\s*(?P<db>{_IDENT})\s*\.\s*(?P<table>{_IDENT})"
+)
+
+
+def mount_schema(database: str) -> str:
+    """Return the schema an ``awsdatacatalog`` database is mounted as."""
+    return f"awsdatacatalog.{database}"
+
+
+def rewrite_awsdatacatalog(sql: str) -> tuple[str, set[str]]:
+    """Rewrite ``awsdatacatalog.<db>.<table>`` to its mounted schema.
+
+    PostgreSQL reads a three-part name as another database; the proxy mounts each
+    Glue database named this way as the external schema ``"awsdatacatalog.<db>"``
+    (in the client's database, before the statement runs) and the name becomes
+    ``"awsdatacatalog.<db>".<table>``. Returns the SQL and the databases named.
+    Only code is rewritten, never a string literal.
+    """
+    found: set[str] = set()
+
+    def repl(m: re.Match) -> str:
+        db = split_name(m.group("db"))[0]
+        found.add(db)
+        return f"{_quote(mount_schema(db))}.{m.group('table')}"
+
+    parts = re.split(r"('(?:[^']|'')*')", sql)
+    out = "".join(
+        p if p.startswith("'") else _AWSDATACATALOG.sub(repl, p) for p in parts
+    )
+    return out, found
+
+
 def has_iceberg_ddl(sql: str) -> bool:
     """Cheap test for statements ``rewrite_iceberg`` may change."""
     s = sql.lstrip().lower()
@@ -1088,6 +1122,62 @@ def _alter_table(plpy, name: str, action: str) -> str:
 # MERGE
 # -----------------------------------------------------------------------------------------------
 _TARGET_ALIAS = re.compile(r"\s+(?:as\s+)?(?!using\b)([A-Za-z_][\w$]*)", re.IGNORECASE)
+_SOURCE_ALIAS = re.compile(rf"^\s*(?:as\s+)?({_IDENT})\s*$", re.IGNORECASE)
+
+
+def _top_level_word(text: str, word: str, start: int = 0) -> int:
+    """Index of ``word`` at parenthesis depth 0, outside quotes, or -1."""
+    depth, i = 0, start
+    pattern = re.compile(rf"(?i)\b{word}\b")
+    while i < len(text):
+        ch = text[i]
+        if ch in "'\"":
+            end = text.find(ch, i + 1)
+            while end != -1 and end + 1 < len(text) and text[end + 1] == ch:
+                end = text.find(ch, end + 2)
+            i = len(text) if end == -1 else end + 1
+            continue
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif (
+            depth == 0
+            and pattern.match(text, i)
+            and (i == 0 or not text[i - 1].isalnum())
+        ):
+            return i
+        i += 1
+    return -1
+
+
+def _merge_source(rest: str) -> tuple[str, str, str, str] | None:
+    """Split a MERGE after its target into (target alias part, source, alias, tail).
+
+    ``source`` is a ``SELECT`` for the USING relation or subquery; ``tail`` starts
+    at ``ON``. None when the statement doesn't have that shape.
+    """
+    using = _top_level_word(rest, "using")
+    on = _top_level_word(rest, "on", using + 5) if using >= 0 else -1
+    if using < 0 or on < 0:
+        return None
+    head, src, tail = rest[:using], rest[using + 5 : on].strip(), rest[on:]
+    if src.startswith("("):
+        end = _balanced(src, 0)
+        if end == -1:
+            return None
+        query, alias_text = src[1 : end - 1], src[end:]
+    else:
+        m = re.match(rf"({_NAME})(.*)$", src, re.DOTALL)
+        if m is None:
+            return None
+        query, alias_text = f"SELECT * FROM {m.group(1)}", m.group(2)
+        if not alias_text.strip():
+            alias_text = split_name(m.group(1))[-1]
+    am = _SOURCE_ALIAS.match(alias_text)
+    if am is None:
+        return None
+    return head, query, am.group(1), tail
 
 
 def _merge(plpy, stmt: str) -> str:
@@ -1128,6 +1218,15 @@ def _merge(plpy, stmt: str) -> str:
     for col in _not_null_columns(plpy, stage):
         plpy.execute(f"ALTER TABLE {copy} ALTER COLUMN {_quote(col)} SET NOT NULL")
     rest = m.group("rest")
+    # the source is copied too, so the MERGE touches local temporary tables
+    # only: a Citus cluster can't MERGE a distributed source into a local target
+    parts = _merge_source(rest)
+    if parts is None:
+        _fail(plpy, "MERGE INTO ... USING <table or (subquery) alias> ON ...")
+    head, query, alias, tail = parts
+    source = f"oblako_merge_{n}_s"
+    plpy.execute(f"CREATE TEMP TABLE {source} AS {query}")
+    rest = f"{head}USING pg_temp.{source} AS {alias} {tail}"
     # the target keeps its name inside the statement (ON orders.id = s.id)
     target = f"pg_temp.{copy}"
     if not _TARGET_ALIAS.match(rest):
@@ -1148,7 +1247,7 @@ def _merge(plpy, stmt: str) -> str:
         f"INSERT INTO {stage} SELECT 'D', statement_timestamp(), * FROM {gone}"
     )
     plpy.execute(f"INSERT INTO {stage} SELECT 'I', statement_timestamp(), * FROM {new}")
-    plpy.execute(f"DROP TABLE {copy}, {gone}, {new}")
+    plpy.execute(f"DROP TABLE {copy}, {gone}, {new}, {source}")
     return "MERGE"
 
 

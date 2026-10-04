@@ -384,17 +384,27 @@ DROP TABLE lake.orders;  -- removes the catalog entry; the files stay
   and attributes are refused. Errors carry Redshift's own messages, checked
   against Redshift Serverless.
 - `SELECT` scans the table, so joins with local tables are plain SQL. `INSERT`,
-  `UPDATE` and `DELETE` work from any client, parameterized statements included.
-  An insert appends; an update or delete rewrites the table's data files.
+  `UPDATE` and `DELETE` work from any client, parameterized statements included;
+  `MERGE` works too, written without bind parameters. An insert appends; any other
+  write rewrites the table's data files.
 - Each write commits as one Iceberg snapshot when its transaction commits, and
   `ROLLBACK` writes nothing. As on Redshift, a transaction takes one Iceberg write.
+- `ALTER TABLE` renames, adds and drops columns, widens a column's type (`int` to
+  `bigint`, `real` to `double precision`, a decimal's precision), sets
+  `TABLE PROPERTIES ('compression_type'=...)`, and evolves the partition spec with
+  `ADD`, `DROP` and `REPLACE PARTITION FIELD`. These change metadata only.
+- Redshift's auto-mounted catalog works without `CREATE EXTERNAL SCHEMA`:
+  `SELECT * FROM awsdatacatalog.sales.orders` reaches Glue database `sales`, which
+  oblako mounts as the schema `"awsdatacatalog.sales"` on first use.
+- DDL completes as a command, with no result rows, as on Redshift.
 - `svv_external_schemas`, `svv_external_tables` and `svv_external_columns` list
   the external schemas and their tables.
 - Not yet: Iceberg v3 tables (`'format-version'='3'`, which Redshift Serverless
-  also refused when this was checked) and column `DEFAULT` values, `MERGE` and `ALTER TABLE` on Iceberg tables, the `awsdatacatalog` and
-  `s3tablescatalog` three-part names, and nested Iceberg types in writes. A table
-  another engine creates after `CREATE EXTERNAL SCHEMA` appears once you run
-  `CREATE EXTERNAL SCHEMA IF NOT EXISTS` again.
+  also refused when this was checked) and column `DEFAULT` values, S3 table
+  buckets (`"<bucket>@s3tablescatalog"` names), and nested Iceberg types in
+  writes. A table another engine creates after `CREATE EXTERNAL SCHEMA` appears
+  once you run `CREATE EXTERNAL SCHEMA IF NOT EXISTS` again (an `awsdatacatalog`
+  name picks it up by itself).
 
 **Limitations**
 
