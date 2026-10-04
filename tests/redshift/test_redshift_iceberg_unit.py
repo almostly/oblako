@@ -101,10 +101,16 @@ def test_bad_partition_specs(spec):
 
 
 def test_properties():
-    assert _mod.parse_properties("'format-version'='3', 'compression_type'='GZIP'") == {
-        "format-version": "3",
+    assert _mod.parse_properties("'format-version'='2', 'compression_type'='GZIP'") == {
+        "format-version": "2",
         "compression_type": "gzip",
     }
-    for bad in ("'format-version'='1'", "'compression_type'='lz4'", "'owner'='x'"):
+    bad_ones = (
+        "'format-version'='1'",
+        "'format-version'='3'",  # refused by Redshift Serverless too (2026-10)
+        "'compression_type'='lz4'",
+        "'owner'='x'",
+    )
+    for bad in bad_ones:
         with pytest.raises(ValueError):
             _mod.parse_properties(bad)
