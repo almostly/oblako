@@ -17,6 +17,7 @@ stack without touching a warehouse already on 5439).
 import gzip
 import json
 import os
+import uuid
 
 import boto3
 import psycopg2
@@ -94,7 +95,7 @@ def test_unload_then_copy_roundtrip(conn, s3):
     )
     cur.execute(
         "UNLOAD ('SELECT * FROM cu_src ORDER BY id') TO 's3://rs-bridge-test/dump/' "
-        "IAM_ROLE 'arn:x' FORMAT AS PARQUET"
+        "ALLOWOVERWRITE IAM_ROLE 'arn:x' FORMAT AS PARQUET"
     )
     objs = s3.list_objects_v2(Bucket=BUCKET, Prefix="dump/").get("Contents", [])
     assert objs, "UNLOAD wrote no S3 objects"
@@ -134,7 +135,7 @@ def test_extended_protocol_via_redshift_connector(s3):
         cur.execute("INSERT INTO cu_ext VALUES (1,10),(2,20)")
         cur.execute(
             "UNLOAD ('SELECT * FROM cu_ext ORDER BY id') TO 's3://rs-bridge-test/ext/' "
-            "IAM_ROLE 'x' FORMAT AS PARQUET"
+            "ALLOWOVERWRITE IAM_ROLE 'x' FORMAT AS PARQUET"
         )
         cur.execute("DROP TABLE IF EXISTS cu_ext2")
         cur.execute("CREATE TABLE cu_ext2 (id int, k int)")
@@ -160,7 +161,7 @@ def test_temp_table_batch_unload(conn, s3):
     cur.execute(
         "CREATE TEMPORARY TABLE _cu_t AS (SELECT * FROM cu_base); "
         "UNLOAD ('SELECT * FROM _cu_t') TO 's3://rs-bridge-test/tmp/' "
-        "IAM_ROLE 'x' FORMAT AS PARQUET"
+        "ALLOWOVERWRITE IAM_ROLE 'x' FORMAT AS PARQUET"
     )
     objs = s3.list_objects_v2(Bucket=BUCKET, Prefix="tmp/").get("Contents", [])
     assert objs, "temp-table UNLOAD wrote no S3 objects"
@@ -175,7 +176,7 @@ def test_csv_unload_and_copy_roundtrip(conn, s3):
     cur.execute("INSERT INTO cu_csv_src VALUES (1,'alice',1.5),(2,'bob',2.5)")
     cur.execute(
         "UNLOAD ('SELECT * FROM cu_csv_src ORDER BY id') TO 's3://rs-bridge-test/csv/' "
-        "IAM_ROLE 'x' FORMAT AS CSV HEADER"
+        "ALLOWOVERWRITE IAM_ROLE 'x' FORMAT AS CSV HEADER"
     )
     objs = s3.list_objects_v2(Bucket=BUCKET, Prefix="csv/").get("Contents", [])
     assert objs, "CSV UNLOAD wrote no S3 objects"
@@ -356,3 +357,35 @@ def test_json_copy_gzip(conn, s3):
     cur.execute("SELECT a, b FROM cu_json_gz")
     assert cur.fetchall() == [(7, 8)]
     cur.execute("DROP TABLE cu_json_gz")
+
+
+def test_unload_into_a_non_empty_prefix_fails_as_on_redshift(conn, s3):
+    """Without ALLOWOVERWRITE or CLEANPATH, a second UNLOAD is refused."""
+    prefix = f"guard-{uuid.uuid4().hex[:6]}/"
+    cur = conn.cursor()
+    unload = f"UNLOAD ('SELECT 1 AS x') TO 's3://{BUCKET}/{prefix}' IAM_ROLE 'x'"
+    cur.execute(unload + " FORMAT AS PARQUET")
+    with pytest.raises(
+        psycopg2.Error, match="Specified unload destination on S3 is not empty"
+    ):
+        cur.execute(unload + " FORMAT AS PARQUET")
+    cur.execute(unload + " ALLOWOVERWRITE FORMAT AS PARQUET")
+    # CLEANPATH removes what was there first, a stray file included
+    s3.put_object(Bucket=BUCKET, Key=f"{prefix}stale.csv", Body=b"old")
+    cur.execute(unload + " CLEANPATH FORMAT AS PARQUET")
+    keys = [
+        o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=prefix)["Contents"]
+    ]
+    assert keys == [f"{prefix}0000_part_00.parquet"]
+
+
+def test_unload_files_are_named_after_the_prefix_as_written(conn, s3):
+    """TO 's3://b/venue_' writes venue_0000_part_00, as Redshift names it."""
+    stem = f"venue-{uuid.uuid4().hex[:6]}_"
+    conn.cursor().execute(
+        f"UNLOAD ('SELECT 1 AS x') TO 's3://{BUCKET}/{stem}' IAM_ROLE 'x' CSV"
+    )
+    keys = [
+        o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=stem)["Contents"]
+    ]
+    assert keys == [f"{stem}0000_part_00.csv"]

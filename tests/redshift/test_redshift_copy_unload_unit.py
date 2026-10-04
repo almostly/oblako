@@ -288,3 +288,16 @@ def test_json_rows_gzip():
     ]
     # auto-detect gzip without the token
     assert _mod._json_rows(_FakePlpy(), s3, "bkt", ["k"], ["a"], "auto", None) == [[1]]
+
+
+def test_unload_overwrite_options():
+    plain = _mod.parse_unload("UNLOAD ('SELECT 1') TO 's3://b/p/' IAM_ROLE 'x'")
+    assert not plain.allowoverwrite and not plain.cleanpath
+    over = _mod.parse_unload(
+        "UNLOAD ('SELECT 1') TO 's3://b/p/' IAM_ROLE 'x' ALLOWOVERWRITE"
+    )
+    assert over.allowoverwrite and over.options()["allowoverwrite"]
+    clean = _mod.parse_unload(
+        "UNLOAD ('SELECT 1') TO 's3://b/p/' IAM_ROLE 'x' cleanpath"
+    )
+    assert clean.cleanpath and not clean.allowoverwrite
