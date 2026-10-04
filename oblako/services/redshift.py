@@ -240,12 +240,27 @@ class RedshiftService(Service):
         )
 
     def server_cert(self) -> str | None:
-        """Return the proxy's TLS cert (PEM): this machine's, created if missing.
+        """Return the proxy's TLS cert (PEM).
 
-        Every Redshift container mounts it, the single-node engine and the nodes
-        of a multi-node cluster alike, so ``oblako trust`` works before anything
-        runs and covers them all.
+        oblako's containers, the single-node engine and every node of a multi-node
+        cluster, mount this machine's cert (``ensure_cert``), so ``oblako trust``
+        works before anything runs and covers them all. A container started by
+        ``docker compose`` makes its own, so a running compose ``redshift`` or
+        ``redshift-coordinator`` container's cert comes first.
         """
+        try:
+            containers = self.client.containers.list(
+                filters={"label": "com.docker.compose.service"}
+            )
+        except Exception:  # no Docker, or a backend without labels
+            containers = []
+        for container in containers:
+            service = container.labels.get("com.docker.compose.service")
+            if service not in ("redshift", "redshift-coordinator"):
+                continue
+            code, out = container.exec_run(["cat", SSL_CERT_PATH])
+            if code == 0:
+                return out.decode()
         return (ensure_cert() / "server.crt").read_text()
 
     def trust_cert(self, python_exe: str | None = None) -> str:
