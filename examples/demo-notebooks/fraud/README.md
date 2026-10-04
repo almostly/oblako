@@ -5,21 +5,21 @@ Two notebooks:
 
 | | What it does |
 |---|---|
-| `01_kinesis_transaction_stream.ipynb` | Reads transactions from a CSV and `put_record`s them onto a Kinesis stream (`TransactionsStream`) — the "simulator" half of real-time fraud detection. |
+| `01_kinesis_transaction_stream.ipynb` | Generates synthetic card transactions (`frauddata.py`, in the Kaggle dataset's shape), `put_record`s them onto a Kinesis stream (`TransactionsStream`) and reads them back as a consumer would: the "simulator" half of real-time fraud detection. |
 | `02_linear_learner_training.ipynb` | Builds a bring-your-own-container **linear SVM** (hinge loss + balanced classes, the same model as the managed `LinearLearner`), trains it with the SDK v3 `ModelTrainer` in **local mode** (`Mode.LOCAL_CONTAINER`), evaluates precision/recall on held-out transactions, and stores the model in oblako's S3Proxy. No AWS account. |
 
 ## Running against oblako
 
 Both notebooks use real boto3 / SageMaker SDK calls. To point them at oblako:
 
-**Kinesis** (notebook 01): set `AWS_ENDPOINT_URL_KINESIS` before constructing the
-client, or pass `endpoint_url` explicitly:
+**Kinesis** (notebook 01): the notebook takes its client from oblako, which points
+at the local Kinesis on `:4567`. With `export AWS_PROFILE=oblako` (see `oblako
+configure`), a plain `boto3.client("kinesis")` reaches the same place:
 
 ```python
-import os, boto3
-os.environ["AWS_ENDPOINT_URL_KINESIS"] = "http://localhost:4567"  # KinesisService
-kinesis = boto3.client("kinesis", aws_access_key_id="test",
-                       aws_secret_access_key="test", region_name="us-east-1")
+from oblako.services import KinesisService
+
+kinesis = KinesisService().get_client()  # on AWS: boto3.client("kinesis")
 kinesis.create_stream(StreamName="TransactionsStream", ShardCount=1)
 ```
 
@@ -47,5 +47,5 @@ trainer.train(input_data_config=[InputData(channel_name="train", data_source=str
 ```
 
 S3 paths in either notebook should point at S3Proxy
-(`AWS_ENDPOINT_URL_S3=http://localhost:9000` and path-style addressing — see
+(`AWS_ENDPOINT_URL_S3=http://localhost:9000` and path-style addressing; see
 `oblako/notebook.py`'s `make_env` for the full env recipe).
