@@ -482,3 +482,31 @@ def test_partition_expressions(expression, row, expected):
 def test_partition_expressions_rejected(bad):
     with pytest.raises(ValueError):
         compile_expression(bad, {})
+
+
+def test_connections_crud(call):
+    """Glue connections: what awswrangler's connect(connection=...) reads."""
+    props = {
+        "JDBC_CONNECTION_URL": "jdbc:redshift://localhost:5439/dev",
+        "USERNAME": "admin",
+        "PASSWORD": "secret",
+    }
+    conn_input = {"Name": "rs", "ConnectionType": "JDBC", "ConnectionProperties": props}
+    assert call("CreateConnection", {"ConnectionInput": conn_input})[0] == 200
+    status, body = call("CreateConnection", {"ConnectionInput": conn_input})
+    assert status == 400 and body["__type"] == "AlreadyExistsException"
+    _, body = call("GetConnection", {"Name": "rs"})
+    assert body["Connection"]["ConnectionProperties"]["PASSWORD"] == "secret"
+    assert "CreationTime" in body["Connection"]
+    _, body = call("GetConnection", {"Name": "rs", "HidePassword": True})
+    assert "PASSWORD" not in body["Connection"]["ConnectionProperties"]
+    call(
+        "UpdateConnection",
+        {"Name": "rs", "ConnectionInput": {**conn_input, "Description": "warehouse"}},
+    )
+    _, body = call("GetConnections", {"Filter": {"ConnectionType": "JDBC"}})
+    assert [c["Description"] for c in body["ConnectionList"]] == ["warehouse"]
+    _, body = call("BatchDeleteConnection", {"ConnectionNameList": ["rs", "nope"]})
+    assert body["Succeeded"] == ["rs"] and "nope" in body["Errors"]
+    status, body = call("GetConnection", {"Name": "rs"})
+    assert status == 400 and body["__type"] == "EntityNotFoundException"

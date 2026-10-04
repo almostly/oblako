@@ -292,6 +292,81 @@ def _delete_database(body):
 
 
 # ---------------------------------------------------------------------------
+# Connections: what a job or a client (awswrangler's connect(connection=...))
+# reads to reach a database, e.g. a JDBC URL with a user and password
+# ---------------------------------------------------------------------------
+def _connection(name: str, hide_password: bool) -> dict:
+    conn = _store().connection(name)
+    if conn is None:
+        raise _not_found(f"Connection {name} not found.")
+    if hide_password:
+        props = dict(conn.get("ConnectionProperties") or {})
+        props.pop("PASSWORD", None)
+        conn = {**conn, "ConnectionProperties": props}
+    return conn
+
+
+@_action("AWSGlue.CreateConnection")
+def _create_connection(body):
+    conn_input = dict(body["ConnectionInput"])
+    name = conn_input["Name"]
+    if _store().connection(name) is not None:
+        raise GlueError("AlreadyExistsException", f"Connection {name} already exists.")
+    _store().put_connection(name, conn_input)
+    return {"CreateConnectionStatus": "READY"}
+
+
+@_action("AWSGlue.GetConnection")
+def _get_connection(body):
+    return {"Connection": _connection(body["Name"], body.get("HidePassword", False))}
+
+
+@_action("AWSGlue.GetConnections")
+def _get_connections(body):
+    flt = body.get("Filter") or {}
+    hide = body.get("HidePassword", False)
+    conns = [_connection(n, hide) for n in _store().connections()]
+    if flt.get("ConnectionType"):
+        conns = [c for c in conns if c.get("ConnectionType") == flt["ConnectionType"]]
+    if flt.get("MatchCriteria"):
+        wanted = set(flt["MatchCriteria"])
+        conns = [c for c in conns if wanted <= set(c.get("MatchCriteria") or [])]
+    page, more = _page(conns, body, 100)
+    return {"ConnectionList": page, **more}
+
+
+@_action("AWSGlue.UpdateConnection")
+def _update_connection(body):
+    name = body["Name"]
+    _connection(name, False)
+    _store().put_connection(name, {**body["ConnectionInput"], "Name": name})
+    return {}
+
+
+@_action("AWSGlue.DeleteConnection")
+def _delete_connection(body):
+    name = body["ConnectionName"]
+    _connection(name, False)
+    _store().delete_connection(name)
+    return {}
+
+
+@_action("AWSGlue.BatchDeleteConnection")
+def _batch_delete_connection(body):
+    gone, errors = [], {}
+    for name in body.get("ConnectionNameList") or []:
+        if _store().connection(name) is None:
+            errors[name] = {
+                "ErrorCode": "EntityNotFoundException",
+                "ErrorMessage": f"Connection {name} not found.",
+            }
+        else:
+            _store().delete_connection(name)
+            gone.append(name)
+    return {"Succeeded": gone, "Errors": errors}
+
+
+# ---------------------------------------------------------------------------
 # Tables
 # ---------------------------------------------------------------------------
 def _table(db: str, name: str) -> dict | None:
