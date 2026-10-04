@@ -67,6 +67,8 @@ def test_run_port_conflict_gives_friendly_error(monkeypatch):
             user=None,
         )
     assert "5439" in str(exc.value) and "already in use" in str(exc.value)
+    # and it names the override that moves oblako's service instead
+    assert "OBLAKO_PORT_REDSHIFT_PG=<port>" in str(exc.value)
 
 
 def test_build_k8s_manifests():

@@ -102,3 +102,12 @@ def test_port_in_use_is_a_message_not_a_trace(platform, capsys):
         up("opensearch")
     assert exit_.value.code == 1
     assert capsys.readouterr().out == ("Error: host port 9200 is already in use\n")
+
+
+def test_dashboard_listens_on_this_machine_only_by_default():
+    # the dashboard has no login, and it can read buckets and run SQL
+    from oblako import cli
+
+    assert cli.build_parser().parse_args(["dashboard"]).host == "127.0.0.1"
+    wide = cli.build_parser().parse_args(["dashboard", "--host", "0.0.0.0"])
+    assert wide.host == "0.0.0.0"

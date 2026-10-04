@@ -7,12 +7,13 @@ Unlike redshift-data, rds-data is synchronous (ExecuteStatement returns results
 directly) and supports transactions.
 """
 
+import importlib
 import json
-import os
 
 import boto3
 import pytest
 
+from oblako import ports
 from oblako.engines.rds_data import start_in_thread
 from oblako.engines.rds_data.executor import RdsDataExecutor
 from tests.ports import free_port
@@ -32,7 +33,7 @@ TX_ARN = {k: ARN[k] for k in ("resourceArn", "secretArn", "database")}
 def data():
     executor = RdsDataExecutor(
         host="localhost",
-        port=int(os.environ.get("OBLAKO_TEST_RDS_PORT", "5432")),
+        port=ports.RDS_PG,  # OBLAKO_PORT_RDS_PG moves it when 5432 is taken
         user="oblako",
         password="oblako",
         database="oblako",
@@ -111,11 +112,11 @@ def test_transaction_rollback(data, table):
 
 def _mysql_available() -> bool:
     try:
-        import pymysql
-
+        # an optional dependency (the mysql extra), as in the engine's executor
+        pymysql = importlib.import_module("pymysql")
         conn = pymysql.connect(
             host="localhost",
-            port=3306,
+            port=ports.RDS_MYSQL,
             user="oblako",
             password="oblako",
             database="oblako",

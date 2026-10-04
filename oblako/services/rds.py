@@ -46,14 +46,14 @@ _ENGINES: dict[str, _EngineSpec] = {
     "postgres": {
         "image": POSTGRES_IMAGE,
         "container_port": 5432,
-        "default_host_port": 5432,
+        "default_host_port": ports.RDS_PG,
         "data_dir": "/var/lib/postgresql/data",
         "volume": "oblako-rds-data",
     },
     "mysql": {
         "image": "mysql:8.0",
         "container_port": 3306,
-        "default_host_port": 3306,
+        "default_host_port": ports.RDS_MYSQL,
         "data_dir": "/var/lib/mysql",
         "volume": "oblako-rds-mysql-data",
     },

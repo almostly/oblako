@@ -156,6 +156,12 @@ def cmd_dashboard(args):
     import webbrowser
 
     port = args.port or ports.DASHBOARD
+    if args.host != "127.0.0.1":
+        # the dashboard has no login, and it can read buckets and run SQL
+        print(
+            f"Warning: the dashboard will listen on {args.host}, so other machines "
+            "can reach it without a login."
+        )
     print(f"Starting oblako dashboard on http://localhost:{port}")
     webbrowser.open(f"http://localhost:{port}")
     subprocess.call(
@@ -165,7 +171,7 @@ def cmd_dashboard(args):
             "uvicorn",
             "oblako.dashboard.api:app",
             "--host",
-            "0.0.0.0",
+            args.host,
             "--port",
             str(port),
         ]
@@ -365,8 +371,8 @@ def _get_service(oblako: Oblako, name: str):
 # -----------------------------------------------------------------------------------------------
 # Entry Point
 # -----------------------------------------------------------------------------------------------
-def main():
-    """Parse arguments and dispatch to the appropriate command handler."""
+def build_parser() -> argparse.ArgumentParser:
+    """Build the command-line parser, with every subcommand and its options."""
     parser = argparse.ArgumentParser(prog="oblako", description="Local AWS platform")
     sub = parser.add_subparsers(dest="command")
 
@@ -407,7 +413,13 @@ def main():
 
     p_dash = sub.add_parser("dashboard", help="Start the web dashboard")
     p_dash.add_argument(
-        "-p", "--port", type=int, default=8000, help="Port (default: 8000)"
+        "-p", "--port", type=int, default=None, help="Port (default: 8000)"
+    )
+    p_dash.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Address to listen on (default: 127.0.0.1, this machine only; "
+        "the dashboard has no login)",
     )
     p_dash.set_defaults(func=cmd_dashboard)
 
@@ -481,6 +493,12 @@ def main():
     )
     p_ac.set_defaults(func=cmd_agentcore)
 
+    return parser
+
+
+def main():
+    """Parse arguments and dispatch to the appropriate command handler."""
+    parser = build_parser()
     args = parser.parse_args()
     if not args.command:
         parser.print_help()

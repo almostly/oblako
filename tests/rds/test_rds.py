@@ -7,19 +7,18 @@ Control plane (RDS instances + Aurora clusters) via boto3 'rds' against moto;
 data plane (real SQL) via psycopg2 against the postgres engine.
 """
 
-import os
-
 import boto3
 import psycopg2
 import pytest
 
+from oblako import ports
 from oblako.services import RdsService
 
 CREDS = dict(
     region_name="us-east-1", aws_access_key_id="test", aws_secret_access_key="test"
 )
-# override with OBLAKO_TEST_PG_PORT when 5432 is taken by another Postgres
-PG_PORT = int(os.environ.get("OBLAKO_TEST_PG_PORT", "5432"))
+# the engine's host port: OBLAKO_PORT_RDS_PG moves it when 5432 is taken
+PG_PORT = ports.RDS_PG
 PG = dict(
     host="localhost", port=PG_PORT, user="oblako", password="oblako", dbname="oblako"
 )
