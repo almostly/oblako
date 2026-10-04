@@ -1,4 +1,4 @@
-# SageMaker on oblako — credit-scoring modeling (CatBoost)
+# SageMaker on oblako: credit scoring (CatBoost)
 
 Three notebooks that run a SageMaker credit-scoring workflow **fully locally** against
 oblako, adapted from [`aws-samples/credit-risk-modeling-on-aws`](https://github.com/deburky/credit-risk-modeling-on-aws):
@@ -14,10 +14,10 @@ oblako, adapted from [`aws-samples/credit-risk-modeling-on-aws`](https://github.
 A **CatBoost** classifier over 7 numeric + 5 categorical application features
 (Application/Bureau scores, loan-to-income, residential status, …), predicting
 probability of default. At serving time the score comes from CatBoost's **native
-SHAP** values: `score = offset + factor·(-log_odds)` (higher score = better credit) —
+SHAP** values: `score = offset + factor·(-log_odds)` (higher score = better credit),
 the same scorecard the reference uses.
 
-## The container — `container/`
+## The container: `container/`
 
 One bring-your-own-container that both **trains** (`<image> train`) and **serves**
 (`<image> serve`): `src/train.py` fits CatBoost + writes the scorecard metadata;

@@ -23,6 +23,6 @@ Then open the notebook. It sets `AWS_ENDPOINT_URL_*` to point Feast's boto3 clie
 at oblako; point them back at AWS and the same notebook runs against managed
 Redshift + DynamoDB unchanged.
 
-> Feast's Redshift offline store never speaks the wire protocol — it uses the
+> Feast's Redshift offline store never speaks the wire protocol: it uses the
 > `redshift-data` API plus S3 `UNLOAD`/`COPY`. oblako serves both, and the COPY/UNLOAD
 > bridge lives in the redshift image, so awswrangler and dbt get it too.
