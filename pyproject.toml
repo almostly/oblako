@@ -1,17 +1,26 @@
 [project]
 name = "oblako"
 version = "0.1.0"
-description = "Local AWS platform: Bedrock, SageMaker, Step Functions, and more, no cloud required"
+description = "AWS data services on your machine: real engines behind the AWS APIs, for unmodified boto3 code"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Almostly" }]
+keywords = ["aws", "local", "s3", "redshift", "athena", "glue", "dynamodb", "boto3"]
 classifiers = [
     "Development Status :: 4 - Beta",
+    "Environment :: Console",
     "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
-    "Topic :: Software Development :: Testing :: Mocking",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+    "Topic :: Software Development :: Testing",
 ]
 dependencies = [
     "httpx>=0.27",
@@ -91,6 +100,7 @@ oblako = "oblako.cli:main"
 Homepage = "https://oblako-sdk.almostly.ai/"
 Documentation = "https://oblako-sdk.almostly.ai/"
 Repository = "https://github.com/almostly/oblako"
+Issues = "https://github.com/almostly/oblako/issues"
 
 [tool.ruff]
 target-version = "py310"
@@ -173,6 +183,15 @@ message = "Short description of the change:"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+# the source archive is public on PyPI: no local tool settings, no generated docs
+exclude = [
+    "/.claude",
+    "/docs/_build",
+    "/.tmp",
+    "/oblako/dashboard/frontend/node_modules",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["oblako"]

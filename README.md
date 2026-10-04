@@ -68,17 +68,22 @@ Full per-service guides, limitations, and the Python API are in the
 
 ## Quick start
 
-```bash
-pip install oblako
+oblako needs Python 3.10 or later and a container runtime: Docker (the default),
+or Podman, Colima or Apple's `container` (see below). Most services run as
+containers; a few API engines run in Python without one.
 
-oblako up                  # start all services
-oblako pull qwen2.5:0.5b   # pull a model into the Bedrock (Ollama) engine
+```bash
+pip install oblako         # or: uv tool install oblako
+
+oblako up                  # start the services
+oblako configure           # write the `oblako` AWS profile
+export AWS_PROFILE=oblako  # point boto3 and the AWS CLI at oblako
 oblako dashboard           # web UI at http://localhost:8000
 ```
 
-Your unmodified `boto3` code then hits the local services, no `endpoint_url`,
-no config (the dashboard, notebook, and env helpers wire `AWS_ENDPOINT_URL_*`
-for you).
+Your unmodified `boto3` code and the AWS CLI then reach the local services, with
+no `endpoint_url` in the code. Select another AWS profile and the same code talks
+to AWS.
 
 ## CLI
 
@@ -88,7 +93,7 @@ for you).
 | `oblako down [service]` | Stop all services (or a specific one) |
 | `oblako status` | Show service status |
 | `oblako configure [--profile NAME]` | Write an AWS profile (default `oblako`) whose per-service endpoints are oblako's, with generated keys, to `~/.aws/config` and `~/.aws/credentials`; then `export AWS_PROFILE=oblako` points boto3 and the AWS CLI at oblako, and another profile at AWS. Services without their own entry go to moto, so no call leaves oblako. Other profiles are left as they are |
-| `oblako dashboard [-p PORT]` | Start the web dashboard (default: 8000) |
+| `oblako dashboard [-p PORT] [--host ADDR]` | Start the web dashboard (default: 8000), on `127.0.0.1` only unless `--host` says otherwise; it has no login |
 | `oblako notebook [-p PORT]` | Launch JupyterLab wired to oblako (default: 8888) |
 | `oblako redshift-data [-p PORT]` | Start the Redshift Data API server (default: 8002) |
 | `oblako bedrock-runtime [-p PORT]` | Start the Bedrock Runtime server (default: 8004) |
@@ -124,4 +129,4 @@ hosted editions are offered separately under their own terms.
 oblako orchestrates third-party engines (moto, S3Proxy, Trino, Postgres, and
 others) that it pulls at runtime rather than redistributing; each keeps its own
 license. Two of them (Citus, DynamoDB Local) carry terms that matter for
-commercial use, inventoried in [`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md).
+commercial use, inventoried in [`THIRD_PARTY_LICENSES.md`](https://github.com/almostly/oblako/blob/main/THIRD_PARTY_LICENSES.md).
