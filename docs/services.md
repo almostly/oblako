@@ -343,6 +343,16 @@ SELECT sandbox.credit_predict(f1::float8, f2::float8) FROM sandbox.tape;
 - Features must be numeric (cast them in the `SELECT`); `PREPROCESSORS` other
   than `'none'` are rejected. The model lives in the database it was created in.
 
+**SUPER.** `SUPER` columns take JSON (`json_parse`, nested Parquet through
+`COPY`) and PartiQL navigation, with dots or brackets: `data.customer.name`,
+`data.items[0].sku`, `data['customer']['name']`. A navigated value selected on its
+own comes back as Redshift sends SUPER to a driver, as JSON text: `"Ann"`, with its
+quotes, in a column named after the last step (`name`). Cast it for the plain value
+(`data.customer.name::varchar`). Inside an expression or a filter, a navigated value
+is text, so `WHERE data.type = 'premium'` works; compare numbers through a cast
+(`data.age::int > 30`). A whole `SUPER` column, or a bracket path, comes back as
+PostgreSQL `jsonb`, which some drivers decode into Python values.
+
 **Apache Iceberg tables.** Redshift creates and writes Iceberg tables registered
 in the Glue Data Catalog, and so does redshift-local. oblako's Glue catalog keeps
 Iceberg tables in its Iceberg REST catalog on S3Proxy, so a table Redshift writes
