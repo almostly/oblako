@@ -80,8 +80,14 @@ http {{
         "~^/v20180820/" 1;
         default 0;
     }}
-    map "$s3_control:$ext_query:$http_x_amz_tagging:$http_x_amz_copy_source" $s3_upstream {{
-        "0:0::" s3proxy;
+    # CreateBucket (PUT on a bucket, no key, no query): S3 in us-east-1 answers
+    # 200 for a bucket you already own, S3Proxy 409 BucketAlreadyOwnedByYou
+    map "$request_method:$s3_path" $create_bucket {{
+        "~^PUT:/[^/?]+/?$" 1;
+        default 0;
+    }}
+    map "$s3_control:$ext_query:$create_bucket:$http_x_amz_tagging:$http_x_amz_copy_source" $s3_upstream {{
+        "0:0:0::" s3proxy;
         default s3ext;
     }}
     # virtual-hosted addressing (bucket.localhost:9000/key), the AWS SDKs'
