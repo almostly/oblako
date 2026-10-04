@@ -58,6 +58,8 @@ _QUOTE = re.compile(r"(?i)\bquote\s+(?:as\s+)?'([^']*)'")
 _IGNOREHEADER = re.compile(r"(?i)\bignoreheader\s+(?:as\s+)?(\d+)")
 _HEADER = re.compile(r"(?i)\bheader\b")
 _ADDQUOTES = re.compile(r"(?i)\baddquotes\b")
+_ALLOWOVERWRITE = re.compile(r"(?i)\ballowoverwrite\b")
+_CLEANPATH = re.compile(r"(?i)\bcleanpath\b")
 
 
 def has_s3_copy_or_unload(sql: str) -> bool:
@@ -199,8 +201,9 @@ class UnloadCommand(BaseModel):
 
     Redshift defaults to ``PARALLEL ON`` (one part-file per slice); ``PARALLEL
     OFF`` writes one file. redshift-local is a single slice, so one part-file is a
-    correct result either way. ``PARALLEL`` / ``ALLOWOVERWRITE`` / ``MAXFILESIZE``
-    are accepted and ignored.
+    correct result either way. ``PARALLEL`` / ``MAXFILESIZE`` are accepted and
+    ignored. As on Redshift, UNLOAD into a prefix that already holds files fails
+    unless ``ALLOWOVERWRITE`` (overwrite) or ``CLEANPATH`` (remove them first).
     """
 
     query: str
@@ -211,6 +214,8 @@ class UnloadCommand(BaseModel):
     quote: str | None = None
     header: bool = False
     addquotes: bool = False
+    allowoverwrite: bool = False
+    cleanpath: bool = False
 
     @field_validator("fmt")
     @classmethod
@@ -225,6 +230,8 @@ class UnloadCommand(BaseModel):
             "quote": self.quote,
             "header": self.header,
             "addquotes": self.addquotes,
+            "allowoverwrite": self.allowoverwrite,
+            "cleanpath": self.cleanpath,
         }
 
 
@@ -282,6 +289,8 @@ def parse_unload(stmt: str) -> UnloadCommand | None:
         quote=quote.group(1) if quote else None,
         header=bool(_HEADER.search(opts)),
         addquotes=bool(_ADDQUOTES.search(opts)),
+        allowoverwrite=bool(_ALLOWOVERWRITE.search(opts)),
+        cleanpath=bool(_CLEANPATH.search(opts)),
     )
 
 
@@ -425,8 +434,20 @@ def do_unload(
     if fmt not in _SUPPORTED_FORMATS:
         plpy.error(f"unsupported UNLOAD format {fmt}; use PARQUET, CSV, or text")
     options = json.loads(opts) if opts else {}
-    bucket, key = _bucket_key(uri)
-    key = key.rstrip("/")
+    bucket, prefix = _bucket_key(uri)
+    # Redshift names the files after the prefix as written: TO 's3://b/venue_'
+    # writes venue_0000_part_00, TO 's3://b/out/' writes out/0000_part_00
+    s3 = s3_client()
+    existing = _s3_object_keys(s3, bucket, prefix)
+    if existing and options.get("cleanpath"):
+        for k in existing:
+            s3.delete_object(Bucket=bucket, Key=k)
+    elif existing and not options.get("allowoverwrite"):
+        plpy.error(
+            "Specified unload destination on S3 is not empty. Consider using a "
+            "different bucket / prefix, manually removing the target files in S3, "
+            "or using the ALLOWOVERWRITE option."
+        )
     res = plpy.execute(query)
     names = list(res.colnames())
     oids = list(res.coltypes())
@@ -467,7 +488,7 @@ def do_unload(
             )
         body, ext = sio.getvalue().encode("utf-8"), ".csv" if fmt == "CSV" else ""
 
-    s3_client().put_object(Bucket=bucket, Key=f"{key}/0000_part_00{ext}", Body=body)
+    s3.put_object(Bucket=bucket, Key=f"{prefix}0000_part_00{ext}", Body=body)
     return nrows
 
 
