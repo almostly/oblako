@@ -7,6 +7,7 @@ from .dynamodb import DynamoDBService
 from .ec2 import Ec2Service
 from .ecs import EcsService
 from .elbv2 import Elbv2Service
+from .kinesis import KinesisService
 from .moto import MotoService
 from .opensearch import OpenSearchService
 from .platform import Oblako
@@ -24,6 +25,7 @@ __all__ = [
     "Ec2Service",
     "EcsService",
     "Elbv2Service",
+    "KinesisService",
     "MotoService",
     "Service",
     "ServiceStatus",
