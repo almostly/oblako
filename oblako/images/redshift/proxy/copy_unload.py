@@ -34,11 +34,13 @@ lazily, only inside the execution functions.
 from __future__ import annotations
 
 import csv
+import decimal
 import datetime as _dt
 import io
 import json
 import os
 import re
+import urllib.parse
 
 from pydantic import BaseModel, field_validator
 
@@ -60,6 +62,10 @@ _HEADER = re.compile(r"(?i)\bheader\b")
 _ADDQUOTES = re.compile(r"(?i)\baddquotes\b")
 _ALLOWOVERWRITE = re.compile(r"(?i)\ballowoverwrite\b")
 _CLEANPATH = re.compile(r"(?i)\bcleanpath\b")
+_PARTITION_BY = re.compile(r"(?i)\bpartition\s+by\s*\(([^)]*)\)\s*(include\b)?")
+_MANIFEST = re.compile(r"(?i)\bmanifest\b(\s+verbose\b)?")
+_EXTENSION = re.compile(r"(?i)\bextension\s+'([^']*)'")
+_PARALLEL_OFF = re.compile(r"(?i)\bparallel\s+(?:off|false)\b")
 
 
 def has_s3_copy_or_unload(sql: str) -> bool:
@@ -201,9 +207,11 @@ class UnloadCommand(BaseModel):
 
     Redshift defaults to ``PARALLEL ON`` (one part-file per slice); ``PARALLEL
     OFF`` writes one file. redshift-local is a single slice, so one part-file is a
-    correct result either way. ``PARALLEL`` / ``MAXFILESIZE`` are accepted and
-    ignored. As on Redshift, UNLOAD into a prefix that already holds files fails
-    unless ``ALLOWOVERWRITE`` (overwrite) or ``CLEANPATH`` (remove them first).
+    correct result either way, named as Redshift names a parallel or serial
+    unload. ``MAXFILESIZE`` is accepted and ignored. As on Redshift, UNLOAD into a
+    prefix that already holds files fails unless ``ALLOWOVERWRITE`` (overwrite) or
+    ``CLEANPATH`` (remove them first); ``PARTITION BY`` writes Hive-style folders and
+    ``MANIFEST`` a JSON list of the files.
     """
 
     query: str
@@ -216,6 +224,13 @@ class UnloadCommand(BaseModel):
     addquotes: bool = False
     allowoverwrite: bool = False
     cleanpath: bool = False
+    partition_by: list[str] = []
+    include: bool = False
+    manifest: bool = False
+    verbose: bool = False
+    extension: str | None = None
+    compression: str | None = None
+    parallel: bool = True
 
     @field_validator("fmt")
     @classmethod
@@ -232,6 +247,13 @@ class UnloadCommand(BaseModel):
             "addquotes": self.addquotes,
             "allowoverwrite": self.allowoverwrite,
             "cleanpath": self.cleanpath,
+            "partition_by": self.partition_by,
+            "include": self.include,
+            "manifest": self.manifest,
+            "verbose": self.verbose,
+            "extension": self.extension,
+            "compression": self.compression,
+            "parallel": self.parallel,
         }
 
 
@@ -291,6 +313,15 @@ def parse_unload(stmt: str) -> UnloadCommand | None:
         addquotes=bool(_ADDQUOTES.search(opts)),
         allowoverwrite=bool(_ALLOWOVERWRITE.search(opts)),
         cleanpath=bool(_CLEANPATH.search(opts)),
+        partition_by=[c.strip().strip('"') for c in pb.group(1).split(",") if c.strip()]
+        if (pb := _PARTITION_BY.search(opts))
+        else [],
+        include=bool(pb and pb.group(2)),
+        manifest=bool(mf := _MANIFEST.search(opts)),
+        verbose=bool(mf and mf.group(1)),
+        extension=ex.group(1) if (ex := _EXTENSION.search(opts)) else None,
+        compression=cm.group(1).lower() if (cm := _COMPRESSION.search(opts)) else None,
+        parallel=not _PARALLEL_OFF.search(opts),
     )
 
 
@@ -422,51 +453,65 @@ def _s3_object_keys(s3, bucket: str, prefix: str) -> list[str]:
     ]
 
 
-def do_unload(
-    plpy, query: str, uri: str, fmt: str = "PARQUET", opts: str = "{}"
-) -> int:
-    """Run ``query`` and write its result to ``uri``. Returns the row count.
+_COMPRESSION_EXT = {"gzip": ".gz", "bzip2": ".bz2", "zstd": ".zst"}
+_HIVE_DEFAULT = "__HIVE_DEFAULT_PARTITION__"
 
-    Runs via SPI on the caller's session, so temp tables created earlier in the
-    same batch are visible. Called by the ``oblako_unload_to_s3`` plpython3u UDF.
+
+def _unload_extension(fmt: str, options: dict) -> str:
+    """Return the file extension Redshift gives an unloaded file.
+
+    EXTENSION when given; else ``.parquet`` for Parquet; else the compression's
+    (``.gz``/``.bz2``/``.zst``); else none (Redshift adds no ``.csv``).
     """
-    fmt = fmt.upper()
-    if fmt not in _SUPPORTED_FORMATS:
-        plpy.error(f"unsupported UNLOAD format {fmt}; use PARQUET, CSV, or text")
-    options = json.loads(opts) if opts else {}
-    bucket, prefix = _bucket_key(uri)
-    # Redshift names the files after the prefix as written: TO 's3://b/venue_'
-    # writes venue_0000_part_00, TO 's3://b/out/' writes out/0000_part_00
-    s3 = s3_client()
-    existing = _s3_object_keys(s3, bucket, prefix)
-    if existing and options.get("cleanpath"):
-        for k in existing:
-            s3.delete_object(Bucket=bucket, Key=k)
-    elif existing and not options.get("allowoverwrite"):
-        plpy.error(
-            "Specified unload destination on S3 is not empty. Consider using a "
-            "different bucket / prefix, manually removing the target files in S3, "
-            "or using the ALLOWOVERWRITE option."
-        )
-    res = plpy.execute(query)
-    names = list(res.colnames())
-    oids = list(res.coltypes())
-    nrows = res.nrows()
+    if options.get("extension"):
+        return "." + options["extension"].lstrip(".")
+    if fmt == "PARQUET":
+        return ".parquet"
+    return _COMPRESSION_EXT.get(options.get("compression") or "", "")
 
+
+def _partition_value(value) -> str:
+    """Return a partition folder's value, Hive style (NULL -> __HIVE_DEFAULT_PARTITION__)."""
+    if value is None:
+        return _HIVE_DEFAULT
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return urllib.parse.quote(str(value), safe="-_.:~ ")
+
+
+def _render(fmt: str, options: dict, names, rows, oids) -> bytes:
+    """Serialize rows (dicts) as Parquet, CSV/text or JSON lines."""
     if fmt == "PARQUET":
         import pyarrow as pa
         import pyarrow.parquet as pq
 
-        columns = {
-            name: [_from_pg(res[r][name], oids[i]) for r in range(nrows)]
-            for i, name in enumerate(names)
-        }
+        columns = {n: [_from_pg(r[n], oids[n]) for r in rows] for n in names}
         table = pa.table(columns) if names else pa.table({})
         buf = io.BytesIO()
         pq.write_table(
             table, buf, coerce_timestamps="us", allow_truncated_timestamps=True
         )
-        body, ext = buf.getvalue(), ".parquet"
+        return buf.getvalue()
+    if fmt == "JSON":
+        # NOTE: Redshift's docs say booleans are unloaded "as t or f"; JSON
+        # true/false here until checked on Redshift
+        def cell(value, oid):
+            value = _from_pg(value, oid)
+            if isinstance(value, _dt.date | _dt.time):
+                return (
+                    value.isoformat(sep=" ")
+                    if isinstance(value, _dt.datetime)
+                    else value.isoformat()
+                )
+            if isinstance(value, decimal.Decimal):
+                return float(value)
+            return value
+
+        lines = [
+            json.dumps({n: cell(r[n], oids[n]) for n in names}, ensure_ascii=False)
+            for r in rows
+        ]
+        body = ("\n".join(lines) + "\n").encode("utf-8") if lines else b""
     else:
         # CSV / default TEXT: delimited, plpython's text forms are already what we
         # want to write; None -> the NULL sentinel (default empty).
@@ -482,14 +527,129 @@ def do_unload(
         )
         if options.get("header"):
             writer.writerow(names)
-        for r in range(nrows):
+        for r in rows:
             writer.writerow(
-                [null_as if res[r][c] is None else _csv_cell(res[r][c]) for c in names]
+                [null_as if r[c] is None else _csv_cell(r[c]) for c in names]
             )
-        body, ext = sio.getvalue().encode("utf-8"), ".csv" if fmt == "CSV" else ""
+        body = sio.getvalue().encode("utf-8")
+    return _compress(body, options.get("compression"))
 
-    s3.put_object(Bucket=bucket, Key=f"{prefix}0000_part_00{ext}", Body=body)
-    return nrows
+
+def _compress(body: bytes, compression: str | None) -> bytes:
+    """Compress an unloaded text file as GZIP / BZIP2 / ZSTD asks."""
+    if compression == "gzip":
+        import gzip
+
+        return gzip.compress(body)
+    if compression == "bzip2":
+        import bz2
+
+        return bz2.compress(body)
+    if compression == "zstd":
+        import zstandard
+
+        return zstandard.ZstdCompressor().compress(body)
+    return body
+
+
+def do_unload(
+    plpy, query: str, uri: str, fmt: str = "PARQUET", opts: str = "{}"
+) -> int:
+    """Run ``query`` and write its result to ``uri``. Returns the row count.
+
+    Files are named as Redshift names them: ``<prefix>0000_part_00`` (``000`` with
+    PARALLEL OFF), plus ``.parquet`` for Parquet, the compression's extension, or
+    EXTENSION. PARTITION BY writes ``col=value/`` folders (without the partition
+    columns, unless INCLUDE); MANIFEST writes ``<prefix>manifest``.
+
+    Runs via SPI on the caller's session, so temp tables created earlier in the
+    same batch are visible. Called by the ``oblako_unload_to_s3`` plpython3u UDF.
+    """
+    fmt = fmt.upper()
+    if fmt not in _SUPPORTED_FORMATS:
+        plpy.error(f"unsupported UNLOAD format {fmt}; use PARQUET, CSV, JSON or text")
+    options = json.loads(opts) if opts else {}
+    if options.get("cleanpath") and options.get("allowoverwrite"):
+        plpy.error(
+            "You can't specify the CLEANPATH option with the ALLOWOVERWRITE option."
+        )
+    if fmt == "PARQUET" and options.get("compression"):
+        plpy.error("PARQUET can't be used with GZIP, BZIP2 or ZSTD")
+    bucket, prefix = _bucket_key(uri)
+    partition_by = options.get("partition_by") or []
+    if partition_by and prefix and not prefix.endswith("/"):
+        prefix += "/"  # as Redshift adds it with PARTITION BY
+    res = plpy.execute(query)
+    names = list(res.colnames())
+    oids = dict(zip(names, res.coltypes()))
+    rows = list(res)
+    missing = [c for c in partition_by if c not in names]
+    if missing:
+        plpy.error(f"PARTITION BY column {missing[0]} is not in the query's results")
+    stem = "000" if not options.get("parallel", True) else "0000_part_00"
+    ext = _unload_extension(fmt, options)
+    files: dict[str, list] = {}
+    for r in rows:
+        folder = "".join(f"{c}={_partition_value(r[c])}/" for c in partition_by)
+        files.setdefault(folder, []).append(r)
+    if not files and not partition_by and fmt != "JSON":
+        files[""] = []  # Redshift may write an empty file for zero rows
+    written = [f"{prefix}{folder}{stem}{ext}" for folder in files]
+    manifest_key = f"{prefix}manifest"
+    # Redshift refuses to overwrite unless ALLOWOVERWRITE; CLEANPATH clears first,
+    # with PARTITION BY only the folders that receive files
+    s3 = s3_client()
+    scopes = [f"{prefix}{folder}" for folder in files] if partition_by else [prefix]
+    existing = sorted(
+        {k for scope in scopes for k in _s3_object_keys(s3, bucket, scope)}
+    )
+    if options.get("manifest"):
+        existing += [
+            k for k in _s3_object_keys(s3, bucket, manifest_key) if k == manifest_key
+        ]
+    if existing and options.get("cleanpath"):
+        for k in existing:
+            s3.delete_object(Bucket=bucket, Key=k)
+    elif existing and not options.get("allowoverwrite"):
+        plpy.error(
+            "Specified unload destination on S3 is not empty. Consider using a "
+            "different bucket / prefix, manually removing the target files in S3, "
+            "or using the ALLOWOVERWRITE option."
+        )
+    keep = [n for n in names if n not in partition_by or options.get("include")]
+    entries: list[dict] = []
+    sizes: list[int] = []
+    for (folder, group), key in zip(files.items(), written):
+        body = _render(fmt, options, keep, group, oids)
+        s3.put_object(Bucket=bucket, Key=key, Body=body)
+        meta: dict[str, int] = {"content_length": len(body)}
+        if options.get("verbose"):
+            meta["record_count"] = len(group)
+        entries.append({"url": f"s3://{bucket}/{key}", "meta": meta})
+        sizes.append(len(body))
+    if options.get("manifest"):
+        manifest: dict = {"entries": entries}
+        if options.get("verbose"):
+            manifest["schema"] = {
+                "elements": [
+                    {"name": n, "type": {"base": _pg_type_name(plpy, oids[n])}}
+                    for n in keep
+                ]
+            }
+            manifest["meta"] = {
+                "content_length": sum(sizes),
+                "record_count": len(rows),
+            }
+            manifest["author"] = {"name": "Amazon Redshift", "version": "1.0.0"}
+        s3.put_object(
+            Bucket=bucket, Key=manifest_key, Body=json.dumps(manifest).encode("utf-8")
+        )
+    return len(rows)
+
+
+def _pg_type_name(plpy, oid: int) -> str:
+    """Return the type name for a manifest's schema (``integer``, ``character varying``)."""
+    return plpy.execute(f"SELECT format_type({int(oid)}, NULL) AS t")[0]["t"]
 
 
 def _csv_cell(value) -> str:

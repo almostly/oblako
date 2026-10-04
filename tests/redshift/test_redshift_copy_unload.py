@@ -176,7 +176,7 @@ def test_csv_unload_and_copy_roundtrip(conn, s3):
     cur.execute("INSERT INTO cu_csv_src VALUES (1,'alice',1.5),(2,'bob',2.5)")
     cur.execute(
         "UNLOAD ('SELECT * FROM cu_csv_src ORDER BY id') TO 's3://rs-bridge-test/csv/' "
-        "ALLOWOVERWRITE IAM_ROLE 'x' FORMAT AS CSV HEADER"
+        "CLEANPATH IAM_ROLE 'x' FORMAT AS CSV HEADER"
     )
     objs = s3.list_objects_v2(Bucket=BUCKET, Prefix="csv/").get("Contents", [])
     assert objs, "CSV UNLOAD wrote no S3 objects"
@@ -380,12 +380,69 @@ def test_unload_into_a_non_empty_prefix_fails_as_on_redshift(conn, s3):
 
 
 def test_unload_files_are_named_after_the_prefix_as_written(conn, s3):
-    """TO 's3://b/venue_' writes venue_0000_part_00, as Redshift names it."""
+    """TO 's3://b/venue_' writes venue_0000_part_00, as Redshift names it.
+
+    Redshift adds no extension to text or CSV (only .parquet, a compression's, or
+    EXTENSION's), and numbers a serial (PARALLEL OFF) unload 000.
+    """
     stem = f"venue-{uuid.uuid4().hex[:6]}_"
-    conn.cursor().execute(
-        f"UNLOAD ('SELECT 1 AS x') TO 's3://{BUCKET}/{stem}' IAM_ROLE 'x' CSV"
-    )
-    keys = [
+    cur = conn.cursor()
+    unload = f"UNLOAD ('SELECT 1 AS x') TO 's3://{BUCKET}/{stem}"
+    cur.execute(unload + "csv_' IAM_ROLE 'x' CSV")
+    cur.execute(unload + "gz_' IAM_ROLE 'x' CSV GZIP")
+    cur.execute(unload + "ext_' IAM_ROLE 'x' CSV EXTENSION 'csv'")
+    cur.execute(unload + "serial_' IAM_ROLE 'x' FORMAT AS PARQUET PARALLEL OFF")
+    keys = sorted(
         o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=stem)["Contents"]
+    )
+    assert keys == [
+        f"{stem}csv_0000_part_00",
+        f"{stem}ext_0000_part_00.csv",
+        f"{stem}gz_0000_part_00.gz",
+        f"{stem}serial_000.parquet",
     ]
-    assert keys == [f"{stem}0000_part_00.csv"]
+    body = s3.get_object(Bucket=BUCKET, Key=f"{stem}gz_0000_part_00.gz")["Body"].read()
+    assert gzip.decompress(body) == b"1\n"
+
+
+def test_unload_partition_by_and_manifest(conn, s3):
+    """PARTITION BY writes Hive folders; MANIFEST lists every file it wrote."""
+    pq = pytest.importorskip("pyarrow.parquet")
+    import io
+
+    prefix = f"parts-{uuid.uuid4().hex[:6]}/"
+    conn.cursor().execute(
+        "UNLOAD ('SELECT * FROM (VALUES (1, ''a'', true), (2, ''b'', false), "
+        "(3, ''c'', NULL)) AS t(id, name, flag)') "
+        f"TO 's3://{BUCKET}/{prefix}' IAM_ROLE 'x' FORMAT AS PARQUET "
+        "PARTITION BY (flag) MANIFEST VERBOSE"
+    )
+    keys = sorted(
+        o["Key"] for o in s3.list_objects_v2(Bucket=BUCKET, Prefix=prefix)["Contents"]
+    )
+    assert keys == [
+        f"{prefix}flag=__HIVE_DEFAULT_PARTITION__/0000_part_00.parquet",
+        f"{prefix}flag=false/0000_part_00.parquet",
+        f"{prefix}flag=true/0000_part_00.parquet",
+        f"{prefix}manifest",
+    ]
+    manifest = json.loads(
+        s3.get_object(Bucket=BUCKET, Key=f"{prefix}manifest")["Body"].read()
+    )
+    assert len(manifest["entries"]) == 3
+    assert manifest["meta"]["record_count"] == 3
+    assert [e["name"] for e in manifest["schema"]["elements"]] == ["id", "name"]
+    assert manifest["author"]["name"] == "Amazon Redshift"
+    # without INCLUDE the partition column isn't in the files
+    body = s3.get_object(Bucket=BUCKET, Key=f"{prefix}flag=true/0000_part_00.parquet")
+    assert pq.read_table(io.BytesIO(body["Body"].read())).column_names == ["id", "name"]
+
+
+def test_unload_json_lines(conn, s3):
+    prefix = f"json-{uuid.uuid4().hex[:6]}/"
+    conn.cursor().execute(
+        "UNLOAD ('SELECT 1 AS id, ''a'' AS name, NULL::int AS n') "
+        f"TO 's3://{BUCKET}/{prefix}' IAM_ROLE 'x' FORMAT JSON"
+    )
+    body = s3.get_object(Bucket=BUCKET, Key=f"{prefix}0000_part_00")["Body"].read()
+    assert json.loads(body) == {"id": 1, "name": "a", "n": None}
