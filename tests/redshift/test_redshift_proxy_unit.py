@@ -76,13 +76,13 @@ def test_non_ddl_untouched():
     assert rewrite_sql(sql2) == sql2
 
 
-def test_varchar_max_becomes_text():
-    # dlt's redshift destination emits varchar(max); PostgreSQL has no (max)
+def test_varchar_max_is_varchar_65535():
+    # Redshift's VARCHAR(MAX) is VARCHAR(65535); PostgreSQL has no (max)
     out = rewrite_sql("CREATE TABLE t (id int, bio varchar(max))").lower()
-    assert "varchar(max)" not in out and " text" in out
+    assert "varchar(max)" not in out and "bio varchar(65535)" in out
     # also outside CREATE TABLE (e.g. ALTER TABLE) and the CHARACTER VARYING form
     alt = rewrite_sql("ALTER TABLE t ADD COLUMN note CHARACTER VARYING(MAX)").lower()
-    assert "max" not in alt and "text" in alt
+    assert "max" not in alt and "varchar(65535)" in alt
 
 
 def test_redshift_catalog_columns_rewritten():

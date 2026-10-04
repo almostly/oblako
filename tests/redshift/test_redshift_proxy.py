@@ -66,15 +66,21 @@ def test_physical_ddl_is_accepted():
 
 @pytest.mark.skipif(not _proxy_present(), reason="redshift image without the DDL proxy")
 def test_varchar_max_ddl_is_accepted():
-    # dlt's redshift destination emits varchar(max); the proxy maps it to text
+    # dlt's redshift destination emits varchar(max); as on Redshift it is
+    # varchar(65535): reflected so, and a longer value is refused
     c = psycopg2.connect(**RS_CONFIG)
     c.autocommit = True
     cur = c.cursor()
     cur.execute("DROP TABLE IF EXISTS proxy_vmax")
     cur.execute("CREATE TABLE proxy_vmax (id int, payload varchar(max))")
-    cur.execute("INSERT INTO proxy_vmax VALUES (1, %s)", ("x" * 70000,))
-    cur.execute("SELECT length(payload) FROM proxy_vmax")
-    assert cur.fetchone()[0] == 70000
+    cur.execute(
+        "SELECT format_type(atttypid, atttypmod) FROM pg_attribute "
+        "WHERE attrelid = 'proxy_vmax'::regclass AND attname = 'payload'"
+    )
+    assert cur.fetchone()[0] == "character varying(65535)"
+    cur.execute("INSERT INTO proxy_vmax VALUES (1, %s)", ("x" * 65535,))
+    with pytest.raises(psycopg2.errors.StringDataRightTruncation):
+        cur.execute("INSERT INTO proxy_vmax VALUES (2, %s)", ("x" * 65536,))
     cur.execute("DROP TABLE proxy_vmax")
     c.close()
 

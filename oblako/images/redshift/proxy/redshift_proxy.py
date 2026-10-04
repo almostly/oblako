@@ -170,10 +170,11 @@ _STRIPPERS = [
     re.compile(r"(?i)\bbackup\s+(?:yes|no)"),
 ]
 
-# Redshift VARCHAR(MAX) / CHARACTER VARYING(MAX): PostgreSQL has no (MAX) length,
-# so map it to TEXT. Applied to any statement (CREATE/ALTER TABLE, casts), since
-# the token only appears in type declarations and never in valid PG. (dlt's
-# redshift destination emits this DDL.)
+# Redshift VARCHAR(MAX) / CHARACTER VARYING(MAX) is VARCHAR(65535), and Redshift
+# stores and reports it so; PostgreSQL has no (MAX) length, so the length is
+# spelled out. Applied to any statement (CREATE/ALTER TABLE, casts), since the
+# token only appears in type declarations and never in valid PG. (dlt's redshift
+# destination emits this DDL.)
 _VARCHAR_MAX = re.compile(r"(?i)\b(?:character\s+varying|varchar)\s*\(\s*max\s*\)")
 
 # Redshift CREATE USER ... CREATEUSER (a superuser-ish privilege) -> PostgreSQL
@@ -285,7 +286,7 @@ def _rewrite_catalog(sql: str) -> str:
 def rewrite_sql(sql: str) -> str:
     """Rewrite Redshift-only SQL PostgreSQL can't parse.
 
-    ``VARCHAR(MAX)`` -> ``text`` and ``PASSWORD DISABLE`` -> ``PASSWORD NULL``
+    ``VARCHAR(MAX)`` -> ``varchar(65535)`` and ``PASSWORD DISABLE`` -> ``PASSWORD NULL``
     (any statement); Redshift ML's CREATE/SHOW/DROP MODEL become calls to the
     in-engine Redshift ML functions (see ``redshift_ml``); bare datepart keywords (``DATEADD(month, ...)``) are quoted
     (see ``datepart``); Redshift-only pg_catalog columns
@@ -315,7 +316,7 @@ def rewrite_sql(sql: str) -> str:
         s = datepart.rewrite_dateparts(s)  # DATEADD(month, ..) -> ('month', ..)
     if integer_avg is not None:
         s = integer_avg.rewrite_avg(s)  # avg( -> pg_oblako.avg( (BIGINT for ints)
-    s = _VARCHAR_MAX.sub("text", s)
+    s = _VARCHAR_MAX.sub("varchar(65535)", s)
     s = _CREATEUSER.sub("SUPERUSER", s)
     s = _PASSWORD_DISABLE.sub("PASSWORD NULL", s)
     s = _PG_GROUP.sub(_PG_GROUP_SUB, s)

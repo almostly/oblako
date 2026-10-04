@@ -390,8 +390,8 @@ DROP TABLE lake.orders;  -- removes the catalog entry; the files stay
 
 - Redshift physical DDL (`DISTSTYLE`/`DISTKEY`/`SORTKEY`/`ENCODE`) is **accepted
   and ignored** (the bundled wire proxy strips it before the parser), and
-  `varchar(max)` is rewritten to `text`, so awswrangler `to_sql`, dbt physical
-  configs, and dlt's Redshift destination all work. It has no storage effect on
+  `varchar(max)` becomes `varchar(65535)`, as Redshift stores it, so awswrangler
+  `to_sql`, dbt physical configs, and dlt's Redshift destination all work. It has no storage effect on
   the PostgreSQL engine. Late-binding views and `VARBYTE` are still
   unsupported.
 - It's a row-store PostgreSQL, not columnar: no Redshift-style column compression
