@@ -103,11 +103,27 @@ profile agree. An unknown name or a value that is not a port fails at once.
 
 ### Network exposure
 
-`oblako dashboard` and `oblako notebook` listen on `127.0.0.1` only: neither has a
-login, and both can run code against your services. The service containers, however,
-publish their ports on all of your machine's network interfaces (Docker's default),
-with oblako's fixed local credentials. Use oblako on a trusted network, or block its
-ports in your firewall.
+oblako listens on your machine only. Its services use fixed local credentials, so
+their containers publish their ports on `127.0.0.1`, and `oblako dashboard` and
+`oblako notebook`, which have no login and can run code against your services,
+listen there too. Containers still reach each other through the host
+(`host.docker.internal`): Docker Desktop routes that to the host's loopback, and on
+other engines (native Linux Docker, Colima, Podman) the ports also listen on the
+docker bridge's gateway, an address internal to the machine.
+
+To share oblako with other machines on purpose, such as a server your team uses,
+set `OBLAKO_BIND_ADDRESS` (one address, or a comma-separated list) before `oblako
+up`, and keep that network trusted:
+
+```bash
+export OBLAKO_BIND_ADDRESS=0.0.0.0
+```
+
+Containers keep the addresses they were created with; `oblako down` and `oblako up`
+recreate them.
+
+If an Ollama already runs on port 11434, installed on your machine say, `oblako up`
+uses it instead of starting its own container, and `oblako down` leaves it alone.
 
 ## CLI reference
 

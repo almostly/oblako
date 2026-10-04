@@ -3,14 +3,14 @@ services:
   bedrock:
     image: ollama/ollama:latest
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
 
   opensearch:
     image: opensearchproject/opensearch:2
     ports:
-      - "9200:9200"
+      - "127.0.0.1:9200:9200"
     environment:
       - discovery.type=single-node
       - DISABLE_SECURITY_PLUGIN=true
@@ -27,7 +27,7 @@ services:
     image: public.ecr.aws/oblako/redshift-local:16
     build: ./oblako/images/redshift
     ports:
-      - "5439:5439"
+      - "127.0.0.1:5439:5439"
     environment:
       POSTGRES_USER: oblako
       POSTGRES_PASSWORD: oblako
@@ -55,7 +55,7 @@ services:
     image: public.ecr.aws/oblako/redshift-cluster:16
     build: ./oblako/images/redshift-cluster
     ports:
-      - "5439:5439"
+      - "127.0.0.1:5439:5439"
     environment:
       POSTGRES_USER: oblako
       POSTGRES_PASSWORD: oblako
@@ -97,7 +97,7 @@ services:
     # PostgreSQL 16 with pgvector, pinned; see oblako/services/rds.py.
     image: pgvector/pgvector@sha256:40d828eda66737aaacb934387a337babf1455ebd56e9bdd13fc08e211257c972
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     environment:
       POSTGRES_USER: oblako
       POSTGRES_PASSWORD: oblako
@@ -109,12 +109,12 @@ services:
   moto:
     image: motoserver/moto:latest
     ports:
-      - "5500:5000"
+      - "127.0.0.1:5500:5000"
 
   s3proxy:
     image: andrewgaul/s3proxy:s3proxy-4.1.1  # pinned: see oblako/services/s3proxy.py
     ports:
-      - "9000:80"
+      - "127.0.0.1:9000:80"
     environment:
       JCLOUDS_FILESYSTEM_BASEDIR: /data
       S3PROXY_AUTHORIZATION: none
@@ -129,7 +129,7 @@ services:
     working_dir: /home/dynamodblocal
     user: root
     ports:
-      - "8001:8000"
+      - "127.0.0.1:8001:8000"
     volumes:
       - dynamodb_data:/home/dynamodblocal/data
 
@@ -141,14 +141,14 @@ services:
       KPATH: /data
       SHARDLIMIT: "100"
     ports:
-      - "4567:4567"
+      - "127.0.0.1:4567:4567"
     volumes:
       - kinesis_data:/data
 
   stepfunctions:
     image: amazon/aws-stepfunctions-local:latest
     ports:
-      - "8083:8083"
+      - "127.0.0.1:8083:8083"
     environment:
       - LAMBDA_ENDPOINT=http://host.docker.internal:3001
 

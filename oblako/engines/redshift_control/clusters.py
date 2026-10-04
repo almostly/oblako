@@ -27,6 +27,7 @@ import time
 from pathlib import Path
 
 from oblako import ports
+from oblako.services.backends import publish
 
 STATE = Path.home() / ".oblako" / "redshift" / "clusters.json"
 NETWORK = "oblako-redshift"
@@ -211,7 +212,7 @@ def _run_node(client, network, cluster_id: str, record: dict, node: int | None):
         IMAGE,
         name=name,
         environment=environment,
-        ports=published,
+        ports=publish(published, client),
         volumes=volumes,
         extra_hosts={"host.docker.internal": "host-gateway"},
         labels={

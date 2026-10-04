@@ -28,6 +28,7 @@ from oblako import config, ports
 
 from .boto import BotoService, client
 from .moto import MotoService
+from .backends import publish
 
 TASK_LABEL = "oblako.ecs.task-arn"
 CLUSTER_LABEL = "oblako.ecs.cluster"
@@ -408,7 +409,7 @@ class EcsService(BotoService):
             detach=True,
             name=_container_name(task_id, cdef["name"]),
             environment=env,
-            ports=port_bindings or None,
+            ports=publish(port_bindings or None, client),
             extra_hosts={"host.docker.internal": "host-gateway"},
             labels=labels,
         )

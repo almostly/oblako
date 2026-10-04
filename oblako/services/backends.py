@@ -33,6 +33,66 @@ class PortInUseError(RuntimeError):
     """A host port a service needs is already held by another container/process."""
 
 
+# ---------------------------------------------------------------------------
+# Where published ports listen
+# ---------------------------------------------------------------------------
+def bind_addresses(client) -> list[str]:
+    """Return the host addresses oblako's containers publish their ports on.
+
+    Not every interface: the services use fixed local credentials, so they listen
+    on 127.0.0.1. Containers also call each other through the host
+    (host.docker.internal). Docker Desktop routes that to the host's loopback; other
+    engines (native Linux Docker, Colima, Podman) route it to the docker bridge's
+    gateway, which is internal to the machine, so the ports also listen there. If
+    the gateway cannot be found, the ports listen everywhere, as before, so nothing
+    breaks. OBLAKO_BIND_ADDRESS (one address or a comma-separated list, such as
+    0.0.0.0 on a server the whole team uses) overrides all of this.
+    """
+    chosen = os.environ.get("OBLAKO_BIND_ADDRESS")
+    if chosen:
+        return [a.strip() for a in chosen.split(",") if a.strip()]
+    cached = getattr(client, "_oblako_bind_addresses", None)  # one lookup per client
+    if cached:
+        return cached
+    try:
+        desktop = "Docker Desktop" in client.info().get("OperatingSystem", "")
+    except Exception:
+        desktop = False
+    if desktop:
+        found = ["127.0.0.1"]
+    else:
+        try:
+            ipam = client.networks.get("bridge").attrs["IPAM"]["Config"]
+            found = ["127.0.0.1", ipam[0]["Gateway"]]
+        except Exception:
+            found = ["0.0.0.0"]
+    try:
+        client._oblako_bind_addresses = found
+    except AttributeError:
+        pass  # a client that takes no attributes is asked again next time
+    return found
+
+
+def publish(ports: dict | None, client) -> dict | None:
+    """Turn ``{"5439/tcp": 5439}`` into Docker bindings on ``bind_addresses``.
+
+    A random host port (``None``) listens on 127.0.0.1 only: only the host calls
+    those, and each address would otherwise get a different random port.
+    """
+    if not ports:
+        return ports
+    addresses = bind_addresses(client)
+    out: dict = {}
+    for container_port, host_port in ports.items():
+        if host_port is None:
+            out[container_port] = ("127.0.0.1",)
+        elif isinstance(host_port, (tuple, list)):
+            out[container_port] = host_port  # already bound to an address
+        else:
+            out[container_port] = [(address, host_port) for address in addresses]
+    return out
+
+
 # Kubernetes backend: namespace + a registry of live `kubectl port-forward`
 # processes (so localhost:host_port reaches the in-cluster Service), keyed by name.
 K8S_NAMESPACE = os.environ.get("OBLAKO_K8S_NAMESPACE") or "oblako"
@@ -162,7 +222,7 @@ class DockerBackend(ContainerBackend):
                 image,
                 name=name,
                 detach=True,
-                ports=ports,
+                ports=publish(ports, self.client),
                 environment=environment,
                 volumes=volumes,
                 extra_hosts=extra_hosts,
@@ -176,8 +236,12 @@ class DockerBackend(ContainerBackend):
                 "port is already allocated" in msg
                 or "address already in use" in msg.lower()
             ):
-                m = re.search(r":(\d+) failed", msg) or re.search(
-                    r"0\.0\.0\.0:(\d+)", msg
+                # "Bind for 0.0.0.0:5439 failed", or with an address in the
+                # binding, "exposing port TCP 127.0.0.1:11434 -> ... bind: ..."
+                m = (
+                    re.search(r":(\d+) failed", msg)
+                    or re.search(r"exposing port \w+ [\d.:\[\]a-f]*?:(\d+) ", msg)
+                    or re.search(r"0\.0\.0\.0:(\d+)", msg)
                 )
                 port = m.group(1) if m else "?"
                 registry = port_registry.name_of(int(port)) if port.isdigit() else None
