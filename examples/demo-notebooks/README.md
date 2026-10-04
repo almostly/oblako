@@ -6,7 +6,7 @@ a starting point for your use case.
 
 | Case | What it shows | Folder |
 |---|---|---|
-| **Credit risk** (CatBoost scorecard) | BYOC container → SageMaker local training → endpoint → SageMaker Pipelines | [`credit-risk/`](./credit-risk) |
+| **Credit scoring** (CatBoost scorecard) | BYOC container → SageMaker local training → endpoint → SageMaker Pipelines | [`credit-scoring/`](./credit-scoring) |
 | **Fraud detection** (Linear Learner) | Real-time fraud — Kinesis transaction stream + built-in `LinearLearner` training/endpoint | [`fraud/`](./fraud) |
 | **Feast feature store** | Feast on redshift-local (offline) + DynamoDB Local (online): apply → historical features → materialize → serve | [`feast/`](./feast) |
 

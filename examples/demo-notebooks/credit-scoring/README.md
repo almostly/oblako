@@ -1,6 +1,6 @@
-# SageMaker on oblako — credit-risk modeling (CatBoost)
+# SageMaker on oblako — credit-scoring modeling (CatBoost)
 
-Three notebooks that run a SageMaker credit-risk workflow **fully locally** against
+Three notebooks that run a SageMaker credit-scoring workflow **fully locally** against
 oblako, adapted from [`aws-samples/credit-risk-modeling-on-aws`](https://github.com/deburky/credit-risk-modeling-on-aws):
 
 | Notebook | What it does | Reference |
