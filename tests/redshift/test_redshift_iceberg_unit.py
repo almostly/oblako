@@ -19,7 +19,11 @@ def test_external_schema_becomes_a_call():
         "CREATE EXTERNAL SCHEMA lake FROM DATA CATALOG DATABASE 'sales' "
         "IAM_ROLE default CREATE EXTERNAL DATABASE IF NOT EXISTS;"
     )
-    assert out.startswith("SELECT pg_oblako.create_external_schema(")
+    # a command with no result rows, as Redshift answers DDL
+    assert out.startswith(
+        "DO $oblako_ddl$ BEGIN PERFORM pg_oblako.create_external_schema("
+    )
+    assert out.endswith("; END $oblako_ddl$")
     assert "$ice$lake$ice$, $ice$sales$ice$, true, false" in out
 
 
@@ -114,3 +118,8 @@ def test_properties():
     for bad in bad_ones:
         with pytest.raises(ValueError):
             _mod.parse_properties(bad)
+
+
+def test_command_tag_never_collides_with_the_statement():
+    out = _mod._command("pg_oblako.f($ice$ $oblako_ddl$ $ice$)")
+    assert out.startswith("DO $oblako_ddl1$ ") and out.endswith(" $oblako_ddl1$")
