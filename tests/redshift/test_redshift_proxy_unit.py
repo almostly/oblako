@@ -8,6 +8,7 @@ _PATH = (
     pathlib.Path(__file__).parents[2] / "oblako/images/redshift/proxy/redshift_proxy.py"
 )
 _spec = importlib.util.spec_from_file_location("redshift_proxy", _PATH)
+assert _spec is not None and _spec.loader is not None
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 rewrite_sql = _mod.rewrite_sql
@@ -22,6 +23,16 @@ def test_strips_diststyle():
     assert _norm(rewrite_sql("CREATE TABLE t (id int) DISTSTYLE AUTO")) == (
         "CREATE TABLE t (id int)"
     )
+
+
+def test_strips_only_the_create_table_statements():
+    sql = (
+        "CREATE TABLE t (id int) DISTKEY(id); "
+        "SELECT a.attname AS distkey, 'x;y' AS encode FROM pg_attribute a"
+    )
+    first, rest = rewrite_sql(sql).split(";", 1)
+    assert "distkey" not in first.lower()
+    assert rest == " SELECT a.attname AS distkey, 'x;y' AS encode FROM pg_attribute a"
 
 
 def test_strips_all_physical_ddl():
@@ -203,25 +214,22 @@ def _param_status(key: bytes, value: bytes) -> bytes:
     return b"S" + struct.pack("!I", len(body) + 4) + body
 
 
-def test_server_version_parameter_status_rewritten():
+def test_server_version_parameter_status_rewritten(monkeypatch):
     # On the Citus variant the proxy presents Redshift's version to the client on
     # the wire (the engine keeps its real version so Citus works).
-    _mod.PROXY_SERVER_VERSION = "8.0.2"
-    try:
-        real = b"16.15 (Debian 16.15-1.pgdg12+2)"
-        out = _mod._rewrite_parameter_status(b"server_version\x00" + real + b"\x00")
-        # message frames correctly and carries the spoofed value
-        assert out[:1] == b"S"
-        assert struct.unpack("!I", out[1:5])[0] == len(out) - 1
-        assert out[5:] == b"server_version\x008.0.2\x00"
-        # a different ParameterStatus is passed through untouched
-        enc = b"server_encoding\x00UTF8\x00"
-        assert (
-            _mod._rewrite_parameter_status(enc)
-            == b"S" + struct.pack("!I", len(enc) + 4) + enc
-        )
-    finally:
-        _mod.PROXY_SERVER_VERSION = None
+    monkeypatch.setattr(_mod, "PROXY_SERVER_VERSION", "8.0.2")
+    real = b"16.15 (Debian 16.15-1.pgdg12+2)"
+    out = _mod._rewrite_parameter_status(b"server_version\x00" + real + b"\x00")
+    # message frames correctly and carries the spoofed value
+    assert out[:1] == b"S"
+    assert struct.unpack("!I", out[1:5])[0] == len(out) - 1
+    assert out[5:] == b"server_version\x008.0.2\x00"
+    # a different ParameterStatus is passed through untouched
+    enc = b"server_encoding\x00UTF8\x00"
+    assert (
+        _mod._rewrite_parameter_status(enc)
+        == b"S" + struct.pack("!I", len(enc) + 4) + enc
+    )
 
 
 # --- redtape / access-management compat (see tests/redshift/test_redshift_redtape.py) ---

@@ -147,6 +147,12 @@ SSL_CTX = _load_ssl_context()
 _CREATE_TABLE = re.compile(
     r"(?i)\bcreate\s+(?:(?:global|local)\s+)?(?:temp(?:orary)?\s+|unlogged\s+)?table\b"
 )
+# a statement that is a CREATE TABLE, after any leading comments
+_CREATE_TABLE_START = re.compile(
+    r"(?i)^(?:\s+|--[^\n]*\n|/\*.*?\*/)*create\s+(?:(?:global|local)\s+)?"
+    r"(?:temp(?:orary)?\s+|unlogged\s+)?table\b",
+    re.DOTALL,
+)
 _STRIPPERS = [
     re.compile(r"(?i)\bdiststyle\s+\w+"),
     re.compile(r"(?i)\bdistkey\s*(?:\([^)]*\))?"),
@@ -307,14 +313,36 @@ def rewrite_sql(sql: str) -> str:
         s = redshift_ml.rewrite_ml(s)  # CREATE/SHOW/DROP MODEL -> oblako_ml_* calls
     if not _CREATE_TABLE.search(s):
         return s
+    # only the CREATE TABLE statements of a multi-statement string: a SELECT beside
+    # one may name a column distkey or encoding
+    return "".join(
+        _strip_physical_ddl(stmt) if _CREATE_TABLE_START.match(stmt) else stmt
+        for stmt in _segments(s)
+    )
+
+
+def _strip_physical_ddl(stmt: str) -> str:
+    """Remove Redshift's storage clauses from one CREATE TABLE statement."""
     for pat in _STRIPPERS:
-        s = pat.sub(" ", s)
+        stmt = pat.sub(" ", stmt)
     # tidy the artifacts the removals leave behind (without touching literals)
-    s = re.sub(r" {2,}", " ", s)
-    s = re.sub(r"\s+,", ",", s)
-    s = re.sub(r",\s*\)", ")", s)
-    s = re.sub(r"\(\s+", "(", s)
-    return s
+    stmt = re.sub(r" {2,}", " ", stmt)
+    stmt = re.sub(r"\s+,", ",", stmt)
+    stmt = re.sub(r",\s*\)", ")", stmt)
+    return re.sub(r"\(\s+", "(", stmt)
+
+
+def _segments(sql: str) -> list[str]:
+    """Split ``sql`` after each ``;`` outside single quotes, keeping every character."""
+    out, start, in_str = [], 0, False
+    for i, ch in enumerate(sql):
+        if ch == "'":
+            in_str = not in_str  # a doubled quote toggles twice
+        elif ch == ";" and not in_str:
+            out.append(sql[start : i + 1])
+            start = i + 1
+    out.append(sql[start:])
+    return out
 
 
 # Capture the table name and (if present) the Redshift distribution/sort intent
