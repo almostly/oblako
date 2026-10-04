@@ -456,3 +456,27 @@ def test_alter_table_refused(rs, action, error):
     )
     with pytest.raises(psycopg.Error, match=error):
         _exec(rs, f"ALTER TABLE {t} {action}")
+
+
+def test_awsdatacatalog_three_part_names(rs, cat):
+    """Redshift's auto-mounted Data Catalog: no CREATE EXTERNAL SCHEMA first."""
+    pa = pytest.importorskip("pyarrow")
+    db = f"{DB}_auto"
+    cat.create_namespace(db)
+    seen = cat.create_table((db, "seen"), schema=pa.schema([("id", pa.int64())]))
+    seen.append(pa.table({"id": pa.array([7], pa.int64())}))
+    assert _rows(rs, f"SELECT id FROM awsdatacatalog.{db}.seen") == [(7,)]
+    _exec(
+        rs,
+        f"CREATE TABLE awsdatacatalog.{db}.made (id int, v varchar) USING ICEBERG "
+        f"LOCATION '{_location('made')}'",
+    )
+    _exec(rs, f"INSERT INTO awsdatacatalog.{db}.made VALUES (1, 'a')")
+    _exec(
+        rs,
+        f"MERGE INTO awsdatacatalog.{db}.made USING (SELECT 1 AS id, 'b' AS v) s "
+        "ON made.id = s.id WHEN MATCHED THEN UPDATE SET v = s.v",
+    )
+    assert _rows(rs, f"SELECT id, v FROM awsdatacatalog.{db}.made") == [(1, "b")]
+    assert cat.load_table((db, "made")).scan().to_arrow().num_rows == 1
+    _exec(rs, f'DROP SCHEMA "awsdatacatalog.{db}" CASCADE')

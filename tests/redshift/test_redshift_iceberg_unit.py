@@ -123,3 +123,36 @@ def test_properties():
 def test_command_tag_never_collides_with_the_statement():
     out = _mod._command("pg_oblako.f($ice$ $oblako_ddl$ $ice$)")
     assert out.startswith("DO $oblako_ddl1$ ") and out.endswith(" $oblako_ddl1$")
+
+
+def test_awsdatacatalog_names_become_the_mounted_schema():
+    sql = (
+        "SELECT * FROM awsdatacatalog.sales.orders o "
+        'JOIN AwsDataCatalog."Sales".items i ON o.id = i.id '
+        "WHERE o.note <> 'awsdatacatalog.x.y'"
+    )
+    out, dbs = _mod.rewrite_awsdatacatalog(sql)
+    assert out == (
+        'SELECT * FROM "awsdatacatalog.sales".orders o '
+        'JOIN "awsdatacatalog.Sales".items i ON o.id = i.id '
+        "WHERE o.note <> 'awsdatacatalog.x.y'"
+    )
+    assert dbs == {"sales", "Sales"}
+
+
+@pytest.mark.parametrize(
+    "rest, query, alias",
+    [
+        (" USING src s ON t.id = s.id", "SELECT * FROM src", "s"),
+        (" USING public.src ON t.id = src.id", "SELECT * FROM public.src", "src"),
+        (" USING (SELECT 1 AS id) AS s ON t.id = s.id", "SELECT 1 AS id", "s"),
+        (
+            " USING (SELECT id FROM x WHERE y IN (SELECT 1)) s ON t.id = s.id",
+            "SELECT id FROM x WHERE y IN (SELECT 1)",
+            "s",
+        ),
+    ],
+)
+def test_merge_source_is_found(rest, query, alias):
+    head, q, a, tail = _mod._merge_source(rest)
+    assert (q, a) == (query, alias) and tail.startswith("ON ")

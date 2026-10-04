@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import os
 import re
 import ssl
@@ -285,6 +286,54 @@ def _rewrite_catalog(sql: str) -> str:
 
 
 _EXTERNAL_CACHE: tuple[float, set[str]] = (0.0, set())
+# the database the current client connection asked for (its StartupMessage)
+CLIENT_DATABASE: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "client_database", default=""
+)
+_MOUNTED: dict[tuple[str, str], float] = {}
+
+
+def _startup_database(startup: bytes) -> str:
+    """Return the ``database`` (else ``user``) parameter of a StartupMessage."""
+    fields = startup[8:].split(b"\x00")
+    params = dict(zip(fields[0::2], fields[1::2]))
+    db = params.get(b"database") or params.get(b"user") or PG_DATABASE.encode()
+    return db.decode("utf-8", "replace")
+
+
+def _mount_awsdatacatalog(glue_databases: set[str]) -> None:
+    """Mount each Glue database as the external schema "awsdatacatalog.<db>".
+
+    In the client's database, before its statement runs, as Redshift auto-mounts
+    the Data Catalog. Re-mounted at most every two seconds, which picks up tables
+    created since. Failures are logged; the statement then fails as it would.
+    """
+    global _EXTERNAL_CACHE
+    client_db = CLIENT_DATABASE.get() or PG_DATABASE
+    now = time.monotonic()
+    todo = [d for d in glue_databases if now - _MOUNTED.get((client_db, d), 0) >= 2]
+    if not todo:
+        return
+    try:
+        import psycopg
+
+        conninfo = (
+            f"host={os.path.dirname(PG_SOCKET)} port={PG_PORT} user={PG_USER} "
+            f"dbname={client_db} connect_timeout=5"
+        )
+        with psycopg.connect(conninfo, autocommit=True) as conn:
+            for db in todo:
+                conn.execute(
+                    "SELECT pg_oblako.create_external_schema(%s, %s, false, true)",
+                    (
+                        '"awsdatacatalog.' + db.replace('"', '""') + '"',
+                        db,
+                    ),
+                )
+                _MOUNTED[(client_db, db)] = now
+                _EXTERNAL_CACHE = (0.0, set())  # a new external schema
+    except Exception as exc:  # the statement then fails as it would
+        print(f"oblako: mounting awsdatacatalog failed: {exc!r}", flush=True)
 
 
 def _external_schemas() -> set[str]:
@@ -351,6 +400,11 @@ def rewrite_sql(sql: str) -> str:
     else is left untouched.
     """
     s = sql
+    # awsdatacatalog.<db>.<table> first: the rest then see a two-part name
+    if iceberg_tables is not None and "awsdatacatalog" in s.lower():
+        s, glue_databases = iceberg_tables.rewrite_awsdatacatalog(s)
+        if glue_databases:
+            _mount_awsdatacatalog(glue_databases)
     # first, so the rewrites below also reach the column list and AS query
     if iceberg_tables is not None and iceberg_tables.has_iceberg_ddl(s):
         s = iceberg_tables.rewrite_iceberg(s)
@@ -710,6 +764,7 @@ async def _handle(client_reader, client_writer) -> None:
         with contextlib.suppress(Exception):
             client_writer.close()
         return
+    CLIENT_DATABASE.set(_startup_database(startup))  # seen by this connection's tasks
     server_writer.write(startup)  # forward the StartupMessage plaintext to PG
     await server_writer.drain()
     # Per-connection distribution state (Citus variant only): `queue` holds one
