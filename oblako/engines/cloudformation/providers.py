@@ -197,20 +197,44 @@ def _rds_delete(physical_id, props):
         pass
 
 
-# AWS::IAM::Role (control plane via moto) — e.g. the implicit role SAM creates
+# AWS::IAM::Role (control plane via moto), e.g. the implicit role SAM creates:
+# the role with its inline Policies and ManagedPolicyArns, as CloudFormation does
 def _iam_create(logical_id, props, ctx):
     name = props.get("RoleName") or f"{ctx['stack']}-{logical_id}"
     trust = props.get("AssumeRolePolicyDocument", {})
     iam = _moto_client("iam")
-    resp = iam.create_role(RoleName=name, AssumeRolePolicyDocument=json.dumps(trust))
+    kwargs = {"RoleName": name, "AssumeRolePolicyDocument": json.dumps(trust)}
+    for key in ("Path", "Description", "MaxSessionDuration", "PermissionsBoundary"):
+        if key in props:
+            kwargs[key] = props[key]
+    if props.get("Tags"):
+        kwargs["Tags"] = props["Tags"]
+    resp = iam.create_role(**kwargs)
+    for policy in props.get("Policies") or []:
+        iam.put_role_policy(
+            RoleName=name,
+            PolicyName=policy["PolicyName"],
+            PolicyDocument=json.dumps(policy["PolicyDocument"]),
+        )
+    for arn in props.get("ManagedPolicyArns") or []:
+        iam.attach_role_policy(RoleName=name, PolicyArn=arn)
     return resp["Role"]["Arn"]  # physical id is the ARN, so GetAtt .Arn resolves
 
 
 def _iam_delete(physical_id, props):
+    # IAM refuses to delete a role with policies: remove them first, as
+    # CloudFormation does
     name = physical_id.rsplit("/", 1)[-1]
+    iam = _moto_client("iam")
     try:
-        _moto_client("iam").delete_role(RoleName=name)
-    except Exception:
+        for policy in iam.list_role_policies(RoleName=name)["PolicyNames"]:
+            iam.delete_role_policy(RoleName=name, PolicyName=policy)
+        for policy in iam.list_attached_role_policies(RoleName=name)[
+            "AttachedPolicies"
+        ]:
+            iam.detach_role_policy(RoleName=name, PolicyArn=policy["PolicyArn"])
+        iam.delete_role(RoleName=name)
+    except iam.exceptions.NoSuchEntityException:
         pass
 
 
