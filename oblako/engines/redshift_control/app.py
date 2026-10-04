@@ -35,7 +35,7 @@ from starlette.routing import Route
 
 from oblako import ports
 
-from . import clusters, serverless
+from . import clusters, credentials, serverless
 
 _NS = "http://redshift.amazonaws.com/doc/2012-12-01/"
 _CREDENTIAL = re.compile(r"Credential=[^/]+/\d{8}/([a-z0-9-]+)/")
@@ -200,6 +200,9 @@ class RedshiftControlProxy:
         if refused is not None:
             return refused
         upstream = await self._forward(request, body)
+        if action == "GetClusterCredentials" and upstream.status_code == 200:
+            # moto checked the cluster; the credentials come from its real engine
+            return await credentials_response(form)
         if upstream.status_code == 200:
             try:
                 region = region_of(request.headers)
@@ -214,6 +217,24 @@ class RedshiftControlProxy:
             status_code=upstream.status_code,
             media_type=upstream.headers.get("content-type", "text/xml"),
         )
+
+
+async def credentials_response(form: dict[str, str]) -> Response:
+    """Answer GetClusterCredentials with credentials the cluster's engine accepts."""
+    try:
+        creds = await run_in_threadpool(credentials.issue, form)
+    except credentials.CredentialsError as e:
+        return error_response(e.code, str(e))
+    except Exception as e:  # the engine refused or isn't running
+        return error_response("InternalFailure", str(e), status=500)
+    result = "".join(f"<{k}>{v}</{k}>" for k, v in creds.items())
+    xml = (
+        f'<GetClusterCredentialsResponse xmlns="{_NS}">'
+        f"<GetClusterCredentialsResult>{result}</GetClusterCredentialsResult>"
+        f"<ResponseMetadata><RequestId>{uuid.uuid4()}</RequestId></ResponseMetadata>"
+        "</GetClusterCredentialsResponse>"
+    )
+    return Response(xml, media_type="text/xml")
 
 
 async def serverless_response(operation: str, body: bytes) -> Response:
