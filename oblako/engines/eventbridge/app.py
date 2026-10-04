@@ -33,6 +33,10 @@ _REGION = "us-east-1"
 _ACCOUNT = "123456789012"
 
 
+_SCHEDULER_LOCK = threading.Lock()
+_SCHEDULER_STARTED = False
+
+
 def _moto_url() -> str:
     import os
 
@@ -46,10 +50,16 @@ class EventBridgeProxy:
         """Bind to the moto endpoint and start the scheduled-rule firing loop."""
         self.backend = (backend_url or _moto_url()).rstrip("/")
         self._last_fired: dict[str, float] = {}
-        threading.Thread(target=self._schedule_loop, daemon=True).start()
+        # one scheduler per process: the module builds an app at import and the
+        # engine builds another, and two loops fired every scheduled rule twice
+        global _SCHEDULER_STARTED
+        with _SCHEDULER_LOCK:
+            if not _SCHEDULER_STARTED:
+                _SCHEDULER_STARTED = True
+                threading.Thread(target=self._schedule_loop, daemon=True).start()
 
     def _schedule_loop(self) -> None:
-        """Fire ScheduleExpression rules (rate(...)) on their cadence, every 1s."""
+        """Fire ScheduleExpression rules (rate(...) and cron(...)), checked every 1s."""
         import boto3
 
         while True:
@@ -60,20 +70,43 @@ class EventBridgeProxy:
             except Exception:
                 pass  # moto may be momentarily unreachable; retry next tick
 
-    def _fire_scheduled(self, events, now: float) -> list[str]:
-        """Fire every due scheduled rule once; return the names fired (one pass)."""
+    def _fire_scheduled(
+        self, events, now: float, utc: datetime.datetime | None = None
+    ) -> list[str]:
+        """Fire every due scheduled rule once; return the names fired (one pass).
+
+        ``rate(...)`` rules fire one interval after they are first seen, then on
+        that cadence; ``cron(...)`` rules fire once in each UTC minute they match.
+        """
+        utc = utc or datetime.datetime.now(datetime.timezone.utc)
+        minute = utc.replace(second=0, microsecond=0).timestamp()
         fired = []
         for rule in events.list_rules().get("Rules", []):
-            expr = rule.get("ScheduleExpression")
-            interval = _rate_seconds(expr) if expr else None
-            if interval is None or rule.get("State") != "ENABLED":
+            expr = rule.get("ScheduleExpression") or ""
+            if rule.get("State") != "ENABLED":
                 continue
-            last = self._last_fired.get(rule["Name"])
-            if last is None:
-                self._last_fired[rule["Name"]] = now  # first fire after one interval
-                continue
-            if now - last >= interval:
-                self._last_fired[rule["Name"]] = now
+            if expr.startswith("cron("):
+                if (
+                    not cron_matches(expr, utc)
+                    or self._last_fired.get(rule["Name"]) == minute
+                ):
+                    continue
+                self._last_fired[rule["Name"]] = minute
+                due = True
+            else:
+                interval = _rate_seconds(expr) if expr else None
+                if interval is None:
+                    continue
+                last = self._last_fired.get(rule["Name"])
+                if last is None:
+                    self._last_fired[rule["Name"]] = (
+                        now  # first fire after one interval
+                    )
+                    continue
+                due = now - last >= interval
+                if due:
+                    self._last_fired[rule["Name"]] = now
+            if due:
                 event = _scheduled_event(rule)
                 for target in events.list_targets_by_rule(Rule=rule["Name"]).get(
                     "Targets", []
@@ -243,16 +276,19 @@ def _deliver(target: dict, event: dict, moto_url: str) -> None:
             lam.invoke(
                 FunctionName=arn.split(":function:")[-1], Payload=payload.encode()
             )
-    except Exception:
-        pass  # best-effort delivery, like a dead-letter would swallow
+    except Exception as e:  # delivery is best effort, as EventBridge retries
+        print(f"oblako eventbridge: delivering to {arn} failed: {e!r}", flush=True)
 
 
-def _deliver_redshift(params: dict, cluster_arn: str) -> None:
-    """Run an EventBridge Redshift Data target: ExecuteStatement via redshift-data.
+def _deliver_redshift(params: dict, target_arn: str) -> None:
+    """Run an EventBridge Redshift Data target through oblako's redshift-data API.
 
-    This is the EventBridge -> Redshift Data API scheduled-query path: a rule
-    (typically ScheduleExpression) whose target carries RedshiftDataParameters
-    runs its SQL against oblako's local Redshift through the redshift-data engine.
+    The scheduled-query path: a rule (query editor v2 names them ``QS2-...``)
+    whose target is a cluster or a Serverless workgroup, with
+    RedshiftDataParameters. ``Sql`` runs as ExecuteStatement, ``Sqls`` as one
+    BatchExecuteStatement (a single transaction), with ``DbUser`` or
+    ``SecretManagerArn``. ``WithEvent`` puts a "Redshift Data Statement Status
+    Change" event on the default bus when the statement finishes.
     """
     import os
 
@@ -262,26 +298,172 @@ def _deliver_redshift(params: dict, cluster_arn: str) -> None:
         f"http://localhost:{ports.REDSHIFT_DATA}"
     )
     rd = boto3.client("redshift-data", endpoint_url=endpoint, **_creds())
-    sqls = params.get("Sqls") or ([params["Sql"]] if params.get("Sql") else [])
-    for sql in sqls:
-        kwargs = {"Database": params.get("Database"), "Sql": sql}
-        cluster = _cluster_from_arn(cluster_arn)
-        if cluster:
-            kwargs["ClusterIdentifier"] = cluster
-        if params.get("DbUser"):
-            kwargs["DbUser"] = params["DbUser"]
-        if params.get("StatementName"):
-            kwargs["StatementName"] = params["StatementName"]
-        rd.execute_statement(**kwargs)
+    kwargs: dict = {"Database": params.get("Database")}
+    kind, name = _target_from_arn(target_arn)
+    if kind == "workgroup":
+        kwargs["WorkgroupName"] = name
+    elif kind == "cluster":
+        kwargs["ClusterIdentifier"] = name
+    if params.get("DbUser"):
+        kwargs["DbUser"] = params["DbUser"]
+    if params.get("SecretManagerArn"):
+        kwargs["SecretArn"] = params["SecretManagerArn"]
+    if params.get("StatementName"):
+        kwargs["StatementName"] = params["StatementName"]
+    if params.get("WithEvent"):
+        kwargs["WithEvent"] = True
+    if params.get("Sqls"):
+        statement = rd.batch_execute_statement(Sqls=params["Sqls"], **kwargs)
+    else:
+        statement = rd.execute_statement(Sql=params.get("Sql", ""), **kwargs)
+    if params.get("WithEvent"):
+        threading.Thread(
+            target=_status_change_event,
+            args=(rd, statement["Id"], params, "Sqls" in params),
+            daemon=True,
+        ).start()
 
 
-def _cluster_from_arn(arn: str) -> str | None:
-    """Extract the cluster identifier from a Redshift (Serverless) target ARN."""
+def _status_change_event(rd, statement_id: str, params: dict, batch: bool) -> None:
+    """Wait for a statement, then put Redshift Data's status-change event."""
+    for _ in range(3600):
+        desc = rd.describe_statement(Id=statement_id)
+        if desc["Status"] in ("FINISHED", "FAILED", "ABORTED"):
+            break
+        time.sleep(1)
+    else:
+        return
+    detail = {
+        "principal": params.get("DbUser") or params.get("SecretManagerArn") or "",
+        "statementName": params.get("StatementName") or "",
+        "statementId": statement_id,
+        "redshiftQueryId": desc.get("RedshiftQueryId", 0),
+        "state": desc["Status"],
+        "type": "BatchExecuteStatement" if batch else "ExecuteStatement",
+    }
+    if desc["Status"] == "FINISHED" and desc.get("HasResultSet"):
+        detail["rows"] = desc.get("ResultRows", 0)
+    _emit_service_event(
+        "aws.redshift-data", "Redshift Data Statement Status Change", detail
+    )
+
+
+def _emit_service_event(source: str, detail_type: str, detail: dict) -> None:
+    """Put an AWS service's event on the default bus, as the service itself does.
+
+    ``aws.*`` sources are reserved: PutEvents refuses them, and AWS services emit
+    their events inside EventBridge. So the proxy matches the bus's rules itself
+    and delivers to every target (moto, which never sees the event, delivers none).
+    """
+    import boto3
+
+    moto = _moto_url()
+    events = boto3.client("events", endpoint_url=moto, **_creds())
+    event = {
+        "version": "0",
+        "id": str(uuid.uuid4()),
+        "detail-type": detail_type,
+        "source": source,
+        "account": _ACCOUNT,
+        "time": datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        ),
+        "region": _REGION,
+        "resources": [],
+        "detail": detail,
+    }
+    for pattern, targets in EventBridgeProxy._rules_with_targets(events):
+        if _matches(pattern, event):
+            for target in targets:
+                _deliver(target, event, moto)
+
+
+def _target_from_arn(arn: str) -> tuple[str, str] | tuple[None, None]:
+    """Return ("cluster" | "workgroup", name) for a Redshift target ARN."""
     if ":cluster:" in arn:
-        return arn.split(":cluster:")[-1]
-    if "workgroup/" in arn:
-        return arn.split("workgroup/")[-1]
-    return None
+        return "cluster", arn.split(":cluster:")[-1]
+    if ":workgroup/" in arn:
+        return "workgroup", arn.split(":workgroup/")[-1]
+    return None, None
+
+
+# ---------------------------------------------------------------------------------
+# cron(...) schedules, as EventBridge reads them (UTC)
+# ---------------------------------------------------------------------------------
+_MONTHS: dict[str, int] = {
+    m: i
+    for i, m in enumerate(
+        "JAN FEB MAR APR MAY JUN JUL AUG SEP OCT NOV DEC".split(), start=1
+    )
+}
+_DAYS: dict[str, int] = {
+    d: i for i, d in enumerate("SUN MON TUE WED THU FRI SAT".split(), start=1)
+}
+_NUMBERS: dict[str, int] = {}  # fields with no names
+
+
+def _field_values(field: str, low: int, high: int, names: dict[str, int]) -> set[int]:
+    """Expand one cron field (``*``, lists, ranges, steps, names) to its values."""
+    values: set[int] = set()
+    for part in field.split(","):
+        step = 1
+        if "/" in part:
+            part, step_text = part.split("/", 1)
+            step = int(step_text)
+        if part in ("*", "?"):
+            start, end = low, high
+        elif "-" in part:
+            a, b = part.split("-", 1)
+            start, end = (
+                names.get(a.upper()) or int(a),
+                names.get(b.upper()) or int(b),
+            )
+        else:
+            start = names.get(part.upper()) or int(part)
+            end = high if step > 1 else start
+        values.update(range(start, end + 1, step))
+    return values
+
+
+def cron_matches(expression: str, when: datetime.datetime) -> bool:
+    """Whether ``cron(min hour day-of-month month day-of-week year)`` matches ``when``.
+
+    EventBridge's six fields: day-of-week counts SUN=1 to SAT=7, ``?`` leaves a day
+    field open, ``L`` is the last day of the month (or ``5L``, its last Thursday),
+    and ``3#2`` is the second Tuesday. ``W`` isn't supported.
+    """
+    import calendar
+
+    fields = expression.strip()[len("cron(") : -1].split()
+    if len(fields) != 6:
+        return False
+    minute, hour, dom, month, dow, year = fields
+    if when.minute not in _field_values(minute, 0, 59, _NUMBERS):
+        return False
+    if when.hour not in _field_values(hour, 0, 23, _NUMBERS):
+        return False
+    if when.month not in _field_values(month, 1, 12, _MONTHS):
+        return False
+    if year not in ("*", "?") and when.year not in _field_values(
+        year, 1970, 2199, _NUMBERS
+    ):
+        return False
+    last_day = calendar.monthrange(when.year, when.month)[1]
+    weekday = (when.isoweekday() % 7) + 1  # SUN=1 ... SAT=7
+    if dom == "L":
+        dom_ok = when.day == last_day
+    else:
+        dom_ok = dom == "?" or when.day in _field_values(dom, 1, 31, _NUMBERS)
+    if dow.endswith("L") and len(dow) > 1:
+        target = _DAYS.get(dow[:-1].upper()) or int(dow[:-1])
+        dow_ok = weekday == target and when.day + 7 > last_day
+    elif "#" in dow:
+        day_text, nth = dow.split("#", 1)
+        target = _DAYS.get(day_text.upper()) or int(day_text)
+        dow_ok = weekday == target and (when.day - 1) // 7 + 1 == int(nth)
+    else:
+        dow_ok = dow == "?" or weekday in _field_values(dow, 1, 7, _DAYS)
+    return dom_ok and dow_ok
 
 
 def _rate_seconds(expression: str) -> int | None:
