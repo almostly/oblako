@@ -314,9 +314,13 @@ def cmd_test_integration(args):
 
 def cmd_configure(args):
     """Write an AWS profile whose endpoints are oblako's (see oblako.profile)."""
-    from oblako.profile import write_profile
+    from oblako.profile import ProfileDowngradeError, write_profile
 
-    out = write_profile(args.profile)
+    try:
+        out = write_profile(args.profile, force=args.force)
+    except ProfileDowngradeError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
     print(
         f"profile {out['profile']}: {out['services']} service endpoints in "
         f"{out['config']}, keys in {out['credentials']}"
@@ -448,6 +452,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_configure.add_argument(
         "--profile", default="oblako", help="Profile name (default: oblako)"
+    )
+    p_configure.add_argument(
+        "--force",
+        action="store_true",
+        help="Write the profile even if it drops settings a newer oblako wrote",
     )
     p_configure.set_defaults(func=cmd_configure)
 
