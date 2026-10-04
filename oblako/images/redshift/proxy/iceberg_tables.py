@@ -220,19 +220,24 @@ def parse_properties(text: str | None) -> dict[str, str]:
     props: dict[str, str] = {}
     for key, value in _PROPERTY.findall(text or ""):
         key, value = key.replace("''", "'").lower(), value.replace("''", "'")
+        # Redshift's own messages. v3 is refused as Redshift Serverless refused it
+        # (2026-10); oblako's catalog and pyiceberg write v2 only besides.
         if key == "format-version":
-            if value not in ("2", "3"):
-                raise ValueError(f"format-version must be '2' or '3', not '{value}'")
+            if value != "2":
+                raise ValueError(
+                    f'"{value}" is not a valid value for the "format-version" '
+                    'property of "iceberg" table'
+                )
         elif key == "compression_type":
             value = value.lower()
             if value not in _COMPRESSIONS:
                 raise ValueError(
-                    f"compression_type must be one of {', '.join(sorted(_COMPRESSIONS))}"
+                    f'"{value}" is not a valid value for the "compression_type" '
+                    'property of "iceberg" table'
                 )
         else:
             raise ValueError(
-                f"unsupported table property '{key}': Iceberg tables take "
-                "'format-version' and 'compression_type'"
+                f'"{key}" cannot be used in the PROPERTIES clause of "iceberg" table'
             )
         props[key] = value
     return props
@@ -278,7 +283,9 @@ def parse_partitions(text: str | None) -> list[tuple[str, str, int | None]]:
     cols = [c for c, _, _ in out]
     for c in cols:
         if cols.count(c) > 1:
-            raise ValueError(f"column {c} is used in more than one partition transform")
+            raise ValueError(
+                f'"{c}"  used in multiple transform functions for "iceberg" table'
+            )
     return out
 
 
@@ -520,6 +527,16 @@ def _columns(plpy, relation: str) -> list[tuple[str, str]]:
     return [(r["attname"], r["t"]) for r in rows]
 
 
+def _not_null_columns(plpy, relation: str) -> set[str]:
+    """Return the NOT NULL columns of ``relation``."""
+    rows = plpy.execute(
+        "SELECT attname FROM pg_attribute WHERE attrelid = "
+        f"{plpy.quote_literal(relation)}::regclass AND attnum > 0 "
+        "AND NOT attisdropped AND attnotnull"
+    )
+    return {r["attname"] for r in rows}
+
+
 def _attach(plpy, schema, database, name, table, stage=None, location=None) -> None:
     """Create the view, triggers and registry row for Iceberg table ``database.name``.
 
@@ -532,7 +549,9 @@ def _attach(plpy, schema, database, name, table, stage=None, location=None) -> N
             pgt = pg_type(field.field_type)
             if pgt is None:
                 raise ValueError(f"column {field.name} has type {field.field_type}")
-            cols.append(f"{_quote(field.name)} {pgt}")
+            cols.append(
+                f"{_quote(field.name)} {pgt}" + (" NOT NULL" if field.required else "")
+            )
         n = plpy.execute("SELECT nextval('pg_oblako.iceberg_stage_seq') AS n")[0]["n"]
         stage = f"pg_oblako.iceberg_stage_{n}"
         plpy.execute(
@@ -552,6 +571,18 @@ def _attach(plpy, schema, database, name, table, stage=None, location=None) -> N
         f"UNION ALL SELECT {names} FROM {stage} WHERE _op = 'I'"
     )
     fn = f"{stage}_dml"
+    required = _not_null_columns(plpy, stage)
+    null_checks = "".join(
+        f"    IF NEW.{_quote(c)} IS NULL THEN\n"
+        "      RAISE EXCEPTION 'Cannot insert a NULL value into column "
+        + c.replace("'", "''")
+        + "';\n"
+        "    END IF;\n"
+        for c, _ in columns
+        if c in required
+    )
+    if null_checks:
+        null_checks = "  IF TG_OP <> 'DELETE' THEN\n" + null_checks + "  END IF;\n"
     plpy.execute(
         f"CREATE FUNCTION {fn}() RETURNS trigger LANGUAGE plpgsql AS $fn$\n"
         "BEGIN\n"
@@ -559,8 +590,7 @@ def _attach(plpy, schema, database, name, table, stage=None, location=None) -> N
         "             OR _stmt > statement_timestamp()) THEN\n"
         "    RAISE EXCEPTION 'a transaction takes one write to Iceberg table %, as on "
         f"Redshift: COMMIT first', {plpy.quote_literal(schema + '.' + name)};\n"
-        "  END IF;\n"
-        "  IF TG_OP <> 'INSERT' THEN\n"
+        "  END IF;\n" + null_checks + "  IF TG_OP <> 'INSERT' THEN\n"
         f"    INSERT INTO {stage} SELECT 'D', statement_timestamp(), OLD.*;\n"
         "  END IF;\n"
         "  IF TG_OP <> 'DELETE' THEN\n"
@@ -672,32 +702,34 @@ def _create_table(
             plpy.notice(f'table "{table}" already exists, skipping')
             return "CREATE TABLE"
         plpy.error(f'table "{table}" already exists')
+    # Redshift's own messages, from a Redshift Serverless run (2026-10)
     if not location:
-        _fail(
-            plpy, "CREATE TABLE ... USING ICEBERG in an external schema needs LOCATION"
-        )
+        _fail(plpy, f'Empty location for Iceberg table "{table}"')
+    location = location.rstrip("/")
     try:
         if not _location_is_empty(location):
-            plpy.error(f"LOCATION {location} is not empty")
+            plpy.error(
+                f'Cannot create Iceberg table: S3 location "{location}" contains '
+                "existing objects"
+            )
     except ValueError as e:
         plpy.error(str(e))
     version = props.get("format-version", "2")
-    if version == "3":
-        # the REST catalog oblako runs writes v2 metadata only
-        plpy.error(
-            "Iceberg v3 tables ('format-version'='3') are not supported in oblako "
-            "yet; leave format-version out for a v2 table"
-        )
+    constraints = (
+        'Columns constraints and attributes are not supported for an "iceberg" table.'
+    )
     if columns and re.search(r"(?i)\bdefault\b", columns):
         plpy.error(
-            "column DEFAULT values need an Iceberg v3 table: 'format-version'='3'"
+            constraints,
+            hint='Default values are only supported with Iceberg version "3".',
         )
+    # NOT NULL is the one column attribute Redshift takes
     if columns and re.search(
-        r"(?i)\b(primary\s+key|unique|references|not\s+null|identity|encode|"
-        r"distkey|sortkey|collate)\b",
+        r"(?i)\b(primary\s+key|unique|references|identity|encode|distkey|sortkey|"
+        r"collate|check)\b",
         columns,
     ):
-        plpy.error("Iceberg tables take no column constraints or attributes")
+        plpy.error(constraints)
 
     n = plpy.execute("SELECT nextval('pg_oblako.iceberg_stage_seq') AS n")[0]["n"]
     stage = f"pg_oblako.iceberg_stage_{n}"
@@ -722,10 +754,19 @@ def _create_table(
             plpy.execute(
                 f"ALTER TABLE {stage} ALTER COLUMN {_quote(col)} TYPE numeric(18,0)"
             )
+    not_null = _not_null_columns(plpy, stage)
     fields = []
     try:
         for i, (col, typ) in enumerate(_columns(plpy, stage), start=1):
-            fields.append(NestedField(i, col, iceberg_type(typ), required=False))
+            if query is None and typ.startswith("character varying("):
+                plpy.error(
+                    f'VARCHAR(N) specifiying length is not supported for column "{col}" '
+                    "in Iceberg table.",
+                    hint="Use VARCHAR for strings in Iceberg tables.",
+                )
+            fields.append(
+                NestedField(i, col, iceberg_type(typ), required=col in not_null)
+            )
     except ValueError as e:
         plpy.error(str(e))
     ice_schema = Schema(*fields)
@@ -845,7 +886,7 @@ def show_table(plpy, name: str) -> str:
     )[0]
     schema, table = rel["nspname"], rel["relname"]
     reg = plpy.execute(
-        "SELECT databasename, location FROM pg_oblako.iceberg_tables WHERE "
+        "SELECT databasename, location, stage FROM pg_oblako.iceberg_tables WHERE "
         f"schemaname = {plpy.quote_literal(schema)} AND "
         f"tablename = {plpy.quote_literal(table)}"
     )
@@ -856,20 +897,23 @@ def show_table(plpy, name: str) -> str:
         f"WHERE a.attrelid = {oid} AND a.attnum > 0 AND NOT a.attisdropped "
         "ORDER BY a.attnum"
     )
+    # an Iceberg table's view carries no NOT NULL; its staging table does
+    required = _not_null_columns(plpy, reg[0]["stage"]) if reg.nrows() else set()
     lines = []
     for c in cols:
-        line = f"{c['attname']} {c['t']}"
+        line = f"{c['attname']} {redshift_type(c['t'])}"
         if c["dflt"] is not None:
             default = _CAST_SUFFIX.sub("", c["dflt"])
             line += f" DEFAULT {default}"
-        if c["attnotnull"]:
+        if c["attnotnull"] or c["attname"] in required:
             line += " NOT NULL"
         lines.append(line)
-    ddl = f"CREATE TABLE {schema}.{table} (\n  " + ",\n  ".join(lines) + "\n)"
+    # Redshift's layout: one column per line, the list closed on the last one
+    ddl = f"CREATE TABLE {schema}.{table} (" + ",\n".join(lines) + ")"
     if not reg.nrows():
         return ddl + ";"
     ice = _catalog_or_error(plpy).load_table((reg[0]["databasename"], table))
-    ddl += f"\nUSING ICEBERG\nLOCATION '{reg[0]['location']}'"
+    ddl += f"\nUSING ICEBERG\nLOCATION '{reg[0]['location'].rstrip('/')}'"
     field_names = {f.field_id: f.name for f in ice.schema().fields}
     parts = []
     for pf in ice.spec().fields:
@@ -878,20 +922,38 @@ def show_table(plpy, name: str) -> str:
         if t == "identity":
             parts.append(col)
         elif m := _TRANSFORM_SQL.match(t):
-            parts.append(f"{m.group(1)}({m.group(2)}, {col})")
+            parts.append(f"{m.group(1).upper()}({m.group(2)}, {col})")
         else:
-            parts.append(f"{t}({col})")
+            parts.append(f"{t.upper()}({col})")
     if parts:
         ddl += f"\nPARTITIONED BY ({', '.join(parts)})"
-    props = []
-    if ice.metadata.format_version == 3:
-        props.append("'format-version'='3'")
     codec = ice.properties.get("write.parquet.compression-codec", "zstd")
-    if codec != "zstd":
-        props.append(f"'compression_type'='{codec}'")
-    if props:
-        ddl += f"\nTABLE PROPERTIES ({', '.join(props)})"
+    ddl += (
+        f"\nTABLE PROPERTIES ('format-version'='{ice.metadata.format_version}', "
+        f"'compression_type'='{codec}')"
+    )
     return ddl + ";"
+
+
+_REDSHIFT_TYPES = {
+    "integer": "int",
+    "character varying": "varchar",
+    "timestamp without time zone": "timestamp",
+    "timestamp with time zone": "timestamptz",
+    "time without time zone": "time",
+    "bytea": "varbyte",
+}
+
+
+def redshift_type(pg: str) -> str:
+    """Return the name Redshift's SHOW TABLE gives a PostgreSQL column type."""
+    if m := re.fullmatch(r"numeric\((\d+),(\d+)\)", pg):
+        return f"decimal({m.group(1)}, {m.group(2)})"
+    if m := re.fullmatch(r"character varying\((\d+)\)", pg):
+        return f"varchar({m.group(1)})"
+    if m := re.fullmatch(r"character\((\d+)\)", pg):
+        return f"char({m.group(1)})"
+    return _REDSHIFT_TYPES.get(pg, pg)
 
 
 _DROP_TABLE = re.compile(

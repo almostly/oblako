@@ -369,6 +369,10 @@ DROP TABLE lake.orders;  -- removes the catalog entry; the files stay
   Redshift), `PARTITIONED BY` with `identity`, `bucket(N, col)`,
   `truncate(W, col)`, `year`, `month`, `day` and `hour`, and `TABLE PROPERTIES`
   `compression_type` (`zstd` by default). `CREATE TABLE ... AS SELECT` works too.
+- As on Redshift, strings are `VARCHAR` without a length (`VARCHAR(N)` is
+  refused), and `NOT NULL` is the one column attribute taken; other constraints
+  and attributes are refused. Errors carry Redshift's own messages, checked
+  against Redshift Serverless.
 - `SELECT` scans the table, so joins with local tables are plain SQL. `INSERT`,
   `UPDATE` and `DELETE` work from any client, parameterized statements included.
   An insert appends; an update or delete rewrites the table's data files.
@@ -376,8 +380,8 @@ DROP TABLE lake.orders;  -- removes the catalog entry; the files stay
   `ROLLBACK` writes nothing. As on Redshift, a transaction takes one Iceberg write.
 - `svv_external_schemas`, `svv_external_tables` and `svv_external_columns` list
   the external schemas and their tables.
-- Not yet: Iceberg v3 tables (`'format-version'='3'`) and column `DEFAULT`
-  values, `MERGE` and `ALTER TABLE` on Iceberg tables, the `awsdatacatalog` and
+- Not yet: Iceberg v3 tables (`'format-version'='3'`, which Redshift Serverless
+  also refused when this was checked) and column `DEFAULT` values, `MERGE` and `ALTER TABLE` on Iceberg tables, the `awsdatacatalog` and
   `s3tablescatalog` three-part names, and nested Iceberg types in writes. A table
   another engine creates after `CREATE EXTERNAL SCHEMA` appears once you run
   `CREATE EXTERNAL SCHEMA IF NOT EXISTS` again.

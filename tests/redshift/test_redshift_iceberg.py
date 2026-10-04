@@ -113,7 +113,7 @@ def test_create_insert_update_delete(rs, cat):
     _exec(
         rs,
         f"CREATE TABLE {SCHEMA}.orders (order_id int, order_date date, "
-        "total decimal(10,2), status varchar(20)) USING ICEBERG "
+        "total decimal(10,2), status varchar) USING ICEBERG "
         f"LOCATION '{_location('orders')}' PARTITIONED BY (month(order_date)) "
         "TABLE PROPERTIES ('compression_type'='snappy')",
     )
@@ -182,9 +182,15 @@ def test_show_table(rs):
         f"LOCATION '{location}' PARTITIONED BY (bucket(16, id))",
     )
     (ddl,) = _rows(rs, f"SHOW TABLE {SCHEMA}.shown")[0]
-    assert f"LOCATION '{location}'" in ddl
-    assert "PARTITIONED BY (bucket(16, id))" in ddl
-    assert "price numeric(5,2)" in ddl
+    # Redshift Serverless's own output, for the same statement (2026-10)
+    assert ddl == (
+        f"CREATE TABLE {SCHEMA}.shown (id int,\n"
+        "price decimal(5, 2))\n"
+        "USING ICEBERG\n"
+        f"LOCATION '{location.rstrip('/')}'\n"
+        "PARTITIONED BY (BUCKET(16, id))\n"
+        "TABLE PROPERTIES ('format-version'='2', 'compression_type'='zstd');"
+    )
 
 
 def test_a_table_from_another_engine_shows_up(rs, cat):
@@ -256,14 +262,25 @@ def test_drop_table_keeps_the_files(rs, cat):
 @pytest.mark.parametrize(
     "columns, clauses, error",
     [
-        ("(id int)", "", "needs LOCATION"),
-        ("(id int NOT NULL)", "LOCATION '{loc}'", "no column constraints"),
-        ("(id int, s varchar DEFAULT 'x')", "LOCATION '{loc}'", "DEFAULT"),
-        ("(id int)", "LOCATION '{loc}' TABLE PROPERTIES ('owner'='me')", "property"),
+        # the messages Redshift Serverless gave for the same statements (2026-10)
+        ("(id int)", "", 'Empty location for Iceberg table "bad"'),
+        ("(id int PRIMARY KEY)", "LOCATION '{loc}'", "Columns constraints"),
+        ("(id int, s varchar DEFAULT 'x')", "LOCATION '{loc}'", "Columns constraints"),
+        ("(id int, s varchar(20))", "LOCATION '{loc}'", "VARCHAR\\(N\\) specifiying"),
+        (
+            "(id int)",
+            "LOCATION '{loc}' TABLE PROPERTIES ('owner'='me')",
+            "cannot be used in the PROPERTIES clause",
+        ),
+        (
+            "(id int)",
+            "LOCATION '{loc}' TABLE PROPERTIES ('format-version'='3')",
+            '"3" is not a valid value for the "format-version" property',
+        ),
         (
             "(id int, d date)",
             "LOCATION '{loc}' PARTITIONED BY (bucket(4, d), year(d))",
-            "more than one",
+            "used in multiple transform functions",
         ),
     ],
 )
@@ -273,13 +290,30 @@ def test_refused_as_redshift_refuses(rs, columns, clauses, error):
         _exec(rs, f"CREATE TABLE {SCHEMA}.bad {columns} USING ICEBERG {clauses}")
 
 
+def test_not_null_is_kept_and_enforced(rs, cat):
+    _exec(
+        rs,
+        f"CREATE TABLE {SCHEMA}.required (id int NOT NULL, note varchar) "
+        f"USING ICEBERG LOCATION '{_location('required')}'",
+    )
+    assert cat.load_table((DB, "required")).schema().find_field("id").required
+    with pytest.raises(
+        psycopg.Error, match="Cannot insert a NULL value into column id"
+    ):
+        _exec(rs, f"INSERT INTO {SCHEMA}.required VALUES (NULL, 'x')")
+    (ddl,) = _rows(rs, f"SHOW TABLE {SCHEMA}.required")[0]
+    assert ddl.startswith(
+        f"CREATE TABLE {SCHEMA}.required (id int NOT NULL,\nnote varchar)"
+    )
+
+
 def test_location_must_be_empty(rs):
     location = _location("taken")
     _exec(
         rs, f"CREATE TABLE {SCHEMA}.taken (id int) USING ICEBERG LOCATION '{location}'"
     )
     _exec(rs, f"INSERT INTO {SCHEMA}.taken VALUES (1)")
-    with pytest.raises(psycopg.Error, match="not empty"):
+    with pytest.raises(psycopg.Error, match="contains existing objects"):
         _exec(
             rs,
             f"CREATE TABLE {SCHEMA}.taken_again (id int) USING ICEBERG "
@@ -291,7 +325,7 @@ def test_redshift_connector_parameters(rs):
     redshift_connector = pytest.importorskip("redshift_connector")
     _exec(
         rs,
-        f"CREATE TABLE {SCHEMA}.params (id int, note varchar(10)) USING ICEBERG "
+        f"CREATE TABLE {SCHEMA}.params (id int, note varchar) USING ICEBERG "
         f"LOCATION '{_location('params')}'",
     )
     conn = redshift_connector.connect(
