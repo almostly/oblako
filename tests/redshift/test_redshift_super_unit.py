@@ -109,14 +109,18 @@ def test_noop_when_no_super_columns_known():
 
 
 def test_a_selected_item_is_json_text_as_redshift_sends_super():
-    # Redshift returns SUPER to the driver as JSON text ("Ann", quotes included);
-    # a cast gives the plain string, and inside an expression the leaf is text
+    # checked on Redshift Serverless (2026-10): a selected SUPER value is JSON text
+    # ("Alice", quotes included) named after the path's last key, data.tags[0] is
+    # "tags"; a cast gives the plain value and keeps that name; inside an
+    # expression the navigated value is text
     _mod.SUPER_COLUMNS.add("data")
     out = _mod.rewrite_super_paths(
-        "SELECT data.name AS name, data.age::int, upper(data.city) FROM t"
+        "SELECT data.name AS who, data.tags[0], data.age::int, upper(data.city) FROM t"
     )
     assert out == (
-        "SELECT (data #> ARRAY['name'])::text AS name, (data #>> ARRAY['age'])::int, "
+        "SELECT (data #> ARRAY['name'])::text AS who, "
+        "(data #> ARRAY['tags', '0'])::text AS \"tags\", "
+        "(data #>> ARRAY['age'])::int AS \"age\", "
         "upper((data #>> ARRAY['city'])) FROM t"
     )
 

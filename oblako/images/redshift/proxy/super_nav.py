@@ -272,32 +272,58 @@ def _in_select_list(sql, code, depth, start) -> bool:
     return False
 
 
+# a cast right after a navigated item: ::varchar, ::int, ::character varying(20)
+_CAST = re.compile(
+    r"\s*::\s*[A-Za-z_]\w*(?:\s+(?:precision|varying))?(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?"
+)
+
+
+def _item_ends(nxt: str) -> bool:
+    """Whether the token after an expression ends a SELECT-list item."""
+    return (
+        nxt in ("", ",", ")", ";")
+        or nxt in _ITEM_END_WORDS
+        or (nxt.isidentifier() and nxt not in _OPERATOR_WORDS)
+    )
+
+
+def _alias_needed(nxt: str) -> bool:
+    """Whether an item ending before ``nxt`` has no alias of its own."""
+    return nxt != "as" and not (
+        nxt.isidentifier() and nxt not in _OPERATOR_WORDS | _ITEM_END_WORDS
+    )
+
+
 def _finish(sql: str) -> str:
-    """Turn each tagged chain into ``#>>`` (text), or JSON text as a bare SELECT item."""
+    """Turn each tagged chain into ``#>>`` (text), or JSON text as a bare SELECT item.
+
+    A selected item is named as Redshift names it, after the last key of its path
+    (``data.tags[0]`` is ``tags``), cast or not, unless it has an alias.
+    """
     code, depth = _scan(sql)
     out, pos = [], 0
     for m in _TAGGED.finditer(sql):
         if not code[m.start()]:
             continue
+        keys = [
+            k.replace("''", "'") for k in re.findall(r"'((?:[^']|'')*)'", m.group(0))
+        ]
+        names = [k for k in keys if not k.isdigit()]
+        alias = ' AS "' + names[-1].replace('"', '""') + '"' if names else ""
+        listed = _in_select_list(sql, code, depth, m.start())
+        in_by = _prev_token(sql, code, m.start())[0] == "by"
         nxt = _next_token(sql, code, m.end())
-        bare = _in_select_list(sql, code, depth, m.start()) and (
-            nxt in ("", ",", ")", ";")
-            or nxt in _ITEM_END_WORDS
-            or (nxt.isidentifier() and nxt not in _OPERATOR_WORDS)
-        )
-        expr = m.group(0)
-        if bare:  # the SUPER value as Redshift sends it: JSON text
+        expr, end = m.group(0), m.end()
+        if listed and _item_ends(nxt):  # the SUPER value as Redshift sends it
             expr = "(" + expr[1:-1].replace(_TAG, "#>") + ")::text"
-            # named after the last step, as Redshift names it (not "?column?")
-            last = re.findall(r"'((?:[^']|'')*)'", m.group(0))[-1].replace("''", "'")
-            in_list = _prev_token(sql, code, m.start())[0] != "by"
-            aliased = nxt == "as" or (
-                nxt.isidentifier() and nxt not in _OPERATOR_WORDS | _ITEM_END_WORDS
-            )
-            if in_list and not aliased and not last.isdigit():
-                expr += ' AS "' + last.replace('"', '""') + '"'
-
+            if not in_by and _alias_needed(nxt):
+                expr += alias
+        elif listed and not in_by and nxt == ":" and (cast := _CAST.match(sql, end)):
+            # a cast item (data.name::varchar) keeps the path's name, as on Redshift
+            after = _next_token(sql, code, cast.end())
+            if _item_ends(after) and _alias_needed(after):
+                expr, end = expr + cast.group(0) + alias, cast.end()
         out.append(sql[pos : m.start()] + expr)
-        pos = m.end()
+        pos = end
     out.append(sql[pos:])
     return "".join(out).replace(_TAG, "#>>")
