@@ -52,7 +52,7 @@ def test_dot_navigation_to_jsonb_path():
     _mod.SUPER_COLUMNS.add("data")
     assert (
         _mod.rewrite_super_paths("SELECT data.a.b FROM t")
-        == "SELECT (data #>> ARRAY['a', 'b']) FROM t"
+        == "SELECT (data #> ARRAY['a', 'b'])::text AS \"b\" FROM t"
     )
 
 
@@ -60,7 +60,7 @@ def test_alias_qualified_navigation():
     _mod.SUPER_COLUMNS.add("data")
     assert (
         _mod.rewrite_super_paths("SELECT c.data.customer.name FROM c")
-        == "SELECT (c.data #>> ARRAY['customer', 'name']) FROM c"
+        == "SELECT (c.data #> ARRAY['customer', 'name'])::text AS \"name\" FROM c"
     )
 
 
@@ -68,7 +68,7 @@ def test_mixed_dot_and_bracket_with_array_index():
     _mod.SUPER_COLUMNS.add("data")
     assert (
         _mod.rewrite_super_paths("SELECT data.items[0].sku FROM t")
-        == "SELECT (data #>> ARRAY['items', '0', 'sku']) FROM t"
+        == "SELECT (data #> ARRAY['items', '0', 'sku'])::text AS \"sku\" FROM t"
     )
 
 
@@ -106,3 +106,27 @@ def test_filter_predicate_is_rewritten():
 
 def test_noop_when_no_super_columns_known():
     assert _mod.rewrite_super_paths("SELECT data.a FROM t") == "SELECT data.a FROM t"
+
+
+def test_a_selected_item_is_json_text_as_redshift_sends_super():
+    # Redshift returns SUPER to the driver as JSON text ("Ann", quotes included);
+    # a cast gives the plain string, and inside an expression the leaf is text
+    _mod.SUPER_COLUMNS.add("data")
+    out = _mod.rewrite_super_paths(
+        "SELECT data.name AS name, data.age::int, upper(data.city) FROM t"
+    )
+    assert out == (
+        "SELECT (data #> ARRAY['name'])::text AS name, (data #>> ARRAY['age'])::int, "
+        "upper((data #>> ARRAY['city'])) FROM t"
+    )
+
+
+def test_grouped_and_ordered_items_match_the_selected_one():
+    _mod.SUPER_COLUMNS.add("data")
+    out = _mod.rewrite_super_paths(
+        "SELECT data.a, count(*) FROM t GROUP BY data.a ORDER BY data.a DESC"
+    )
+    item = "(data #> ARRAY['a'])::text"
+    assert out == (
+        f'SELECT {item} AS "a", count(*) FROM t GROUP BY {item} ORDER BY {item} DESC'
+    )

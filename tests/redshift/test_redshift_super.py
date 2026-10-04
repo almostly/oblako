@@ -65,12 +65,17 @@ def test_super_dot_and_bracket_navigation(conn):
         (2, JSON_PARSE('{"type":"basic","customer":{"name":"Bob"},"tags":["c"],"age":25}'))"""
     )
     # dot navigation (rewritten by the proxy)
+    # Redshift sends a selected SUPER value as JSON text, quotes included,
+    # named after the last step; a cast gives the plain string
     cur.execute("SELECT id, data.customer.name FROM sup_events ORDER BY id")
-    assert cur.fetchall() == [(1, "Alice"), (2, "Bob")]
+    assert cur.fetchall() == [(1, '"Alice"'), (2, '"Bob"')]
+    assert cur.description[1][0] == "name"
+    cur.execute("SELECT data.customer.name::varchar FROM sup_events ORDER BY id")
+    assert [r[0] for r in cur.fetchall()] == ["Alice", "Bob"]
     cur.execute("SELECT id FROM sup_events WHERE data.type = 'premium'")
     assert cur.fetchall() == [(1,)]
     cur.execute("SELECT data.tags[0] FROM sup_events ORDER BY id")
-    assert [r[0] for r in cur.fetchall()] == ["a", "c"]
+    assert [r[0] for r in cur.fetchall()] == ['"a"', '"c"']
     # a numeric comparison needs an explicit cast (documented)
     cur.execute("SELECT id FROM sup_events WHERE (data.age)::int > 27")
     assert cur.fetchall() == [(1,)]
@@ -139,5 +144,5 @@ def test_super_nested_parquet_copy(conn):
     )
     # the struct landed as SUPER and is navigable
     cur.execute("SELECT id, doc.name, doc.roles[0] FROM sup_copy ORDER BY id")
-    assert cur.fetchall() == [(1, "Alice", "admin"), (2, "Bob", None)]
+    assert cur.fetchall() == [(1, '"Alice"', '"admin"'), (2, '"Bob"', None)]
     cur.execute("DROP TABLE sup_copy")

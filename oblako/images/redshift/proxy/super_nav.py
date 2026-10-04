@@ -10,8 +10,11 @@ path extraction:
     c.data.customer.name      ->  (c.data #>> ARRAY['customer','name'])
     data.items[0].sku         ->  (data #>> ARRAY['items','0','sku'])
 
-The leaf is text (``#>>``), so projections and string/equality filters work
-(``WHERE data.type = 'premium'``). Which columns are SUPER is learned from the
+The leaf is text (``#>>``), so string/equality filters work
+(``WHERE data.type = 'premium'``). A chain that is a whole item of a SELECT list
+(``SELECT data.customer.name, ...``) returns the SUPER value as JSON text instead,
+``"Ann"`` with its quotes, which is how Redshift sends SUPER to the driver; a cast
+(``data.customer.name::varchar``) gives the plain string, as on Redshift. Which columns are SUPER is learned from the
 ``CREATE TABLE`` / ``ALTER TABLE`` DDL the proxy sees (every client connects
 through the proxy, so every declaration passes by). Rewrites are applied only
 outside string literals, so data is never touched.
@@ -117,6 +120,184 @@ def rewrite_super_paths(sql: str) -> str:
         if path is None:
             return m.group(0)
         elems = ", ".join("'" + p.replace("'", "''") + "'" for p in path)
-        return f"({m.group(1)} #>> ARRAY[{elems}])"
+        return f"({m.group(1)} {_TAG} ARRAY[{elems}])"
 
-    return _map_code(sql, lambda code: pat.sub(repl, code))
+    tagged = _map_code(sql, lambda code: pat.sub(repl, code))
+    if _TAG not in tagged:
+        return tagged
+    return _finish(tagged)
+
+
+# ---------------------------------------------------------------------------------
+# Projection items: SUPER as JSON text
+# ---------------------------------------------------------------------------------
+# marks a rewritten chain until _finish decides its operator
+_TAG = "#>>/*oblako-nav*/"
+_TAGGED = re.compile(
+    r"\((?:\w+\.)?\w+ " + re.escape(_TAG) + r" ARRAY\[(?:'(?:[^']|'')*'(?:, )?)+\]\)"
+)
+# a SELECT list ends, or never began, at one of these at the same depth
+_NOT_SELECT_LIST = {
+    "from",
+    "where",
+    "having",
+    "on",
+    "using",
+    "set",
+    "values",
+    "join",
+    "limit",
+    "into",
+    "returning",
+}
+# after an item, these start an operator expression rather than end the item
+_OPERATOR_WORDS = {
+    "is",
+    "and",
+    "or",
+    "not",
+    "like",
+    "ilike",
+    "in",
+    "between",
+    "similar",
+    "collate",
+    "at",
+    "escape",
+    "isnull",
+    "notnull",
+}
+_ITEM_END_WORDS = {
+    "asc",
+    "desc",
+    "nulls",
+    "from",
+    "as",
+    "into",
+    "union",
+    "except",
+    "intersect",
+    "order",
+    "limit",
+    "where",
+    "group",
+    "having",
+    "offset",
+    "fetch",
+}
+
+
+def _scan(sql: str) -> tuple[list[bool], list[int]]:
+    """Return, per character, whether it is code (not a literal or comment) and its depth."""
+    code = [True] * len(sql)
+    depth = [0] * len(sql)
+    d, i, n = 0, 0, len(sql)
+    while i < n:
+        c = sql[i]
+        if c == "'" or c == '"':
+            j = i + 1
+            while j < n and not (sql[j] == c and (j + 1 >= n or sql[j + 1] != c)):
+                j += 2 if sql[j] == c else 1
+            for k in range(i, min(j + 1, n)):
+                code[k], depth[k] = False, d
+            i = j + 1
+            continue
+        if sql.startswith("--", i) or sql.startswith("/*", i):
+            j = sql.find("\n", i) if sql.startswith("--", i) else sql.find("*/", i) + 1
+            j = n - 1 if j <= 0 else j
+            for k in range(i, j + 1):
+                code[k], depth[k] = False, d
+            i = j + 1
+            continue
+        if c == "(":
+            depth[i] = d
+            d += 1
+        elif c == ")":
+            d -= 1
+            depth[i] = d
+        else:
+            depth[i] = d
+        i += 1
+    return code, depth
+
+
+def _prev_token(sql, code, start):
+    """Return (token, index) of the last code token before ``start``, or ("", -1)."""
+    i = start - 1
+    while i >= 0 and (not code[i] or sql[i].isspace()):
+        i -= 1
+    if i < 0:
+        return "", -1
+    if sql[i].isalnum() or sql[i] == "_":
+        j = i
+        while j > 0 and code[j - 1] and (sql[j - 1].isalnum() or sql[j - 1] == "_"):
+            j -= 1
+        return sql[j : i + 1].lower(), j
+    return sql[i], i
+
+
+def _next_token(sql, code, end):
+    """Return the first code token at or after ``end``, or "" at the end."""
+    i = end
+    while i < len(sql) and (not code[i] or sql[i].isspace()):
+        i += 1
+    if i >= len(sql):
+        return ""
+    if sql[i].isalnum() or sql[i] == "_":
+        j = i
+        while j < len(sql) and (sql[j].isalnum() or sql[j] == "_"):
+            j += 1
+        return sql[i:j].lower()
+    return sql[i]
+
+
+def _in_select_list(sql, code, depth, start) -> bool:
+    """Whether the expression at ``start`` stands alone as an item of a SELECT list.
+
+    GROUP BY and ORDER BY lists count too, so an item grouped or ordered by is
+    spelled exactly as it is selected (PostgreSQL matches them by expression).
+    """
+    tok, at = _prev_token(sql, code, start)
+    if tok not in ("select", "distinct", "all", "by", ","):
+        return False
+    d = depth[start]
+    while at >= 0:
+        if tok in ("select", "by") and depth[at] == d:
+            return True
+        if tok == "(" and depth[at] < d:
+            return False  # inside parentheses that aren't a subquery's own
+        if tok in _NOT_SELECT_LIST and depth[at] == d:
+            return False
+        tok, at = _prev_token(sql, code, at)
+    return False
+
+
+def _finish(sql: str) -> str:
+    """Turn each tagged chain into ``#>>`` (text), or JSON text as a bare SELECT item."""
+    code, depth = _scan(sql)
+    out, pos = [], 0
+    for m in _TAGGED.finditer(sql):
+        if not code[m.start()]:
+            continue
+        nxt = _next_token(sql, code, m.end())
+        bare = _in_select_list(sql, code, depth, m.start()) and (
+            nxt in ("", ",", ")", ";")
+            or nxt in _ITEM_END_WORDS
+            or (nxt.isidentifier() and nxt not in _OPERATOR_WORDS)
+        )
+        expr = m.group(0)
+        if bare:  # the SUPER value as Redshift sends it: JSON text
+            expr = "(" + expr[1:-1].replace(_TAG, "#>") + ")::text"
+            # named after the last step, as Redshift names it (not "?column?")
+            last = re.findall(r"'((?:[^']|'')*)'", m.group(0))[-1].replace("''", "'")
+            in_list = _prev_token(sql, code, m.start())[0] != "by"
+            aliased = nxt == "as" or (
+                nxt.isidentifier() and nxt not in _OPERATOR_WORDS | _ITEM_END_WORDS
+            )
+            if in_list and not aliased and not last.isdigit():
+                expr += ' AS "' + last.replace('"', '""') + '"'
+
+        out.append(sql[pos : m.start()] + expr)
+        pos = m.end()
+    out.append(sql[pos:])
+    return "".join(out).replace(_TAG, "#>>")
