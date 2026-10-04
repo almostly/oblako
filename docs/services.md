@@ -40,7 +40,7 @@ This page lists what each one provides and where it diverges from AWS.
 | **Athena** | The real boto3 `athena` API (`StartQueryExecution`, `GetQueryExecution`, `GetQueryResults`, `StopQueryExecution`, workgroups) executed via **Trino**, with results written to the S3 `OutputLocation`. `AwsDataCatalog` is the **Glue Data Catalog**, so awswrangler's `read_sql_query` works as is, CTAS included. See "Glue Data Catalog and Athena" below. | Trino SQL dialect, not Athena/Presto-exact; `StopQueryExecution` is best-effort (Trino runs to completion); no federation, `UNLOAD` or Athena's Hive DDL. |
 | **Firehose** | `firehose` delivery streams: `DirectPut` and `KinesisStreamAsSource` (read from `LATEST`, as on AWS) sources, buffered and flushed on the interval or size to **S3** or **Redshift**. S3 objects are named as on AWS (`<prefix><stream>-1-yyyy-MM-dd-HH-mm-ss-<uuid>`, `yyyy/MM/dd/HH/` appended to a prefix without a `!{timestamp:...}` expression; `!{timestamp:...}` and `!{firehose:random-string}` evaluated; `.gz` for GZIP). **Record format conversion** writes Parquet with the column types of a Glue table (`pip install 'oblako[parquet]'`); records that don't convert go to the `ErrorOutputPrefix` as `format-conversion-failed`. The **Redshift** destination stages each batch to S3 and runs Firehose's `COPY ... FROM 's3://...' CREDENTIALS ... <CopyOptions>` on the cluster, so `CopyOptions` such as `JSON 'auto' GZIP` apply as on AWS. Stream definitions persist across restarts. | Destinations: S3 and Redshift only. No Lambda transformation, dynamic partitioning, ORC, or ZIP/Snappy compression; no `UpdateDestination` (the version is always 1). Buffering floors aren't enforced, and records still buffered when the engine stops are lost. |
 | **Glue (jobs)** | The boto3 `glue` job API (`create_job`, `start_job_run`, `get_job_run`, `get_job_runs`, ...) on the Glue engine (:8486): a run fetches `Command.ScriptLocation` from S3 and runs it in the official `amazon/aws-glue-libs:5` image (per-job container), with Glue's arguments (`--JOB_NAME`, the job's arguments) so `getResolvedOptions` works. Spark's `s3://` and `s3a://` reach oblako's S3, and the container's AWS SDKs reach oblako's Glue and S3 (`AWS_ENDPOINT_URL_GLUE` / `_S3`), so `from_catalog` reads Data Catalog tables and scripts carry no endpoint. Output goes to CloudWatch Logs `/aws-glue/jobs/output` and `/error` (in moto). | ~5 GB image; workers, worker types and job bookmarks aren't modelled (one local Spark); sequential workflows only (no full DAGs/crawlers). |
-| **Glue Data Catalog** | boto3 `glue` databases, tables, partitions and column statistics: Parquet / CSV / JSON tables (awswrangler, Athena CTAS) and Iceberg tables (PyIceberg's Glue catalog), the latter in the same **Iceberg REST catalog** as S3 Tables. Trino's metastore for Athena. | No crawlers, connections or Lake Formation; Glue can't write Iceberg metadata itself (`OpenTableFormatInput`). |
+| **Glue Data Catalog** | boto3 `glue` databases, tables, partitions, column statistics and connections: Parquet / CSV / JSON tables (awswrangler, Athena CTAS) and Iceberg tables (PyIceberg's Glue catalog), the latter in the same **Iceberg REST catalog** as S3 Tables. Trino's metastore for Athena. | No crawlers, connections or Lake Formation; Glue can't write Iceberg metadata itself (`OpenTableFormatInput`). |
 
 ## Orchestration & compute
 
@@ -342,6 +342,18 @@ SELECT sandbox.credit_predict(f1::float8, f2::float8) FROM sandbox.tape;
   [...]}` as `SUPER`.
 - Features must be numeric (cast them in the `SELECT`); `PREPROCESSORS` other
   than `'none'` are rejected. The model lives in the database it was created in.
+
+**COPY, UNLOAD and awswrangler.** `COPY` loads Parquet, CSV, JSON and delimited
+text from S3, and `UNLOAD` writes them, as Redshift does: files named after the
+prefix as written (`venue_0000_part_00`, `000` with `PARALLEL OFF`; `.parquet` for
+Parquet, `.gz`/`.bz2`/`.zst` when compressed, or `EXTENSION`), `PARTITION BY (...)
+[INCLUDE]` into Hive-style folders, `MANIFEST [VERBOSE]`, and a refusal to write
+into a non-empty prefix unless `ALLOWOVERWRITE` or `CLEANPATH`. Every function in
+awswrangler's `wr.redshift` works against redshift-local: `to_sql` in each mode
+and with Redshift's table options, `copy`, `unload` and `unload_to_files`, and all
+three ways to connect: a Secrets Manager secret, a Glue connection, and
+`connect_temp`, whose `GetClusterCredentials` call issues an `IAMA:<user>` login on
+the cluster's engine that acts as `<user>` until it expires.
 
 **SUPER.** `SUPER` columns take JSON (`json_parse`, nested Parquet through
 `COPY`) and PartiQL navigation, with dots or brackets: `data.customer.name`,
