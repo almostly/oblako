@@ -50,6 +50,7 @@ import re
 import ssl
 import struct
 import sys
+import time
 
 # The COPY/UNLOAD <-> S3 bridge. Optional: if its deps (pydantic/boto3/pyarrow)
 # aren't present the proxy still runs, just without COPY/UNLOAD rewriting.
@@ -283,6 +284,56 @@ def _rewrite_catalog(sql: str) -> str:
     return sql
 
 
+_EXTERNAL_CACHE: tuple[float, set[str]] = (0.0, set())
+
+
+def _external_schemas() -> set[str]:
+    """Return the external (Data Catalog) schema names of every database.
+
+    Asked only for a MERGE, whose target may be an Iceberg table, and cached for
+    two seconds. Over the trusted Unix socket; empty if anything fails, so the
+    MERGE then runs as sent.
+    """
+    global _EXTERNAL_CACHE
+    now = time.monotonic()
+    if now - _EXTERNAL_CACHE[0] < 2:
+        return _EXTERNAL_CACHE[1]
+    names: set[str] = set()
+    try:
+        import psycopg
+
+        def conninfo(db: str) -> str:
+            return (
+                f"host={os.path.dirname(PG_SOCKET)} port={PG_PORT} user={PG_USER} "
+                f"dbname={db} connect_timeout=2"
+            )
+
+        with psycopg.connect(conninfo(PG_DATABASE), autocommit=True) as conn:
+            dbs = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT datname FROM pg_database "
+                    "WHERE datallowconn AND NOT datistemplate"
+                )
+            ]
+        for db in dbs:
+            with psycopg.connect(conninfo(db), autocommit=True) as conn:
+                row = conn.execute(
+                    "SELECT to_regclass('pg_oblako.external_schemas')"
+                ).fetchone()
+                if row and row[0]:
+                    names |= {
+                        r[0]
+                        for r in conn.execute(
+                            "SELECT schemaname FROM pg_oblako.external_schemas"
+                        )
+                    }
+    except Exception as exc:  # the MERGE then runs as sent
+        print(f"oblako: external schema lookup failed: {exc!r}", flush=True)
+    _EXTERNAL_CACHE = (now, names)
+    return names
+
+
 def rewrite_sql(sql: str) -> str:
     """Rewrite Redshift-only SQL PostgreSQL can't parse.
 
@@ -303,6 +354,9 @@ def rewrite_sql(sql: str) -> str:
     # first, so the rewrites below also reach the column list and AS query
     if iceberg_tables is not None and iceberg_tables.has_iceberg_ddl(s):
         s = iceberg_tables.rewrite_iceberg(s)
+    if iceberg_tables is not None and (target := iceberg_tables.merge_target(s)):
+        if len(target) >= 2 and target[-2] in _external_schemas():
+            s = iceberg_tables.rewrite_merge(s)
     if pivot_unpivot is not None:
         s = pivot_unpivot.rewrite_pivot_unpivot(s)  # PIVOT/UNPIVOT -> standard SQL
     if copy_unload is not None and copy_unload.has_s3_copy_or_unload(s):

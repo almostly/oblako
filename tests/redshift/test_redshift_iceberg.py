@@ -347,3 +347,58 @@ def test_redshift_connector_parameters(rs):
         assert [list(r) for r in cur.fetchall()] == [["b"]]
     finally:
         conn.close()
+
+
+def test_ddl_returns_no_rows_as_on_redshift(rs):
+    cur = _exec(
+        rs,
+        f"CREATE TABLE {SCHEMA}.quiet (id int) USING ICEBERG "
+        f"LOCATION '{_location('quiet')}'",
+    )
+    assert cur.description is None
+
+
+def test_merge_into_an_iceberg_table(rs, cat):
+    _exec(
+        rs,
+        f"CREATE TABLE {SCHEMA}.stock (sku varchar, qty int) USING ICEBERG "
+        f"LOCATION '{_location('stock')}'",
+    )
+    _exec(rs, f"INSERT INTO {SCHEMA}.stock VALUES ('a', 1), ('b', 2), ('c', 3)")
+    _exec(rs, "DROP TABLE IF EXISTS public.stock_delta")
+    _exec(rs, "CREATE TABLE public.stock_delta (sku varchar, qty int)")
+    _exec(rs, "INSERT INTO public.stock_delta VALUES ('a', 10), ('c', 0), ('d', 4)")
+    # Redshift's form: the target named by its table name in ON and SET
+    cur = _exec(
+        rs,
+        f"MERGE INTO {SCHEMA}.stock USING public.stock_delta s ON stock.sku = s.sku "
+        "WHEN MATCHED AND s.qty = 0 THEN DELETE "
+        "WHEN MATCHED THEN UPDATE SET qty = stock.qty + s.qty "
+        "WHEN NOT MATCHED THEN INSERT VALUES (s.sku, s.qty)",
+    )
+    assert cur.description is None
+    assert _rows(rs, f"SELECT sku, qty FROM {SCHEMA}.stock ORDER BY sku") == [
+        ("a", 11),
+        ("b", 2),
+        ("d", 4),
+    ]
+    snapshot = cat.load_table((DB, "stock")).scan().to_arrow().to_pylist()
+    assert sorted((r["sku"], r["qty"]) for r in snapshot) == [
+        ("a", 11),
+        ("b", 2),
+        ("d", 4),
+    ]
+    _exec(rs, "DROP TABLE public.stock_delta")
+
+
+def test_merge_into_a_local_table_is_untouched(rs):
+    _exec(rs, "DROP TABLE IF EXISTS public.merge_local")
+    _exec(rs, "CREATE TABLE public.merge_local (id int, v int)")
+    _exec(rs, "INSERT INTO public.merge_local VALUES (1, 1)")
+    cur = _exec(
+        rs,
+        "MERGE INTO public.merge_local USING (SELECT 1 AS id, 5 AS v) s "
+        "ON merge_local.id = s.id WHEN MATCHED THEN UPDATE SET v = s.v",
+    )
+    assert cur.statusmessage == "MERGE 1"
+    _exec(rs, "DROP TABLE public.merge_local")

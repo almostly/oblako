@@ -159,25 +159,38 @@ def parse_create_iceberg(sql: str) -> dict | None:
     return out
 
 
+def _command(call: str) -> str:
+    """Wrap a pg_oblako call so the client sees a command, with no result rows.
+
+    Redshift answers DDL with a command completion and no result set; a ``DO``
+    block does the same (``SELECT`` would hand back a status row).
+    """
+    tag = "$oblako_ddl$"
+    n = 0
+    while tag in call:
+        n += 1
+        tag = f"$oblako_ddl{n}$"
+    return f"DO {tag} BEGIN PERFORM {call}; END {tag}"
+
+
 def rewrite_iceberg(sql: str) -> str:
     """Rewrite external-schema and Iceberg DDL into pg_oblako function calls."""
     if m := _EXTERNAL_SCHEMA.match(sql):
         db = _DATABASE.search(m.group("rest"))
         database = db.group(1).replace("''", "'") if db else None
-        return (
-            "SELECT pg_oblako.create_external_schema("
+        return _command(
+            "pg_oblako.create_external_schema("
             f"{_literal(m.group('schema'))}, {_literal(database)}, "
             f"{'true' if _CREATE_DB.search(m.group('rest')) else 'false'}, "
-            f"{'true' if m.group('ine') else 'false'}) AS status"
+            f"{'true' if m.group('ine') else 'false'})"
         )
     if (p := parse_create_iceberg(sql)) is not None:
-        return (
-            "SELECT pg_oblako.iceberg_create_table("
+        return _command(
+            "pg_oblako.iceberg_create_table("
             f"{_literal(p['name'])}, {_literal(p['columns'])}, "
             f"{_literal(p['location'])}, {_literal(p['partitioned'])}, "
             f"{_literal(p['properties'])}, "
-            f"{'true' if p['if_not_exists'] else 'false'}, {_literal(p['query'])}"
-            ") AS status"
+            f"{'true' if p['if_not_exists'] else 'false'}, {_literal(p['query'])})"
         )
     if m := _SHOW_TABLE.match(sql):
         return (
@@ -185,6 +198,29 @@ def rewrite_iceberg(sql: str) -> str:
             'AS "Show Table DDL statement"'
         )
     return sql
+
+
+_MERGE = re.compile(
+    rf"^\s*merge\s+into\s+(?P<name>{_NAME})(?P<rest>\s.*?)\s*;?\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def merge_target(sql: str) -> list[str] | None:
+    """Return the target's name parts if ``sql`` is a MERGE, else None."""
+    m = _MERGE.match(sql)
+    return split_name(m.group("name")) if m else None
+
+
+def rewrite_merge(sql: str) -> str:
+    """Rewrite a MERGE into an Iceberg table into a pg_oblako call.
+
+    PostgreSQL 16 can't MERGE into a view, which is what an Iceberg table is
+    here; ``iceberg_merge`` runs the statement against a copy instead. The proxy
+    calls this only for a target in an external schema; any other MERGE runs as
+    sent.
+    """
+    return _command(f"pg_oblako.iceberg_merge({_literal(sql)})")
 
 
 def has_iceberg_ddl(sql: str) -> bool:
@@ -800,6 +836,74 @@ def _create_table(
 
 
 # -----------------------------------------------------------------------------------------------
+# MERGE
+# -----------------------------------------------------------------------------------------------
+_TARGET_ALIAS = re.compile(r"\s+(?:as\s+)?(?!using\b)([A-Za-z_][\w$]*)", re.IGNORECASE)
+
+
+def _merge(plpy, stmt: str) -> str:
+    """MERGE into an Iceberg table: the statement as written, run against a copy.
+
+    The table's rows go into a temporary table, the MERGE runs there unchanged
+    (every clause PostgreSQL's MERGE has), and the difference between copy and
+    table is staged as deletes and inserts. The deferred commit then writes one
+    snapshot, as any other write.
+    """
+    m = _MERGE.match(stmt)
+    if m is None:
+        _fail(plpy, "not a MERGE statement")
+    parts = split_name(m.group("name"))
+    if len(parts) < 2:
+        _fail(plpy, "name the MERGE target <external_schema>.<table>")
+    schema, table = parts[-2], parts[-1]
+    reg = plpy.execute(
+        "SELECT stage FROM pg_oblako.iceberg_tables WHERE "
+        f"schemaname = {plpy.quote_literal(schema)} AND "
+        f"tablename = {plpy.quote_literal(table)}"
+    )
+    if not reg.nrows():
+        _fail(plpy, f'relation "{schema}.{table}" does not exist')
+    stage = reg[0]["stage"]
+    if plpy.execute(
+        f"SELECT 1 FROM {stage} WHERE _stmt <> statement_timestamp() LIMIT 1"
+    ).nrows():
+        _fail(
+            plpy,
+            f"a transaction takes one write to Iceberg table {schema}.{table}, as on "
+            "Redshift: COMMIT first",
+        )
+    view = f"{_quote(schema)}.{_quote(table)}"
+    n = plpy.execute("SELECT nextval('pg_oblako.iceberg_stage_seq') AS n")[0]["n"]
+    copy, gone, new = (f"oblako_merge_{n}{s}" for s in ("", "_d", "_i"))
+    plpy.execute(f"CREATE TEMP TABLE {copy} AS SELECT * FROM {view}")
+    for col in _not_null_columns(plpy, stage):
+        plpy.execute(f"ALTER TABLE {copy} ALTER COLUMN {_quote(col)} SET NOT NULL")
+    rest = m.group("rest")
+    # the target keeps its name inside the statement (ON orders.id = s.id)
+    target = f"pg_temp.{copy}"
+    if not _TARGET_ALIAS.match(rest):
+        target += f" AS {_quote(table)}"
+    rest = re.sub(
+        rf"(?i)\b{re.escape(schema)}\.{re.escape(table)}\.", f"{_quote(table)}.", rest
+    )
+    plpy.execute(f"MERGE INTO {target}{rest}")
+    plpy.execute(
+        f"CREATE TEMP TABLE {gone} AS SELECT * FROM {view} EXCEPT ALL "
+        f"SELECT * FROM {copy}"
+    )
+    plpy.execute(
+        f"CREATE TEMP TABLE {new} AS SELECT * FROM {copy} EXCEPT ALL "
+        f"SELECT * FROM {view}"
+    )
+    plpy.execute(
+        f"INSERT INTO {stage} SELECT 'D', statement_timestamp(), * FROM {gone}"
+    )
+    plpy.execute(f"INSERT INTO {stage} SELECT 'I', statement_timestamp(), * FROM {new}")
+    plpy.execute(f"DROP TABLE {copy}, {gone}, {new}")
+    return "MERGE"
+
+
+# -----------------------------------------------------------------------------------------------
 # Reads and commits
 # -----------------------------------------------------------------------------------------------
 def scan(database: str, name: str):
@@ -1011,3 +1115,9 @@ def on_drop_table(plpy, query: str | None) -> None:
     """Before DROP TABLE (see ``_on_drop_table``)."""
     with _coordinator_only(plpy):
         _on_drop_table(plpy, query)
+
+
+def merge(plpy, stmt: str) -> str:
+    """MERGE into an Iceberg table (see ``_merge``)."""
+    with _coordinator_only(plpy):
+        return _merge(plpy, stmt)
