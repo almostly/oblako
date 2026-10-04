@@ -402,3 +402,57 @@ def test_merge_into_a_local_table_is_untouched(rs):
     )
     assert cur.statusmessage == "MERGE 1"
     _exec(rs, "DROP TABLE public.merge_local")
+
+
+def test_alter_table_changes_the_iceberg_table(rs, cat):
+    t = f"{SCHEMA}.evolving"
+    _exec(
+        rs,
+        f"CREATE TABLE {t} (id int, amount real, d date) USING ICEBERG "
+        f"LOCATION '{_location('evolving')}' PARTITIONED BY (year(d))",
+    )
+    _exec(rs, f"INSERT INTO {t} VALUES (1, 1.5, '2026-01-02')")
+    _exec(rs, f"ALTER TABLE {t} RENAME COLUMN amount TO price")
+    _exec(rs, f"ALTER TABLE {t} ADD COLUMN note varchar")
+    _exec(rs, f"ALTER TABLE {t} ALTER COLUMN id TYPE bigint")
+    _exec(rs, f"ALTER TABLE {t} ALTER COLUMN price TYPE double precision")
+    _exec(rs, f"ALTER TABLE {t} SET TABLE PROPERTIES ('compression_type'='snappy')")
+    _exec(rs, f"ALTER TABLE {t} REPLACE PARTITION FIELD year(d) WITH month(d)")
+    _exec(rs, f"ALTER TABLE {t} ADD PARTITION FIELD bucket(4, id)")
+    _exec(rs, f"INSERT INTO {t} VALUES (2, 2.5, '2026-02-03', 'new')")
+    assert _rows(rs, f"SELECT id, price, note FROM {t} ORDER BY id") == [
+        (1, 1.5, None),
+        (2, 2.5, "new"),
+    ]
+    ice = cat.load_table((DB, "evolving"))
+    fields = {f.name: str(f.field_type) for f in ice.schema().fields}
+    assert fields == {"id": "long", "price": "double", "d": "date", "note": "string"}
+    assert [str(f.transform) for f in ice.spec().fields] == ["month", "bucket[4]"]
+    assert ice.properties["write.parquet.compression-codec"] == "snappy"
+    _exec(rs, f"ALTER TABLE {t} DROP PARTITION FIELD bucket(4, id)")
+    _exec(rs, f"ALTER TABLE {t} DROP COLUMN note")
+    (ddl,) = _rows(rs, f"SHOW TABLE {t}")[0]
+    assert ddl.startswith(
+        f"CREATE TABLE {t} (id bigint,\nprice double precision,\nd date)"
+    )
+    assert "PARTITIONED BY (MONTH(d))" in ddl
+
+
+@pytest.mark.parametrize(
+    "action, error",
+    [
+        ("ALTER COLUMN id TYPE smallint", "widens only"),
+        ("DROP COLUMN d", "partition spec"),
+        ("ADD COLUMN s varchar DEFAULT 'x'", "Default values"),
+        ("ADD COLUMN s varchar(20)", "VARCHAR\\(N\\)"),
+    ],
+)
+def test_alter_table_refused(rs, action, error):
+    t = f"{SCHEMA}.fixed_{uuid.uuid4().hex[:6]}"
+    _exec(
+        rs,
+        f"CREATE TABLE {t} (id int, d date) USING ICEBERG "
+        f"LOCATION '{_location('fixed')}' PARTITIONED BY (day(d))",
+    )
+    with pytest.raises(psycopg.Error, match=error):
+        _exec(rs, f"ALTER TABLE {t} {action}")
