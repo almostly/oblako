@@ -223,8 +223,9 @@ set `sslmode: verify-ca` (see TLS below).
 single-node engine and each node of a multi-node cluster. The key never leaves
 your machine, and the certificate cannot sign others (`CA:FALSE`). It survives
 container recreates and volume resets, so a pinned `sslrootcert` or `oblako trust`
-stays valid. To use your own, replace the two files there. Under plain
-`docker compose`, with no mount, each container makes its own certificate.
+stays valid. To use your own, replace the two files there. A container started
+by plain `docker compose` makes its own certificate, and `oblako trust` trusts
+that one while it runs.
 
 - **libpq clients** (psycopg, and JDBC tools like Metabase) work out of the box
   with `sslmode=require` (encrypt), or `verify-full` with `sslrootcert` pointed at

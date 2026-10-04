@@ -37,12 +37,13 @@ services:
       # the S3Proxy service on the compose network; unset (standalone `docker run`)
       # it falls back to real AWS, so a genuine s3:// with real creds also works.
       OBLAKO_S3_ENDPOINT: http://s3proxy:80
+    # Iceberg tables register in oblako's Iceberg catalog on the host (8181)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - redshift_data:/var/lib/postgresql/data
       # Redshift ML: CREATE MODEL trains in a container on the host Docker daemon
       - /var/run/docker.sock:/var/run/docker.sock
-      # this machine's TLS cert, the one `oblako trust` adds (made here if missing)
-      - ${HOME}/.oblako/redshift/tls:/etc/oblako-redshift
 
   # Redshift MPP cluster (opt-in `cluster` profile): the same Redshift-compatible
   # engine on Citus, so tables shard across worker nodes for real multi-node
@@ -68,9 +69,11 @@ services:
       OBLAKO_CITUS_ROLE: coordinator
       OBLAKO_CITUS_COORDINATOR_HOST: redshift-coordinator
       OBLAKO_CITUS_WORKERS: redshift-w1,redshift-w2
-    volumes:
-      # this machine's TLS cert, the one `oblako trust` adds (made here if missing)
-      - ${HOME}/.oblako/redshift/tls:/etc/oblako-redshift
+      # COPY/UNLOAD and Iceberg tables reach S3, as on the single node
+      OBLAKO_S3_ENDPOINT: http://s3proxy:80
+    # Iceberg tables register in oblako's Iceberg catalog on the host (8181)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - redshift-w1
       - redshift-w2
