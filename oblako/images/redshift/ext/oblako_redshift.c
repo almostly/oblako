@@ -23,6 +23,13 @@ void _PG_init(void);
 /* one backing string per no-op GUC (never read; the GUC just has to exist) */
 static char *guc_store[8];
 
+/*
+ * Redshift's enable_case_sensitive_identifier: off by default, as on Redshift.
+ * Tools read it (awswrangler's to_sql(add_new_columns=True) runs SHOW) and set
+ * it; PostgreSQL already keeps quoted identifiers' case, so it changes nothing.
+ */
+static bool case_sensitive_identifier = false;
+
 static const char *const redshift_gucs[] = {
 	"client_protocol_version",
 	"driver_version",
@@ -47,6 +54,15 @@ _PG_init(void)
 								   PGC_USERSET,
 								   GUC_NO_SHOW_ALL,
 								   NULL, NULL, NULL);
+
+	DefineCustomBoolVariable("enable_case_sensitive_identifier",
+							 "Amazon Redshift compatibility: case-sensitive identifiers.",
+							 NULL,
+							 &case_sensitive_identifier,
+							 false,
+							 PGC_USERSET,
+							 0,
+							 NULL, NULL, NULL);
 
 	/*
 	 * Impersonate Redshift's reported PostgreSQL version so the driver parses it
