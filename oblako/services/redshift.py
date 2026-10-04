@@ -52,6 +52,99 @@ def _redshift_connector_bundle(python_exe: str) -> str:
     return out.strip()
 
 
+# This machine's TLS certificate and key for the Redshift proxy, mounted into every
+# Redshift container. Each machine makes its own, so no one else holds the key.
+CERT_DIR = Path.home() / ".oblako" / "redshift" / "tls"
+# Images up to oblako 0.1.0 baked one certificate into every container, and its key
+# was published with the image. `oblako trust` removes it from bundles it added it to.
+LEGACY_CERT_SHA256 = "163ec1ef92f7c3ef5fc4ff74fbed5e388a0287ad552f2447b8da4f322370dc31"
+
+
+def ensure_cert(cert_dir: Path | None = None) -> Path:
+    """Create this machine's certificate and key for the Redshift proxy, once.
+
+    A server certificate for localhost and 127.0.0.1 only (CA:FALSE), so even its
+    key could not vouch for another host. Kept across restarts and rebuilds, so a
+    bundle that trusts it (``oblako trust``) stays valid. Returns the directory.
+    """
+    import datetime
+    import ipaddress
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+    cert_dir = cert_dir or CERT_DIR
+    crt, key_path = cert_dir / "server.crt", cert_dir / "server.key"
+    if crt.exists() and key_path.exists():
+        return cert_dir
+    cert_dir.mkdir(parents=True, exist_ok=True)
+    key = ec.generate_private_key(ec.SECP256R1())
+    name = x509.Name(
+        [
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "oblako"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
+        ]
+    )
+    now = datetime.datetime.now(datetime.timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - datetime.timedelta(minutes=5))
+        .not_valid_after(now + datetime.timedelta(days=3650))
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [
+                    x509.DNSName("localhost"),
+                    x509.IPAddress(ipaddress.ip_address("127.0.0.1")),
+                ]
+            ),
+            critical=False,
+        )
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(
+            x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False
+        )
+        .sign(key, hashes.SHA256())
+    )
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    key_path.chmod(0o600)
+    crt.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    return cert_dir
+
+
+def remove_certs_from_bundle(bundle_path: str, sha256s: set[str]) -> int:
+    """Remove PEM certs whose SHA-256 fingerprint is in ``sha256s``; return how many."""
+    import hashlib
+    import re
+    import ssl
+
+    p = Path(bundle_path)
+    text = p.read_text()
+    blocks = re.findall(
+        r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", text, re.S
+    )
+    removed = 0
+    for block in blocks:
+        fingerprint = hashlib.sha256(ssl.PEM_cert_to_DER_cert(block)).hexdigest()
+        if fingerprint in sha256s:
+            text = text.replace(block, "")
+            removed += 1
+    if removed:
+        p.write_text(re.sub(r"\n{3,}", "\n\n", text).strip() + "\n")
+    return removed
+
+
 def append_cert_to_bundle(bundle_path: str, cert: str) -> bool:
     """Append a PEM cert to a CA bundle if not already present.
 
@@ -120,6 +213,8 @@ class RedshiftService(Service):
                     "bind": "/var/run/docker.sock",
                     "mode": "rw",
                 },
+                # this machine's TLS cert and key (ensure_cert, before start)
+                str(CERT_DIR): {"bind": "/etc/oblako-redshift", "mode": "ro"},
             },
             # So the in-engine COPY/UNLOAD bridge can reach S3Proxy on the host
             # via host.docker.internal (Docker needs the explicit host-gateway
@@ -145,23 +240,13 @@ class RedshiftService(Service):
         )
 
     def server_cert(self) -> str | None:
-        """Return the proxy's TLS cert (PEM).
+        """Return the proxy's TLS cert (PEM): this machine's, created if missing.
 
-        The running container's cert comes first, since a mounted cert replaces
-        the baked one; otherwise the cert every oblako Redshift image bakes in
-        (images/redshift/certs), so ``oblako trust`` works before anything runs
-        and for a multi-node cluster, whose nodes carry the same cert.
+        Every Redshift container mounts it, the single-node engine and the nodes
+        of a multi-node cluster alike, so ``oblako trust`` works before anything
+        runs and covers them all.
         """
-        try:
-            container = self.client.containers.get(self.container_name)
-            code, out = container.exec_run(["cat", SSL_CERT_PATH])
-            if code == 0:
-                return out.decode()
-        except Exception:  # not running, or no Docker
-            pass
-        baked = Path(__file__).resolve().parents[1] / "images" / "redshift" / "certs"
-        cert = baked / "server.crt"
-        return cert.read_text() if cert.exists() else None
+        return (ensure_cert() / "server.crt").read_text()
 
     def trust_cert(self, python_exe: str | None = None) -> str:
         """Trust the proxy's cert in a venv's redshift_connector CA bundle.
@@ -172,29 +257,34 @@ class RedshiftService(Service):
         that bundle in ``python_exe``'s environment (default: the current one), so
         ``sslmode=verify-ca`` then gives real, verified TLS locally, no
         ``ssl=False``. Idempotent. Re-run after a redshift-connector reinstall
-        (which restores the pristine bundle). Note: that venv then also trusts this
-        cert when talking to real Redshift (harmless without the proxy's key).
+        (which restores the pristine bundle). The cert is this machine's own and
+        cannot sign others (CA:FALSE), so trusting it vouches for nothing else.
         """
         import sys
 
         cert = self.server_cert()
         if not cert:
-            raise RuntimeError(
-                "couldn't find oblako's Redshift TLS cert in the running "
-                "container or in the oblako package"
-            )
+            raise RuntimeError("couldn't create oblako's Redshift TLS cert")
         bundle = _redshift_connector_bundle(python_exe or sys.executable)
+        legacy = remove_certs_from_bundle(bundle, {LEGACY_CERT_SHA256})
         added = append_cert_to_bundle(bundle, cert)
+        note = (
+            " (and removed the certificate older oblako images shared, whose key "
+            "is public)"
+            if legacy
+            else ""
+        )
         return (
-            f"appended oblako's Redshift cert to {bundle}"
+            f"appended this machine's oblako Redshift cert to {bundle}{note}"
             if added
-            else f"already trusted in {bundle}"
+            else f"already trusted in {bundle}{note}"
         )
 
     def start(self) -> None:
         """Start the engine, then the Redshift API that runs multi-node clusters."""
         from oblako.engines import host
 
+        ensure_cert()  # mounted into the container: it must exist first
         super().start()
         if self.control_port == ports.REDSHIFT_CONTROL:
             host.start("redshift-control")

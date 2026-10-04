@@ -32,6 +32,7 @@ dependencies = [
     "psycopg[binary]>=3.1",  # modern driver (Firehose Redshift-destination COPY)
     "docker>=7.0",
     "pyyaml>=6.0",
+    "cryptography>=42",  # this machine's Redshift TLS certificate (ensure_cert)
 ]
 
 [project.optional-dependencies]

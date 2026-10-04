@@ -217,25 +217,27 @@ dbt-redshift: a `type: redshift` profile pointed at `host: localhost`,
 `port: 5439`. For verified TLS, run `oblako trust` once in the venv dbt uses, then
 set `sslmode: verify-ca` (see TLS below).
 
-**TLS.** The bundled proxy terminates SSL. The image ships a **fixed self-signed
-cert** (`CN=localhost`), baked in so every container, `docker compose down -v`,
-and fresh clone presents the *same* cert. That's what makes a pinned
-`sslrootcert` or `oblako trust` stay valid instead of going stale after a volume
-reset. It's a deliberate non-secret for local dev; override by mounting your own
-keypair at `/etc/oblako-redshift`, or disable TLS with `OBLAKO_SSL=0`.
+**TLS.** The bundled proxy terminates SSL with a self-signed certificate for
+`localhost` and `127.0.0.1`. oblako makes it once per machine, in
+`~/.oblako/redshift/tls`, and mounts it into every Redshift container, the
+single-node engine and each node of a multi-node cluster. The key never leaves
+your machine, and the certificate cannot sign others (`CA:FALSE`). It survives
+container recreates and volume resets, so a pinned `sslrootcert` or `oblako trust`
+stays valid. To use your own, replace the two files there. Under plain
+`docker compose`, with no mount, each container makes its own certificate.
 
-- **libpq clients** (psycopg2, and JDBC tools like Metabase) work out of the box
+- **libpq clients** (psycopg, and JDBC tools like Metabase) work out of the box
   with `sslmode=require` (encrypt), or `verify-full` with `sslrootcert` pointed at
-  `oblako/images/redshift/certs/server.crt` (the same cert the container serves).
+  `~/.oblako/redshift/tls/server.crt`.
 - **redshift_connector (dbt, awswrangler)** verifies only against a hardcoded
   Amazon CA bundle with no override, so it can't verify a local cert by default.
-  Run **`oblako trust`** once, it appends the proxy's cert to that venv's
-  redshift-connector bundle, then use `sslmode: verify-ca` for real, verified TLS
-  (no `ssl=False`). Because the cert is fixed, one trust holds across recreates;
-  re-run only after a `redshift-connector` reinstall (which restores the pristine
-  bundle) or in a fresh venv / CI runner. That venv then also trusts the cert
-  against real Redshift (harmless: it's a self-signed localhost cert). Without
-  trust, use `sslmode: disable` locally.
+  Run **`oblako trust`** once: it appends this machine's certificate to that venv's
+  redshift-connector bundle, then use `sslmode: verify-ca` for verified TLS (no
+  `ssl=False`). Re-run it after a `redshift-connector` reinstall (which restores
+  the pristine bundle) or in a fresh venv or CI runner. Without trust, use
+  `sslmode: disable` locally.
+- **Before oblako 0.1.0** the image carried one shared certificate whose key was
+  public. `oblako trust` removes it from any bundle it had been added to.
 
 `OBLAKO_SSL=0` turns TLS off entirely.
 
