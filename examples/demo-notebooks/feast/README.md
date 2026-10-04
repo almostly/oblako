@@ -5,7 +5,8 @@ you'd run on AWS** (only the endpoints change):
 
 - **offline store** = **redshift-local** (`redshift-data` API → wire proxy → PostgreSQL),
   with the proxy bridging Feast's `UNLOAD`/`COPY` staging to **S3Proxy**
-- **online store** = **DynamoDB Local**
+- **online store** = oblako's **DynamoDB** (DynamoDB Local behind oblako's endpoint, which
+  adds the tagging Feast reconciles on every `apply`)
 - **registry** = a local file
 
 [`feature_store_on_redshift.ipynb`](./feature_store_on_redshift.ipynb) walks the full
@@ -15,7 +16,9 @@ join), `materialize`, and `get_online_features`.
 ## Run it
 
 ```bash
-docker compose up -d redshift s3proxy dynamodb
+oblako up redshift
+oblako up s3
+oblako up dynamodb
 pip install "feast[aws]" redshift_connector pandas
 ```
 
