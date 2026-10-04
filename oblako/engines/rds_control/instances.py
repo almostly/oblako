@@ -29,6 +29,7 @@ import socket
 import threading
 import time
 from pathlib import Path
+from oblako.services.backends import publish
 
 STATE = Path.home() / ".oblako" / "rds" / "instances.json"
 INITDB = Path.home() / ".oblako" / "rds" / "initdb"
@@ -193,7 +194,7 @@ def _run(instance_id: str, record: dict, **spec):
     container = client.containers.create(
         image,
         name=name,
-        ports={f"{port}/tcp": port},
+        ports=publish({f"{port}/tcp": port}, client),
         labels={
             "oblako.service": "rds-instance",
             "oblako.rds.instance": instance_id,

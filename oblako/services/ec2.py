@@ -20,6 +20,7 @@ import os
 
 from .boto import BotoService
 from .moto import MotoService
+from .backends import publish
 
 # A generic instance is a long-running container off a base Linux image. AMI ids
 # are metadata only (moto), so the image is fixed (override via OBLAKO_EC2_IMAGE,
@@ -92,7 +93,7 @@ def start_instance_container(
         detach=True,
         name=name,
         volumes={vol: {"bind": EBS_MOUNT, "mode": "rw"}},
-        ports=published_ports or None,
+        ports=publish(published_ports or None, client),
         extra_hosts={
             "host.docker.internal": "host-gateway"
         },  # reach oblako on the host

@@ -8,11 +8,12 @@ Bedrock. Two ways in:
                        the local bedrock-runtime server).
 """
 
-from oblako import ports
 import httpx
 
-from oblako import config
-from .base import Service, PortMapping
+from oblako import config, ports
+
+from .backends import RUNNING
+from .base import PortMapping, Service, ServiceStatus
 
 
 class BedrockService(Service):
@@ -41,6 +42,38 @@ class BedrockService(Service):
         return f"http://localhost:{self.host_port}"
 
     # -------------------------------------------------------------------------------
+    # An Ollama already running on the port (installed on the host, say) is used as
+    # it is: oblako starts no container of its own, and `oblako down` leaves it alone.
+    # -------------------------------------------------------------------------------
+    def _ollama_answers(self) -> bool:
+        try:
+            return httpx.get(f"{self.url}/api/tags", timeout=2.0).status_code == 200
+        except httpx.HTTPError:
+            return False
+
+    def _own_container_running(self) -> bool:
+        try:
+            return self.backend.status(self.container_name) == RUNNING
+        except Exception:
+            return False
+
+    def start(self) -> None:
+        """Start Ollama in a container, unless one already answers on the port."""
+        if not self._own_container_running() and self._ollama_answers():
+            print(f"{self.name}: using the Ollama already running on {self.url}")
+            return
+        super().start()
+
+    def status(self) -> ServiceStatus:
+        """Report running when oblako's container runs or another Ollama answers."""
+        if self._own_container_running() or self._ollama_answers():
+            return ServiceStatus.RUNNING
+        return super().status()
+
+    def _health_check(self) -> bool:
+        return self._ollama_answers()
+
+    # -------------------------------------------------------------------------------
     # Engine (Ollama) model management
     # -------------------------------------------------------------------------------
     def pull_model(self, model: str | None = None) -> None:
@@ -48,9 +81,14 @@ class BedrockService(Service):
         from oblako.engines.bedrock.models import DEFAULT_MODEL
 
         model = model or DEFAULT_MODEL
-        container = self.client.containers.get(self.container_name)
-        exit_code, output = container.exec_run(f"ollama pull {model}", stream=False)
-        print(output.decode("utf-8"))
+        # the HTTP API works for oblako's container and for an Ollama of your own
+        resp = httpx.post(
+            f"{self.url}/api/pull",
+            json={"model": model, "stream": False},
+            timeout=None,
+        )
+        resp.raise_for_status()
+        print(f"{model}: {resp.json().get('status', 'pulled')}")
 
     def list_models(self) -> list[str]:
         """List locally available models."""

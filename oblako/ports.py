@@ -70,8 +70,8 @@ def _apply_overrides() -> None:
 
     names = {k for k, v in globals().items() if k.isupper() and isinstance(v, int)}
     for var, value in os.environ.items():
-        if not var.startswith("OBLAKO_PORT_"):
-            continue
+        if not var.startswith("OBLAKO_PORT_") or not value:
+            continue  # an empty value means unset, as in the shell
         name = var.removeprefix("OBLAKO_PORT_")
         if name not in names:
             known = ", ".join(sorted(names))

@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 from oblako.services.base import Service, PortMapping, ServiceStatus
+from oblako import ports
 
 
 def test_service_container_name():
@@ -92,7 +93,7 @@ def test_rds_service_defaults():
     svc = RdsService()
     assert svc.name == "rds"
     assert svc.image.startswith("pgvector/pgvector@sha256:")  # postgres 16 + pgvector
-    assert svc.host_port == 5432
+    assert svc.host_port == ports.RDS_PG  # 5432 unless OBLAKO_PORT_RDS_PG moves it
 
 
 def test_rds_service_control_client():
@@ -216,7 +217,7 @@ def test_sagemaker_image_exists():
     assert svc.image_exists("my-training:latest") is True
 
 
-def test_oblako_status():
+def test_oblako_status(monkeypatch):
     from oblako.services import Oblako
     from oblako.services import backends
 
@@ -228,9 +229,26 @@ def test_oblako_status():
         svc.backend.status.return_value = backends.ABSENT
     oblako.sagemaker._client = MagicMock()
     oblako.sagemaker._client.containers.list.return_value = []
+    # bedrock also counts an Ollama of your own on the port; none answers here
+    monkeypatch.setattr(oblako.bedrock, "_ollama_answers", lambda: False)
 
     result = oblako.status()
     assert result["bedrock"] == "stopped"
     assert result["redshift"] == "stopped"
     assert result["sagemaker"] == "idle"
     assert "moto" not in result  # infra is hidden from status
+
+
+def test_bedrock_uses_an_ollama_already_on_the_port(monkeypatch, capsys):
+    # a native Ollama on 11434: no container is started, and status says running
+    from oblako.services import backends
+    from oblako.services.bedrock import BedrockService
+
+    svc = BedrockService()
+    svc.backend = MagicMock()
+    svc.backend.status.return_value = backends.ABSENT
+    monkeypatch.setattr(svc, "_ollama_answers", lambda: True)
+    svc.start()
+    svc.backend.run.assert_not_called()
+    assert "using the Ollama already running" in capsys.readouterr().out
+    assert svc.status().value == "running"

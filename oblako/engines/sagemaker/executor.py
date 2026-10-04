@@ -27,6 +27,7 @@ import threading
 import time
 import urllib.request
 import uuid
+from oblako.services.backends import publish
 
 _ACCOUNT = "000000000000"
 _REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
@@ -354,7 +355,7 @@ class SageMakerExecutor:
         container = client.containers.create(
             container_def["Image"],
             environment=container_def.get("Environment", {}),
-            ports={"8080/tcp": None},  # publish to a random host port
+            ports=publish({"8080/tcp": None}, client),  # a random host port
             name=container_name,
             detach=True,
         )

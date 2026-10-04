@@ -131,3 +131,65 @@ def test_docker_host_overrides_socket_autodetect(monkeypatch):
     assert (
         backend._base_url is None
     )  # honours DOCKER_HOST via from_env, no explicit socket
+
+
+# ---------------------------------------------------------------------------
+# Where published ports listen
+# ---------------------------------------------------------------------------
+class _Networks:
+    def __init__(self, gateway):
+        self._gateway = gateway
+
+    def get(self, name):
+        if self._gateway is None:
+            raise RuntimeError("no bridge network")
+
+        class _Net:
+            attrs = {"IPAM": {"Config": [{"Gateway": self._gateway}]}}
+
+        return _Net()
+
+
+class _Engine:
+    def __init__(self, os_name, gateway=None):
+        self._os = os_name
+        self.networks = _Networks(gateway)
+
+    def info(self):
+        return {"OperatingSystem": self._os}
+
+
+def test_docker_desktop_publishes_on_loopback_only(monkeypatch):
+    monkeypatch.delenv("OBLAKO_BIND_ADDRESS", raising=False)
+    assert backends.bind_addresses(_Engine("Docker Desktop")) == ["127.0.0.1"]
+
+
+def test_other_engines_add_the_bridge_gateway(monkeypatch):
+    # containers reach the host through the gateway there (host.docker.internal)
+    monkeypatch.delenv("OBLAKO_BIND_ADDRESS", raising=False)
+    engine = _Engine("Ubuntu 24.04.1 LTS", gateway="172.17.0.1")
+    assert backends.bind_addresses(engine) == ["127.0.0.1", "172.17.0.1"]
+
+
+def test_unknown_gateway_falls_back_to_all_interfaces(monkeypatch):
+    monkeypatch.delenv("OBLAKO_BIND_ADDRESS", raising=False)
+    assert backends.bind_addresses(_Engine("Fedora", gateway=None)) == ["0.0.0.0"]
+
+
+def test_bind_address_override(monkeypatch):
+    monkeypatch.setenv("OBLAKO_BIND_ADDRESS", "0.0.0.0")
+    assert backends.bind_addresses(_Engine("Docker Desktop")) == ["0.0.0.0"]
+
+
+def test_publish_binds_fixed_ports_on_each_address(monkeypatch):
+    monkeypatch.delenv("OBLAKO_BIND_ADDRESS", raising=False)
+    engine = _Engine("Ubuntu", gateway="172.17.0.1")
+    bound = backends.publish(
+        {"5439/tcp": 5439, "8080/tcp": None, "80/tcp": ("10.0.0.5", 80)}, engine
+    )
+    assert bound == {
+        "5439/tcp": [("127.0.0.1", 5439), ("172.17.0.1", 5439)],
+        "8080/tcp": ("127.0.0.1",),  # a random port: loopback only
+        "80/tcp": ("10.0.0.5", 80),  # already bound: left as given
+    }
+    assert backends.publish(None, engine) is None

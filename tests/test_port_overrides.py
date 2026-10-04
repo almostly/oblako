@@ -38,6 +38,11 @@ def test_unknown_name_fails_loudly():
     assert "no port named RDS_PGG" in run.stderr
 
 
+def test_empty_value_means_unset():
+    run = _ports({"OBLAKO_PORT_RDS_PG": ""}, "print(ports.RDS_PG)")
+    assert run.stdout.split() == ["5432"]
+
+
 def test_bad_value_fails_loudly():
     run = _ports({"OBLAKO_PORT_S3": "ninety"}, "pass")
     assert run.returncode != 0

@@ -21,6 +21,7 @@ from pathlib import Path
 
 from .boto import BotoService, client
 from .moto import MotoService
+from .backends import publish
 
 SERVICE_LABEL = "oblako.service"
 LB_LABEL = "oblako.elbv2.lb-arn"
@@ -232,7 +233,7 @@ class Elbv2Service(BotoService):
             "caddy:alpine",
             detach=True,
             name=name,
-            ports={f"{PROXY_PORT}/tcp": info["host_port"]},
+            ports=publish({f"{PROXY_PORT}/tcp": info["host_port"]}, client),
             volumes={str(conf_dir): {"bind": "/etc/caddy", "mode": "ro"}},
             extra_hosts={"host.docker.internal": "host-gateway"},
             labels={SERVICE_LABEL: "elbv2", LB_LABEL: lb_arn},
