@@ -65,10 +65,14 @@ def ensure_cert(cert_dir: Path | None = None) -> Path:
 
     A server certificate for localhost and 127.0.0.1 only (CA:FALSE), so even its
     key could not vouch for another host. Kept across restarts and rebuilds, so a
-    bundle that trusts it (``oblako trust``) stays valid. Returns the directory.
+    bundle that trusts it (``oblako trust``) stays valid. Its subject carries a
+    random OU: OpenSSL finds a trusted self-signed certificate by its subject, and
+    two trusted oblako certificates with one subject make it reject the server.
+    Returns the directory.
     """
     import datetime
     import ipaddress
+    import secrets
 
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
@@ -84,6 +88,7 @@ def ensure_cert(cert_dir: Path | None = None) -> Path:
     name = x509.Name(
         [
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "oblako"),
+            x509.NameAttribute(NameOID.ORGANIZATIONAL_UNIT_NAME, secrets.token_hex(6)),
             x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
         ]
     )
@@ -227,6 +232,36 @@ def _fingerprint(cert: str) -> str:
     return hashlib.sha256(ssl.PEM_cert_to_DER_cert(cert)).hexdigest()
 
 
+def oblako_certs_in_bundle(bundle_path: str) -> set[str]:
+    """Return the SHA-256 fingerprints of the oblako certificates in a CA bundle."""
+    import hashlib
+    import re
+    import ssl
+
+    from cryptography import x509
+    from cryptography.x509.oid import NameOID
+
+    found = set()
+    text = Path(bundle_path).read_text()
+    for block in re.findall(
+        r"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", text, re.S
+    ):
+        der = ssl.PEM_cert_to_DER_cert(block)
+        orgs = x509.load_der_x509_certificate(der).subject.get_attributes_for_oid(
+            NameOID.ORGANIZATION_NAME
+        )
+        if any(o.value == "oblako" for o in orgs):
+            found.add(hashlib.sha256(der).hexdigest())
+    return found
+
+
+def _sha256(cert: str) -> str:
+    import hashlib
+    import ssl
+
+    return hashlib.sha256(ssl.PEM_cert_to_DER_cert(cert.strip())).hexdigest()
+
+
 def append_cert_to_bundle(bundle_path: str, cert: str) -> bool:
     """Append a PEM cert to a CA bundle if not already present.
 
@@ -362,6 +397,12 @@ class RedshiftService(Service):
         redshift-connector reinstall (which restores the pristine bundle). The
         cert is this machine's own and cannot sign others (CA:FALSE), so trusting
         it vouches for nothing else.
+
+        oblako certificates no proxy here presents any more (a removed compose
+        container's, say) are dropped from the bundle and the keeper: OpenSSL
+        finds a trusted self-signed certificate by its subject, and certificates
+        older oblako versions made share one, so a stale one can make it reject
+        the current server.
         """
         import sys
 
@@ -369,18 +410,21 @@ class RedshiftService(Service):
         bundle = _redshift_connector_bundle(python_exe)
         legacy = remove_certs_from_bundle(bundle, {LEGACY_CERT_SHA256})
         certs = self.server_certs()
+        current = {_sha256(c) for c in certs}
+        stale = remove_certs_from_bundle(
+            bundle, oblako_certs_in_bundle(bundle) - current
+        )
         added = sum(append_cert_to_bundle(bundle, cert) for cert in certs)
         site = _site_packages(python_exe)
-        kept = [
-            c for c in kept_certs(site) if c.strip() not in {x.strip() for x in certs}
-        ]
-        write_trust_keeper(site, kept + certs)
+        write_trust_keeper(site, certs)
         note = (
             " (and removed the certificate older oblako images shared, whose key "
             "is public)"
             if legacy
             else ""
         )
+        if stale:
+            note += f" (and removed {stale} oblako cert(s) no proxy here presents)"
         done = (
             f"appended {added} oblako Redshift cert(s) to {bundle}"
             if added
