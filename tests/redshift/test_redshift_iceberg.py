@@ -7,7 +7,6 @@ catalog, where PyIceberg, Trino and the Glue API see it, and tables other engine
 create show up in Redshift.
 """
 
-import os
 import uuid
 from typing import TYPE_CHECKING, cast
 
@@ -25,9 +24,16 @@ DB = f"rs_iceberg_{uuid.uuid4().hex[:6]}"
 SCHEMA = f"lake_{uuid.uuid4().hex[:6]}"
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _s3proxy_checksums():
+    """S3Proxy needs these, as oblako's profile sets them; restored after the module."""
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required")
+        mp.setenv("AWS_RESPONSE_CHECKSUM_VALIDATION", "when_required")
+        yield
+
+
 def _catalog():
-    os.environ.setdefault("AWS_REQUEST_CHECKSUM_CALCULATION", "when_required")
-    os.environ.setdefault("AWS_RESPONSE_CHECKSUM_VALIDATION", "when_required")
     catalog = pytest.importorskip("pyiceberg.catalog")
     return catalog.load_catalog(
         "oblako",
