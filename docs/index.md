@@ -50,6 +50,13 @@ Data & analytics: real engines.
 See [Architecture](architecture.md) for how the topology fits together, including
 where Caddy sits.
 
+## The book
+
+[A Data Guide to AWS on oblako](https://oblako-sdk.almostly.ai/book/) walks through
+the data services chapter by chapter, with code you can run. Read it online or
+download the
+[PDF](https://oblako-sdk.almostly.ai/book/A-Data-Guide-to-AWS-on-oblako.pdf).
+
 ```{toctree}
 :maxdepth: 2
 :caption: Documentation
@@ -61,4 +68,5 @@ dashboard
 runtimes
 api
 license
+The book <https://oblako-sdk.almostly.ai/book/>
 ```

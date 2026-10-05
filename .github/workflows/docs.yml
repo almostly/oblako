@@ -52,7 +52,8 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Sync to S3
-        run: aws s3 sync docs/_build/html "$S3_TARGET" --delete
+        # book/ holds "A Data Guide to AWS on oblako", uploaded separately; keep it
+        run: aws s3 sync docs/_build/html "$S3_TARGET" --delete --exclude "book/*"
 
       - name: Invalidate CloudFront
         run: |
