@@ -234,9 +234,11 @@ when it is running, besides the machine's.
   Amazon CA bundle with no override, so it can't verify a local cert by default.
   Run **`oblako trust`** once: it appends this machine's certificate to that venv's
   redshift-connector bundle, then use `sslmode: verify-ca` for verified TLS (no
-  `ssl=False`). Re-run it after a `redshift-connector` reinstall (which restores
-  the pristine bundle) or in a fresh venv or CI runner. Without trust, use
-  `sslmode: disable` locally.
+  `ssl=False`). It also installs a small keeper in the venv (a `.pth` file and the
+  module it imports) that puts the certificate back at interpreter start, so the
+  trust survives a `redshift-connector` reinstall, which restores the pristine
+  bundle. Run it once per venv or CI runner; `oblako trust --remove` undoes it.
+  Without trust, use `sslmode: disable` locally.
 - **Before oblako 0.1.0** the image carried one shared certificate whose key was
   public. `oblako trust` removes it from any bundle it had been added to.
 

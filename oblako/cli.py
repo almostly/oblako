@@ -334,8 +334,12 @@ def cmd_trust(args):
 
     from oblako.services import RedshiftService
 
+    service = RedshiftService()
     try:
-        print(RedshiftService().trust_cert(python_exe=args.python))
+        if args.remove:
+            print(service.untrust(python_exe=args.python))
+            return
+        print(service.trust_cert(python_exe=args.python))
     # no cert found, no redshift_connector in that interpreter, or an unwritable
     # bundle: surface a clear message, not a trace
     except (RuntimeError, OSError, subprocess.CalledProcessError) as e:
@@ -343,8 +347,7 @@ def cmd_trust(args):
         sys.exit(1)
     print(
         "Now use sslmode=verify-ca: dbt profile `sslmode: verify-ca`, or "
-        "redshift_connector.connect(..., ssl=True, sslmode='verify-ca'). "
-        "Re-run after a redshift-connector reinstall."
+        "redshift_connector.connect(..., ssl=True, sslmode='verify-ca')."
     )
 
 
@@ -467,6 +470,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_trust.add_argument(
         "--python",
         help="Interpreter of the venv to patch (default: the current one)",
+    )
+    p_trust.add_argument(
+        "--remove",
+        action="store_true",
+        help="Stop trusting: remove oblako's certificates and the keeper from the venv",
     )
     p_trust.set_defaults(func=cmd_trust)
 

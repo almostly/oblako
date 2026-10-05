@@ -145,6 +145,88 @@ def remove_certs_from_bundle(bundle_path: str, sha256s: set[str]) -> int:
     return removed
 
 
+# What `oblako trust` installs into a venv so the trust survives a
+# redshift-connector reinstall (which restores the pristine bundle): a module that
+# re-appends the certificates at interpreter start, imported by a .pth file.
+KEEPER_MODULE = "_oblako_redshift_trust"
+_KEEPER_SOURCE = """\
+# Written by `oblako trust`: keeps oblako's Redshift TLS certificates in
+# redshift-connector's CA bundle, which a reinstall restores to Amazon's own.
+# Runs at interpreter start (see {module}.pth); `oblako trust --remove` deletes it.
+CERTS = {certs!r}
+
+
+def _keep():
+    import importlib.util
+    import os
+
+    try:
+        spec = importlib.util.find_spec("redshift_connector")  # not imported
+        if spec is None or not spec.origin:
+            return
+        bundle = os.path.join(os.path.dirname(spec.origin), "files", "redshift-ca-bundle.crt")
+        with open(bundle) as fh:
+            text = fh.read()
+        missing = [c for c in CERTS if c.strip() not in text]
+        if missing:
+            with open(bundle, "a") as fh:
+                fh.write("".join("\\n" + c.strip() + "\\n" for c in missing))
+    except OSError:
+        pass
+
+
+_keep()
+"""
+
+
+def _site_packages(python_exe: str) -> Path:
+    """Return the venv's site-packages directory for ``python_exe``."""
+    import subprocess
+
+    out = subprocess.check_output(
+        [python_exe, "-c", "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+        text=True,
+    )
+    return Path(out.strip())
+
+
+def write_trust_keeper(site: Path, certs: list[str]) -> None:
+    """Install the keeper (module + .pth) that re-trusts ``certs`` after a reinstall."""
+    source = _KEEPER_SOURCE.format(
+        module=KEEPER_MODULE, certs=[c.strip() for c in certs]
+    )
+    (site / f"{KEEPER_MODULE}.py").write_text(source)
+    (site / f"{KEEPER_MODULE}.pth").write_text(f"import {KEEPER_MODULE}\n")
+
+
+def kept_certs(site: Path) -> list[str]:
+    """Return the certificates a venv's keeper holds (none without a keeper)."""
+    module = site / f"{KEEPER_MODULE}.py"
+    if not module.exists():
+        return []
+    import ast
+
+    for node in ast.parse(module.read_text()).body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "CERTS" for t in node.targets
+        ):
+            return list(ast.literal_eval(node.value))
+    return []
+
+
+def remove_trust_keeper(site: Path) -> None:
+    """Delete the keeper's module and .pth file."""
+    for suffix in (".py", ".pth"):
+        (site / f"{KEEPER_MODULE}{suffix}").unlink(missing_ok=True)
+
+
+def _fingerprint(cert: str) -> str:
+    import hashlib
+    import ssl
+
+    return hashlib.sha256(ssl.PEM_cert_to_DER_cert(cert)).hexdigest()
+
+
 def append_cert_to_bundle(bundle_path: str, cert: str) -> bool:
     """Append a PEM cert to a CA bundle if not already present.
 
@@ -275,26 +357,48 @@ class RedshiftService(Service):
         a local cert out of the box. This appends the proxy's self-signed cert to
         that bundle in ``python_exe``'s environment (default: the current one), so
         ``sslmode=verify-ca`` then gives real, verified TLS locally, no
-        ``ssl=False``. Idempotent. Re-run after a redshift-connector reinstall
-        (which restores the pristine bundle). The cert is this machine's own and
-        cannot sign others (CA:FALSE), so trusting it vouches for nothing else.
+        ``ssl=False``. Idempotent. A keeper installed in the same venv re-appends
+        the certificates at interpreter start, so the trust survives a
+        redshift-connector reinstall (which restores the pristine bundle). The
+        cert is this machine's own and cannot sign others (CA:FALSE), so trusting
+        it vouches for nothing else.
         """
         import sys
 
-        bundle = _redshift_connector_bundle(python_exe or sys.executable)
+        python_exe = python_exe or sys.executable
+        bundle = _redshift_connector_bundle(python_exe)
         legacy = remove_certs_from_bundle(bundle, {LEGACY_CERT_SHA256})
-        added = sum(append_cert_to_bundle(bundle, cert) for cert in self.server_certs())
+        certs = self.server_certs()
+        added = sum(append_cert_to_bundle(bundle, cert) for cert in certs)
+        site = _site_packages(python_exe)
+        kept = [
+            c for c in kept_certs(site) if c.strip() not in {x.strip() for x in certs}
+        ]
+        write_trust_keeper(site, kept + certs)
         note = (
             " (and removed the certificate older oblako images shared, whose key "
             "is public)"
             if legacy
             else ""
         )
-        return (
-            f"appended {added} oblako Redshift cert(s) to {bundle}{note}"
+        done = (
+            f"appended {added} oblako Redshift cert(s) to {bundle}"
             if added
-            else f"already trusted in {bundle}{note}"
+            else f"already trusted in {bundle}"
         )
+        return f"{done}{note}; kept across redshift-connector reinstalls"
+
+    def untrust(self, python_exe: str | None = None) -> str:
+        """Undo ``trust_cert``: remove the keeper and its certificates from the bundle."""
+        import sys
+
+        python_exe = python_exe or sys.executable
+        site = _site_packages(python_exe)
+        certs = kept_certs(site) + self.server_certs()
+        bundle = _redshift_connector_bundle(python_exe)
+        removed = remove_certs_from_bundle(bundle, {_fingerprint(c) for c in certs})
+        remove_trust_keeper(site)
+        return f"removed {removed} oblako Redshift cert(s) from {bundle} and its keeper"
 
     def start(self) -> None:
         """Start the engine, then the Redshift API that runs multi-node clusters."""

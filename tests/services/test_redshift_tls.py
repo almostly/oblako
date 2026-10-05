@@ -42,3 +42,32 @@ def test_trust_replaces_the_legacy_cert(tmp_path):
     text = bundle.read_text()
     assert old.strip() not in text and new.strip() in text and "# amazon" in text
     assert redshift.remove_certs_from_bundle(str(bundle), {legacy}) == 0
+
+
+def test_the_keeper_restores_trust_after_a_reinstall(tmp_path, monkeypatch):
+    """The keeper re-appends the certificates a redshift-connector reinstall dropped."""
+    import importlib
+    import sys
+
+    cert = (redshift.ensure_cert(tmp_path / "tls") / "server.crt").read_text()
+    # a stand-in redshift_connector package with its pristine CA bundle
+    pkg = tmp_path / "site" / "redshift_connector"
+    (pkg / "files").mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    bundle = pkg / "files" / "redshift-ca-bundle.crt"
+    bundle.write_text("# amazon\n")
+    site = tmp_path / "site"
+    redshift.write_trust_keeper(site, [cert])
+    assert (site / f"{redshift.KEEPER_MODULE}.pth").read_text() == (
+        f"import {redshift.KEEPER_MODULE}\n"
+    )
+    assert redshift.kept_certs(site) == [cert.strip()]
+    monkeypatch.syspath_prepend(str(site))
+    sys.modules.pop(redshift.KEEPER_MODULE, None)
+    importlib.import_module(redshift.KEEPER_MODULE)  # what the .pth does at start
+    assert cert.strip() in bundle.read_text() and "# amazon" in bundle.read_text()
+    importlib.reload(sys.modules[redshift.KEEPER_MODULE])  # idempotent
+    assert bundle.read_text().count("BEGIN CERTIFICATE") == 1
+    redshift.remove_trust_keeper(site)
+    assert not (site / f"{redshift.KEEPER_MODULE}.py").exists()
+    assert redshift.kept_certs(site) == []
