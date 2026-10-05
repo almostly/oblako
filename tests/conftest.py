@@ -56,6 +56,7 @@ _INTEGRATION_FILES = {
     "tests/services/test_athena.py",
     "tests/services/test_glue_athena.py",
     "tests/services/test_glue_output.py",
+    "tests/services/test_glue_crawlers.py",
     "tests/services/test_athena_s3tables.py",
     "tests/services/test_firehose.py",
 }
