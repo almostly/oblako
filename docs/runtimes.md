@@ -11,7 +11,7 @@ cluster, or Apple's `container`.
 | `podman` | Podman | the Podman socket (auto-detected) |
 | `colima` | Colima | the Colima Docker socket (auto-detected) |
 | `kubernetes` / `k8s` | a Kubernetes cluster | pods + `kubectl port-forward` |
-| `apple` | Apple `container` (macOS 26+) | lightweight per-container VMs |
+| `apple` / `container` | Apple `container` (macOS 26+) | lightweight per-container VMs |
 
 `DOCKER_HOST` always takes precedence for the Docker-API runtimes.
 

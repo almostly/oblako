@@ -16,13 +16,24 @@ elsewhere, with a warning; do that only on a network you trust.
 - **Bedrock**: chat playground powered by Ollama (or OpenRouter).
 - **SageMaker**: training jobs, endpoints, Docker images, and cleanup.
 - **S3**: bucket browser with object listing.
+- **Athena**: a SQL editor. Trino reads Iceberg and S3 Tables through the catalog,
+  and DuckDB-Wasm runs in your browser against Parquet files in S3.
+- **Glue**: Data Catalog databases and tables (the same tables Athena sees), and
+  PySpark jobs in the Glue 5 image.
+- **Kinesis**: streams, with a record writer and reader.
 - **DynamoDB**: table browser with an item viewer.
+- **RDS / Aurora**: instances and clusters, with database creation.
 - **Step Functions**: state machines, ASL JSON viewer, execution history, and a
   flow diagram.
 - **CloudFormation**: stacks deployed to the local CloudFormation, with their
   resources, outputs, and events.
 - **Redshift**: cluster list (management API), table list, and a SQL query
   editor with results.
+- **Lambda**: functions and layers, with function creation and invocation.
+- **EC2**: instances, each backed by a real container, with instance launch.
+- **IAM**: users, roles and policies, with assume-role and an access simulator.
+- **AppConfig**: applications, configuration profiles and deployments, with a
+  feature-flag evaluator.
 
 ## Notebook (JupyterLab)
 
