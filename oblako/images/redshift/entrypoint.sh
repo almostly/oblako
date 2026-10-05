@@ -17,7 +17,9 @@ export PYTHONPATH="/usr/local/bin${PYTHONPATH:+:$PYTHONPATH}"
 # TLS cert for the proxy. oblako mounts this machine's cert and key at
 # /etc/oblako-redshift (made once in ~/.oblako/redshift/tls, so `oblako trust`
 # stays valid). Without a mount, as under plain `docker compose`, this block makes
-# a cert for this container. Disable TLS entirely with OBLAKO_SSL=0.
+# a cert for this container, its subject made unique by a random OU (OpenSSL finds
+# a trusted self-signed cert by subject, so two trusted oblako certs must not
+# share one). Disable TLS entirely with OBLAKO_SSL=0.
 CERT_DIR=/etc/oblako-redshift
 export OBLAKO_SSL_CERT="${OBLAKO_SSL_CERT:-$CERT_DIR/server.crt}"
 export OBLAKO_SSL_KEY="${OBLAKO_SSL_KEY:-$CERT_DIR/server.key}"
@@ -25,7 +27,7 @@ if [ "${OBLAKO_SSL:-1}" = "1" ] && [ ! -f "$OBLAKO_SSL_CERT" ]; then
   mkdir -p "$(dirname "$OBLAKO_SSL_CERT")"
   openssl req -x509 -newkey rsa:2048 -nodes -days 3650 \
     -keyout "$OBLAKO_SSL_KEY" -out "$OBLAKO_SSL_CERT" \
-    -subj "/O=oblako/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+    -subj "/O=oblako/OU=$(openssl rand -hex 6)/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
     -addext "basicConstraints=critical,CA:FALSE" -addext "extendedKeyUsage=serverAuth" \
     >/dev/null 2>&1 || echo "oblako: could not generate TLS cert; proxy will run without SSL"
 fi

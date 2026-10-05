@@ -24,10 +24,34 @@ def test_ensure_cert_makes_a_server_only_cert_once(tmp_path):
     assert (redshift.ensure_cert(tmp_path / "tls") / "server.crt").read_bytes() == crt
 
 
-def test_two_machines_get_different_keys(tmp_path):
-    a = redshift.ensure_cert(tmp_path / "a") / "server.key"
-    b = redshift.ensure_cert(tmp_path / "b") / "server.key"
-    assert a.read_bytes() != b.read_bytes()
+def test_two_machines_get_different_keys_and_subjects(tmp_path):
+    a = redshift.ensure_cert(tmp_path / "a")
+    b = redshift.ensure_cert(tmp_path / "b")
+    assert (a / "server.key").read_bytes() != (b / "server.key").read_bytes()
+    # OpenSSL finds a trusted self-signed cert by subject: two must not share one
+    subject_a, subject_b = (
+        x509.load_pem_x509_certificate((d / "server.crt").read_bytes()).subject
+        for d in (a, b)
+    )
+    assert subject_a != subject_b
+
+
+def test_trust_drops_stale_oblako_certs(tmp_path, monkeypatch):
+    current = (redshift.ensure_cert(tmp_path / "tls") / "server.crt").read_text()
+    stale = (redshift.ensure_cert(tmp_path / "gone") / "server.crt").read_text()
+    site = tmp_path / "site"
+    bundle = site / "redshift_connector" / "files" / "redshift-ca-bundle.crt"
+    bundle.parent.mkdir(parents=True)
+    bundle.write_text("# amazon\n" + stale)
+    monkeypatch.setattr(redshift, "_redshift_connector_bundle", lambda exe: str(bundle))
+    monkeypatch.setattr(redshift, "_site_packages", lambda exe: site)
+    monkeypatch.setattr(
+        redshift.RedshiftService, "server_certs", lambda self: [current]
+    )
+    redshift.RedshiftService.trust_cert(object.__new__(redshift.RedshiftService), "py")
+    text = bundle.read_text()
+    assert current.strip() in text and stale.strip() not in text and "# amazon" in text
+    assert redshift.kept_certs(site) == [current.strip()]
 
 
 def test_trust_replaces_the_legacy_cert(tmp_path):
