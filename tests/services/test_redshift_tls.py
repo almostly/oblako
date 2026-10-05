@@ -63,6 +63,9 @@ def test_the_keeper_restores_trust_after_a_reinstall(tmp_path, monkeypatch):
     )
     assert redshift.kept_certs(site) == [cert.strip()]
     monkeypatch.syspath_prepend(str(site))
+    # an imported redshift_connector (other tests') would be found first
+    for module in [m for m in sys.modules if m.split(".")[0] == "redshift_connector"]:
+        monkeypatch.delitem(sys.modules, module)
     sys.modules.pop(redshift.KEEPER_MODULE, None)
     importlib.import_module(redshift.KEEPER_MODULE)  # what the .pth does at start
     assert cert.strip() in bundle.read_text() and "# amazon" in bundle.read_text()
