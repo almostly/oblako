@@ -715,6 +715,12 @@ async def _glue_dispatch(request: Request) -> JSONResponse:
             status_code=400,
             headers={"x-amzn-errortype": err.code},
         )
+    except KeyError as e:  # a required parameter the request left out
+        return JSONResponse(
+            {"__type": "InvalidInputException", "Message": f"{e.args[0]} is required"},
+            status_code=400,
+            headers={"x-amzn-errortype": "InvalidInputException"},
+        )
     except Exception as e:
         return JSONResponse(
             {"__type": "InternalServiceException", "Message": str(e)},
@@ -734,6 +740,8 @@ def create_app() -> Starlette:
     importlib.import_module("oblako.engines.glue_catalog.jobs")
     crawlers = importlib.import_module("oblako.engines.glue_catalog.crawlers")
     crawlers.start_scheduler()
+    workflows = importlib.import_module("oblako.engines.glue_catalog.workflows")
+    workflows.start_watcher()
     return Starlette(
         routes=[
             Route("/", _health, methods=["GET"]),

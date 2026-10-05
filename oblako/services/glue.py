@@ -204,8 +204,9 @@ class GlueService:
         marked SKIPPED. Returns ``{name, status, steps:[{name, status, exitCode,
         logs}]}``.
 
-        This covers the common sequential-ETL workflow. Full DAGs (parallel
-        branches, crawlers, scheduled/event triggers) aren't modelled yet.
+        This covers the common sequential-ETL workflow from Python. The Glue API
+        (``CreateWorkflow``, ``CreateTrigger``, ``StartWorkflowRun``) runs full
+        graphs: conditional, scheduled and on-demand triggers, jobs and crawlers.
         """
         results: list[dict] = []
         failed = False

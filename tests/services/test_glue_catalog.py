@@ -455,8 +455,14 @@ def test_iceberg_table_dropped_elsewhere_disappears(call):
 
 
 def test_unsupported_action(call):
-    status, body = call("CreateCrawler", {})
+    status, body = call("CreateMLTransform", {})
     assert status == 400 and body["__type"] == "InvalidAction"
+
+
+def test_missing_parameter_is_a_client_error(call):
+    status, body = call("CreateCrawler", {})
+    assert status == 400 and body["__type"] == "InvalidInputException"
+    assert "Name" in body["Message"]
 
 
 @pytest.mark.parametrize(
