@@ -79,6 +79,10 @@ def _sns_client():
     return boto3.client("sns", **kwargs)
 
 
+class ConflictError(Exception):
+    """A request conflicts with the entity's state (SageMaker's ConflictException)."""
+
+
 class SageMakerExecutor:
     """Runs SageMaker training jobs in local Docker and tracks their state."""
 
@@ -99,6 +103,7 @@ class SageMakerExecutor:
         self._monitoring_schedules: dict[str, dict] = {}
         self._package_groups: dict[str, dict] = {}
         self._packages: dict[str, dict] = {}  # keyed by ModelPackageArn
+        self._package_versions: dict[str, int] = {}  # last version issued per group
         self._stopping: set[str] = set()
         self._lock = threading.Lock()
 
@@ -1633,20 +1638,30 @@ class SageMakerExecutor:
             ]
 
     def delete_model_package_group(self, name: str) -> None:
-        """Remove a model package group (idempotent)."""
+        """Remove a model package group (idempotent); its versions must go first.
+
+        As on SageMaker, a group that still holds model package versions is a
+        ConflictException. A group made later under the same name numbers its
+        versions from 1 again.
+        """
         with self._lock:
+            if any(
+                p.get("ModelPackageGroupName") == name for p in self._packages.values()
+            ):
+                raise ConflictError(
+                    f"Model package group {name} still has model package versions; "
+                    "delete them first"
+                )
             self._package_groups.pop(name, None)
+            self._package_versions.pop(name, None)
 
     def create_model_package(self, req: dict) -> str:
         """Register a model package (a versioned entry in a group); return its ARN."""
         group = req.get("ModelPackageGroupName")
         with self._lock:
-            if group:  # versioned package: auto-increment the group's version
-                version = 1 + sum(
-                    1
-                    for p in self._packages.values()
-                    if p.get("ModelPackageGroupName") == group
-                )
+            if group:  # versioned package: the group's next version, never reused
+                version = self._package_versions.get(group, 0) + 1
+                self._package_versions[group] = version
                 arn = (
                     f"arn:aws:sagemaker:{_REGION}:{_ACCOUNT}"
                     f":model-package/{group}/{version}"

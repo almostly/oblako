@@ -76,7 +76,18 @@ def test_model_registry_group_versions_and_approval(sm):
     sm.delete_model_package(ModelPackageName=v2)
     with pytest.raises(sm.exceptions.ClientError):
         sm.describe_model_package(ModelPackageName=v2)
+    # a version number is never reused, even after its package is deleted
+    v3 = sm.create_model_package(ModelPackageGroupName=group, **_infspec())[
+        "ModelPackageArn"
+    ]
+    assert v3.endswith(f"{group}/3")
 
+    # a group with versions left can't be deleted
+    with pytest.raises(sm.exceptions.ClientError) as err:
+        sm.delete_model_package_group(ModelPackageGroupName=group)
+    assert err.value.response["Error"]["Code"] == "ConflictException"
+    for arn in (v1, v3):
+        sm.delete_model_package(ModelPackageName=arn)
     sm.delete_model_package_group(ModelPackageGroupName=group)
     with pytest.raises(sm.exceptions.ClientError):
         sm.describe_model_package_group(ModelPackageGroupName=group)

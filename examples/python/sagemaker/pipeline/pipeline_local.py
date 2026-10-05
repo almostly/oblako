@@ -127,7 +127,17 @@ if __name__ == "__main__":
     # v3 routes pipeline.upsert()/start() through sagemaker_client, which local
     # mode lacks; the local session carries these methods itself.
     sess.create_pipeline(pipeline, "oblako local pipeline demo")
-    sess.start_pipeline_execution(PipelineName=pipeline.name)
+    execution = sess.start_pipeline_execution(PipelineName=pipeline.name)
+    # local mode runs the steps before returning, and records a failure on the
+    # execution instead of raising it
+    status = execution.describe()
+    if status["PipelineExecutionStatus"] != "Succeeded":
+        failed = [
+            f"{s['StepName']}: {s.get('FailureReason')}"
+            for s in execution.list_steps()["PipelineExecutionSteps"]
+            if s.get("FailureReason")
+        ]
+        raise SystemExit(f"pipeline {status['PipelineExecutionStatus']}: {failed}")
     result = _s3.get_object(Bucket=BUCKET, Key="io/double/out/doubled.csv")[
         "Body"
     ].read()

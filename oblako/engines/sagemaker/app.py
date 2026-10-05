@@ -16,7 +16,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
-from .executor import SageMakerExecutor
+from .executor import ConflictError, SageMakerExecutor
 
 
 def _jsonable(obj):
@@ -80,6 +80,8 @@ class SageMakerApp:
             return handler(req)
         except _NotFound as err:
             return _error("ResourceNotFound", str(err), status=400)
+        except ConflictError as err:
+            return _error("ConflictException", str(err))
         except Exception as err:  # surface as ValidationException
             return _error("ValidationException", str(err))
 

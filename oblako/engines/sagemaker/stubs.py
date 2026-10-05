@@ -7,7 +7,9 @@ execution role through STS/IAM, look up a default ``sagemaker-<region>-<account>
 bucket, and pull the image from ECR. With no account (and oblako's dummy creds)
 those calls fail.
 
-``use_local_stubs()`` neutralizes exactly those three, so the SDK's local modes run
+``use_local_stubs()`` neutralizes exactly those three, and lets local jobs read an
+``S3Prefix`` input under ``response_checksum_validation = when_required`` (the SDK
+mistakes the folder for a missing object there), so the SDK's local modes run
 fully locally against oblako -- pair it with ``AWS_ENDPOINT_URL_S3`` pointing boto3
 at S3Proxy and a locally built image. The role check is patched for both
 ``ModelBuilder`` and ``ModelTrainer``, and an explicit ``default_bucket=`` on a
@@ -23,7 +25,7 @@ from __future__ import annotations
 
 
 def use_local_stubs() -> None:
-    """Patch the SDK's role validation, default-bucket lookup, and image pull.
+    """Patch the SDK's role validation, default-bucket lookup, image pull and S3 folder download.
 
     Safe to call more than once. Silently skips any piece the installed SDK
     doesn't expose (module layouts differ across v3 minor versions).
@@ -39,11 +41,11 @@ def use_local_stubs() -> None:
     with contextlib.suppress(Exception):
         from sagemaker.serve import model_builder
 
-        model_builder.resolve_and_validate_role = _keep_role
+        setattr(model_builder, "resolve_and_validate_role", _keep_role)
     with contextlib.suppress(Exception):
         from sagemaker.train import defaults
 
-        defaults.resolve_and_validate_role = _keep_role
+        setattr(defaults, "resolve_and_validate_role", _keep_role)
 
     # 2. keep an explicit Session(default_bucket=...) and fall back to "local",
     # instead of resolving sagemaker-<region>-<account> through STS
@@ -64,3 +66,48 @@ def use_local_stubs() -> None:
             self.client.ping()
 
         local_container_mode.LocalContainerMode._pull_image = _use_local_image
+
+    # 4. download an S3Prefix input whose prefix is not an object. The SDK first
+    # tries the prefix as one object and takes only HeadObject's 404 to mean "a
+    # folder"; with response_checksum_validation = when_required (oblako's
+    # profile) s3transfer skips the HEAD, so the miss is GetObject's NoSuchKey
+    # and the step fails. Treat NoSuchKey the same way.
+    with contextlib.suppress(Exception):
+        import functools
+        import importlib
+
+        from sagemaker.core import common_utils
+
+        original = getattr(
+            common_utils.download_folder, "__wrapped__", common_utils.download_folder
+        )
+
+        @functools.wraps(original)
+        def _download_folder(bucket_name, prefix, target, sagemaker_session):
+            from botocore.exceptions import ClientError
+
+            try:
+                return original(bucket_name, prefix, target, sagemaker_session)
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") != "NoSuchKey":
+                    raise
+            owner = sagemaker_session._get_account_id_if_default_bucket(bucket_name)
+            common_utils._download_files_under_prefix(
+                bucket_name,
+                prefix.lstrip("/"),
+                target,
+                sagemaker_session.s3_resource,
+                extra_args={"ExpectedBucketOwner": owner} if owner else None,
+            )
+
+        for name in (
+            "sagemaker.core.common_utils",
+            "sagemaker.core.utils",
+            "sagemaker.utils",
+            "sagemaker.core.modules.local_core.local_container",
+            "sagemaker.train.local.local_container",
+        ):
+            with contextlib.suppress(Exception):
+                module = importlib.import_module(name)
+                if hasattr(module, "download_folder"):
+                    setattr(module, "download_folder", _download_folder)
