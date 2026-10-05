@@ -49,7 +49,12 @@ normal `boto3` client (or native driver):
 | ECS / Fargate | moto + container per task | `run_task`/`create_service` launch real containers; a Fargate+ALB CloudFormation stack deploys and serves locally |
 | ELBv2 (ALB) | moto + Caddy proxy per LB | real reverse proxy round-robining to tasks with the target group health check; `DNSName` → `localhost:<port>` |
 | S3 | S3Proxy | S3 API over the local filesystem |
+| S3 Tables | oblako server + Iceberg REST catalog | boto3 `s3tables`; tables are real Iceberg, queryable by Athena, Trino and pyiceberg |
+| S3 Vectors | oblako server | boto3 `s3vectors`: vector buckets, indexes and k-NN `QueryVectors` |
 | DynamoDB | dynamodb-local | Official AWS Docker image |
+| Kinesis | kinesalite | Kinesis Data Streams |
+| Firehose | oblako server | boto3 `firehose` delivery streams, buffered and flushed to S3 or Redshift |
+| Athena | oblako server + Trino | boto3 `athena`; queries run on Trino, results go to the S3 output location |
 | Redshift (engine) | oblako image (PostgreSQL 16) | impersonates Redshift: redshift-connector natively, system tables, `SET query_group`, UDFs |
 | Redshift (management API) | moto | boto3 `redshift` control plane: clusters, nodes, endpoints |
 | Redshift Data API | oblako server | boto3 `redshift-data`, real SQL against the engine |
@@ -59,6 +64,11 @@ normal `boto3` client (or native driver):
 | RDS Data API | oblako server | boto3 `rds-data`: synchronous SQL + transactions |
 | CloudFormation | oblako server | boto3 `cloudformation` (+ `aws cloudformation deploy` / `sam deploy`) → **real** oblako resources |
 | Glue | Spark + S3Proxy | Spark jobs read/write oblako's S3 |
+| Glue Data Catalog | oblako server | boto3 `glue` databases, tables, partitions and crawlers; it is Athena's `AwsDataCatalog` |
+| MWAA (Airflow) | AWS's MWAA Airflow image | boto3 `mwaa`; each environment runs real Airflow, with DAGs synced from S3 |
+| EventBridge | moto + oblako proxy | boto3 `events`; scheduled rules fire and run their targets |
+| EKS | moto | boto3 `eks` control plane: create, describe and list clusters |
+| API Gateway | AWS SAM CLI (external) | `sam local start-api`, bring your own SAM CLI |
 | AppConfig | oblako agent | Python reimplementation of the feature-flag / A/B split |
 
 Full per-service guides, limitations, and the Python API are in the
@@ -103,7 +113,8 @@ to AWS.
 | `oblako test` / `oblako test-integration` | Run unit / integration tests |
 
 Service names: `bedrock`, `opensearch`, `redshift`, `rds`, `moto`, `s3`,
-`dynamodb`, `stepfunctions` (`ollama` aliases `bedrock`; `aurora` aliases `rds`).
+`dynamodb`, `kinesis`, `stepfunctions`, `iceberg`, `trino` (`ollama` aliases
+`bedrock`; `aurora` aliases `rds`).
 
 ## Container runtimes
 

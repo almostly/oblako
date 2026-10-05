@@ -2,7 +2,9 @@
 
 ## Prerequisites
 
-- **Docker**: oblako runs services as local containers.
+- **A container runtime**: oblako runs services as local containers. Docker is the
+  default; Podman, Colima, Kubernetes and Apple's `container` also work (see
+  [Container runtimes](runtimes.md)).
 - **Python 3.10+**
 
 ## Install
@@ -22,15 +24,21 @@ pip install -e .
 
 ```bash
 oblako up                  # start all services
+oblako configure           # write the `oblako` AWS profile
+export AWS_PROFILE=oblako  # point boto3 and the AWS CLI at oblako
 oblako pull qwen2.5:0.5b   # pull a model into the Bedrock (Ollama) engine
 oblako dashboard           # web UI at http://localhost:8000
 ```
 
+`oblako configure` writes a profile whose per-service endpoints are oblako's. With
+it selected, boto3 and the AWS CLI reach the local services; select another
+profile and the same code talks to AWS.
+
 ## Your AWS code just works
 
-Each service is reached through its normal `boto3` client. In a notebook or with
-the endpoint env vars set, unmodified `boto3` transparently hits the local
-service, no `endpoint_url`:
+Each service is reached through its normal `boto3` client. With the `oblako`
+profile selected (or in `oblako notebook`, which sets the endpoints itself),
+unmodified `boto3` transparently hits the local service, no `endpoint_url`:
 
 ```python
 import boto3
@@ -74,7 +82,8 @@ same way, each on its canonical port, so plain boto3 or the AWS CLI can reach
 them without any oblako code in the client: `s3vectors`, `s3tables`, `athena`,
 `firehose`, `eventbridge`, `appconfig`, `sagemaker`, `glue`,
 `dynamodb-vectors`, `redshift-data`, `redshift-control`, `rds-data`, `rds-control`,
-`bedrock-runtime`, `cloudformation`, `ecs-metadata`.
+`mwaa`, `ecs`, `bedrock-runtime`, `cloudformation`, `ecs-metadata`, `s3-ext`
+(`oblako up s3` starts `s3-ext` itself).
 
 ```bash
 oblako up s3vectors         # S3 Vectors on :8012, in the background
@@ -134,14 +143,30 @@ uses it instead of starting its own container, and `oblako down` leaves it alone
 | `oblako status` | Show service status |
 | `oblako configure [--profile NAME]` | Write an AWS profile (default `oblako`) whose per-service endpoints are oblako's, with generated keys, to `~/.aws/config` and `~/.aws/credentials`; then `export AWS_PROFILE=oblako` points boto3 and the AWS CLI at oblako, and another profile at AWS. Services without their own entry go to moto, so no call leaves oblako. Other profiles are left as they are |
 | `oblako dashboard [-p PORT] [--host ADDR]` | Start the web dashboard (default: 8000), on `127.0.0.1` only unless `--host` says otherwise; it has no login |
-| `oblako notebook [-p PORT]` | Launch JupyterLab wired to oblako (default: 8888) |
+| `oblako notebook [-p PORT] [--dir DIR]` | Launch JupyterLab wired to oblako (default: 8888), with its workspace in `DIR` (default: `~/.oblako/notebooks`) |
 | `oblako redshift-data [-p PORT]` | Start the Redshift Data API server (default: 8002) |
 | `oblako bedrock-runtime [-p PORT]` | Start the Bedrock Runtime server (default: 8004) |
 | `oblako rds-data [-p PORT]` | Start the RDS Data API server (default: 8006) |
 | `oblako cloudformation [-p PORT]` | Start the CloudFormation server (default: 8017) |
-| `oblako agentcore run <file>` | Run a local AgentCore agent (default: 8080) |
-| `oblako logs <service>` | Show logs for a service |
+| `oblako agentcore run <file> [-p PORT]` | Run a local AgentCore agent (default: 8080) |
+| `oblako agentcore invoke <json> [-p PORT]` | Send a JSON payload to a running AgentCore agent |
+| `oblako trust [--python EXE]` | Trust the local Redshift's TLS certificate in a venv's `redshift-connector`, so it and dbt can use `sslmode=verify-ca` |
+| `oblako logs <service> [-n LINES]` | Show the last `LINES` lines (default 50) of a service's logs |
 | `oblako pull [model]` | Pull a model into the engine (default: `qwen2.5:0.5b`) |
 | `oblako models` | List available Ollama models |
 | `oblako test` | Run unit tests |
 | `oblako test-integration` | Run integration tests (requires services running) |
+
+## Environment variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `OBLAKO_CONTAINER_BACKEND` | `docker` | Container runtime: `docker`, `podman`, `colima`, `kubernetes` or `apple` (see [Container runtimes](runtimes.md)) |
+| `OBLAKO_K8S_NAMESPACE` | `oblako` | Namespace for the Kubernetes backend |
+| `OBLAKO_BIND_ADDRESS` | `127.0.0.1` | Address, or comma-separated addresses, the services' ports listen on |
+| `OBLAKO_PORT_<NAME>` | see `oblako/ports.py` | Move one service off its default port |
+| `OBLAKO_REGION` | `us-east-1` | Region oblako reports in ARNs and endpoints |
+| `OBLAKO_ACCOUNT_ID` | `123456789012` | Account ID oblako reports in ARNs |
+| `OBLAKO_BEDROCK_BACKEND` | `ollama` | Bedrock runtime backend: `ollama`, or `openrouter` (needs `OPENROUTER_API_KEY`) |
+| `OBLAKO_OLLAMA_URL` | `http://localhost:11434` | Ollama server the Bedrock runtime uses |
+| `OBLAKO_NOTEBOOK_DIR` | `~/.oblako/notebooks` | Workspace for `oblako notebook` |
