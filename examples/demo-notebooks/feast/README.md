@@ -4,7 +4,8 @@
 you'd run on AWS** (only the endpoints change):
 
 - **offline store** = **redshift-local** (`redshift-data` API → wire proxy → PostgreSQL),
-  with the proxy bridging Feast's `UNLOAD`/`COPY` staging to **S3Proxy**
+  with the proxy bridging Feast's `UNLOAD`/`COPY` staging to **S3Proxy**, on a
+  provisioned cluster or a Serverless workgroup (set `WAREHOUSE` in the notebook)
 - **online store** = oblako's **DynamoDB** (DynamoDB Local behind oblako's endpoint, which
   adds the tagging Feast reconciles on every `apply`)
 - **registry** = a local file
