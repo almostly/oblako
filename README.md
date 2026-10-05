@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://oblako-public.s3.amazonaws.com/oblako_logo.png?v=3" width="128" alt="oblako">
+  <img src="https://oblako-public.s3.amazonaws.com/oblako_icon.png" width="128" alt="oblako">
 </p>
 
 <p align="center">
