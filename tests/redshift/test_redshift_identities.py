@@ -135,14 +135,16 @@ def test_default_privileges(conn):
     ) == [("idt", "RELATION", "oblako", "user", "SELECT", "idt_reader", "role")]
 
 
-def test_acl_strings_prefix_groups_only(conn):
+def test_acl_strings_prefix_groups_and_leave_out_roles(conn):
     (acl,) = conn.execute(
         "SELECT array_to_string(relacl, ',') FROM pg_class "
         "WHERE oid = 'idt.events'::regclass"
     ).fetchone()
     entries = acl.split(",")
     assert "group idt_analysts=ar/oblako" in entries
-    assert "idt_reader=r/oblako" in entries  # a role is not a group
+    assert "idt_alice=w/oblako" in entries
+    # a grant to a role shows only in the SVV views, as on Redshift
+    assert not any(e.startswith("idt_reader=") for e in entries)
 
 
 def test_views_have_redshifts_columns(conn):
