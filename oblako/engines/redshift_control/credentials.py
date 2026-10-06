@@ -133,3 +133,68 @@ def issue(form: dict[str, str]) -> dict:
         "DbPassword": password,
         "Expiration": expiration.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+
+
+# ---------------------------------------------------------------------------
+# GetClusterCredentialsWithIAM and Redshift Serverless GetCredentials
+# ---------------------------------------------------------------------------
+# Both map the calling IAM identity 1:1 to a database user, which Redshift
+# creates on first use: IAM:<user name> for an IAM user, IAMR:<role name> for an
+# assumed role. The password is temporary (VALID UNTIL the expiration).
+def iam_db_user(caller_arn: str) -> str:
+    """Return the database user an IAM identity maps to."""
+    resource = caller_arn.split(":", 5)[-1]
+    if resource.startswith("assumed-role/"):
+        return "IAMR:" + resource.split("/")[1]
+    if resource.startswith("role/"):
+        return "IAMR:" + resource.rsplit("/", 1)[-1]
+    return "IAM:" + resource.rsplit("/", 1)[-1]
+
+
+def caller_arn(access_key_id: str) -> str:
+    """Ask oblako's STS (moto) who an access key belongs to."""
+    import boto3
+
+    sts = boto3.client(
+        "sts",
+        endpoint_url=f"http://localhost:{ports.MOTO}",
+        region_name="us-east-1",
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key="oblako",  # moto doesn't check signatures
+    )
+    return sts.get_caller_identity()["Arn"]
+
+
+def issue_for_identity(
+    caller: str, cluster_id: str | None, duration: int
+) -> tuple[str, str, dt.datetime]:
+    """Create or refresh the identity's database user; return user, password, expiry."""
+    import psycopg
+    from psycopg import sql
+
+    if not 900 <= duration <= 3600:
+        raise CredentialsError(
+            "InvalidParameterValue",
+            "DurationSeconds must be between 900 and 3600 seconds.",
+        )
+    user = iam_db_user(caller)
+    password = secrets.token_urlsafe(32)
+    expiration = dt.datetime.now(dt.timezone.utc).replace(microsecond=0) + dt.timedelta(
+        seconds=duration
+    )
+    admin = _admin(cluster_id) if cluster_id else _admin("")
+    with psycopg.connect(
+        **admin, autocommit=True, sslmode="prefer", connect_timeout=10
+    ) as conn:
+        exists = conn.execute(
+            "SELECT 1 FROM pg_roles WHERE rolname = %s", (user,)
+        ).fetchone()
+        conn.execute(
+            sql.SQL("{} ROLE {} LOGIN PASSWORD {} VALID UNTIL {}").format(
+                sql.SQL("ALTER" if exists else "CREATE"),
+                sql.Identifier(user),
+                sql.Literal(password),
+                sql.Literal(expiration.strftime("%Y-%m-%d %H:%M:%S+00")),
+            )
+        )
+    return user, password, expiration
