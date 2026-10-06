@@ -58,24 +58,27 @@ $$;
 --
 -- A grantee is a group when oblako_identity_type says so: a role that cannot log
 -- in and is not a Redshift role, minus PostgreSQL's predefined pg_* roles (the
--- set the proxy hides from pg_group too). The grantee is matched unquoted but
--- emitted verbatim, so a quoted name ("IAM:admin") survives intact, and an empty
--- grantee (PUBLIC) matches nothing.
+-- set the proxy hides from pg_group too). A grant to a Redshift role is left out
+-- altogether, as Redshift's own ACL strings leave out RBAC grants: those show
+-- only in the SVV views. The grantee is matched unquoted but emitted verbatim, so
+-- a quoted name ("IAM:admin") survives intact, and an empty grantee (PUBLIC)
+-- matches nothing.
 --
 -- Signature mirrors array_to_string(acl, sep), which is what the proxy rewrites.
 CREATE OR REPLACE FUNCTION pg_catalog.redshift_acl(acl aclitem[], sep text)
     RETURNS text LANGUAGE sql STABLE AS $$
     SELECT CASE WHEN acl IS NULL THEN NULL ELSE coalesce((
         SELECT string_agg(
-                 CASE WHEN r.rolname IS NULL THEN e.item
-                      ELSE 'group ' || e.item END,
+                 CASE WHEN e.identity = 'group' THEN 'group ' || e.item
+                      ELSE e.item END,
                  sep ORDER BY e.ord)
-        FROM (SELECT u.entry::text AS item, u.ord
+        FROM (SELECT u.entry::text AS item, u.ord,
+                     (SELECT pg_catalog.oblako_identity_type(r.oid)
+                      FROM pg_catalog.pg_roles r
+                      WHERE r.rolname = btrim(split_part(u.entry::text, '=', 1), '"')
+                        AND r.rolname !~ '^pg_') AS identity
               FROM unnest(acl) WITH ORDINALITY AS u(entry, ord)) e
-        LEFT JOIN pg_catalog.pg_roles r
-               ON r.rolname = btrim(split_part(e.item, '=', 1), '"')
-              AND pg_catalog.oblako_identity_type(r.oid) = 'group'
-              AND r.rolname !~ '^pg_'
+        WHERE e.identity IS DISTINCT FROM 'role'
     ), '') END;
 $$;
 

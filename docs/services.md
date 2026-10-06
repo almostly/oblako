@@ -209,7 +209,17 @@ Redshift's columns and values (`identity_type` of `user`, `group`, `role` or
 `public`; explicit grants only, not what an owner holds on its own object):
 `svv_roles`, `svv_user_grants`, `svv_role_grants`, `svv_relation_privileges`,
 `svv_schema_privileges`, `svv_database_privileges`, `svv_function_privileges` and
-`svv_default_privileges`.
+`svv_default_privileges`. The same scenario run on Redshift Serverless (2026-10-06)
+gives the same rows in every one of them. As on Redshift, an ACL string leaves out
+grants to roles, which show only in these views.
+
+What still differs from Redshift Serverless here: an ACL string spells an owner's
+privileges PostgreSQL's way (`arwdDxt`), where Redshift writes its own letters
+(`arwdRxtDPA`); Serverless has built-in `sys:*` roles (`sys:dba`, `sys:superuser`,
+...) that redshift-local doesn't; and on Redshift the user an IAM identity maps to
+is created at its first login, without a password, so making it a superuser needs
+a password in the same statement (`ALTER USER "IAM:x" PASSWORD '...' CREATEUSER`),
+whereas redshift-local creates it when the credentials are issued.
 
 The catalog compat is installed in every database, not just the one `POSTGRES_DB`
 names, because a tool managing a cluster walks `pg_database` and reconnects per
