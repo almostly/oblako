@@ -4,6 +4,8 @@ import importlib.util
 import pathlib
 import struct
 
+import pytest
+
 _PATH = (
     pathlib.Path(__file__).parents[2] / "oblako/images/redshift/proxy/redshift_proxy.py"
 )
@@ -324,3 +326,47 @@ def test_password_literal_survives():
     """A real password is untouched, including one that merely contains 'disable'."""
     stmt = "CREATE USER bi_analyst PASSWORD 'disable_me_1';"
     assert rewrite_sql(stmt) == stmt
+
+
+@pytest.mark.parametrize(
+    ("sql", "expected"),
+    [
+        ("GRANT ROLE analyst TO alice", "GRANT analyst TO alice"),
+        ("GRANT ROLE a, ROLE b TO ROLE c", "GRANT a, b TO c"),
+        (
+            "REVOKE ADMIN OPTION FOR ROLE a FROM alice",
+            "REVOKE ADMIN OPTION FOR a FROM alice",
+        ),
+        ("REVOKE ROLE a FROM ROLE b", "REVOKE a FROM b"),
+        (
+            "GRANT SELECT ON t TO ROLE analyst, GROUP g",
+            "GRANT SELECT ON t TO analyst, GROUP g",
+        ),
+        (
+            "ALTER DEFAULT PRIVILEGES FOR USER etl IN SCHEMA s "
+            "GRANT SELECT ON TABLES TO ROLE analyst",
+            "ALTER DEFAULT PRIVILEGES FOR USER etl IN SCHEMA s "
+            "GRANT SELECT ON TABLES TO analyst",
+        ),
+        # left alone: a system permission, a schema named role, PostgreSQL's form
+        ("GRANT CREATE ROLE TO alice", "GRANT CREATE ROLE TO alice"),
+        ("GRANT USAGE ON SCHEMA role TO bob", "GRANT USAGE ON SCHEMA role TO bob"),
+        ("CREATE ROLE x LOGIN PASSWORD 'p'", "CREATE ROLE x LOGIN PASSWORD 'p'"),
+    ],
+)
+def test_redshift_role_grants_lose_the_role_keyword(sql, expected):
+    assert rewrite_sql(sql) == expected
+
+
+def test_create_role_creates_and_marks_a_redshift_role():
+    out = rewrite_sql("CREATE ROLE \"IAM:Ops\" EXTERNALID 'abc';")
+    assert out.startswith('DO $oblako_role$ BEGIN CREATE ROLE "IAM:Ops" NOLOGIN; ')
+    assert "'IAM:Ops'" in out and "'oblako:redshift-role owner='" in out
+    assert out.endswith("END $oblako_role$;")
+    # one statement, so it also runs on the extended protocol
+    assert "SELECT 1; DO $oblako_role$" in rewrite_sql("SELECT 1; CREATE ROLE r2;")
+
+
+def test_pg_group_leaves_out_redshift_roles():
+    out = rewrite_sql("SELECT groname FROM pg_catalog.pg_group")
+    assert "NOT LIKE 'oblako:redshift-role%'" in out

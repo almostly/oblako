@@ -204,8 +204,57 @@ _PASSWORD_DISABLE = re.compile(r"(?i)\bpassword\s+disable\b")
 _PG_GROUP = re.compile(r"(?i)\bpg_catalog\.pg_group\b")
 _PG_GROUP_SUB = (
     "(SELECT groname, grosysid, grolist FROM pg_catalog.pg_group "
-    "WHERE groname !~ '^pg_') AS pg_group"
+    "WHERE groname !~ '^pg_' AND coalesce(pg_catalog.shobj_description(grosysid, "
+    "'pg_authid'), '') NOT LIKE 'oblako:redshift-role%') AS pg_group"
 )
+
+# Redshift roles (RBAC). Redshift keeps roles apart from users and groups;
+# PostgreSQL has only roles. A Redshift role is created here as a role that can't
+# log in, marked with a shared comment naming its creator, which is how
+# initdb.d/14_redshift_identities.sql (svv_roles, oblako_identity_type) and the
+# pg_group filter above tell it from a group. PostgreSQL has no event trigger for
+# role DDL, so the proxy sets the marker: Redshift's CREATE ROLE becomes one DO
+# statement (the extended protocol takes a single statement) that creates and
+# marks the role. Only Redshift's form is rewritten; PostgreSQL's CREATE ROLE with
+# options (LOGIN, PASSWORD, ...) is not Redshift SQL and passes through.
+_CREATE_ROLE = re.compile(
+    r'(?i)^(\s*)create\s+role\s+("(?:[^"]|"")+"|[a-z_][\w$]*)'
+    r"(?:\s+externalid\s+(?:'(?:[^']|'')*'|\S+))?\s*(;?)(\s*)$"
+)
+# GRANT ROLE r TO u, GRANT ROLE r TO ROLE r2, REVOKE [ADMIN OPTION FOR] ROLE r
+# FROM u, and the TO ROLE / FROM ROLE grantee of any GRANT, REVOKE or ALTER
+# DEFAULT PRIVILEGES: PostgreSQL spells all of them without the ROLE keyword. Only a ROLE that follows GRANT,
+# REVOKE, FOR, TO, FROM or a comma is dropped, so GRANT CREATE ROLE (a system
+# permission) and a schema named role are left alone.
+_GRANT_REVOKE_START = re.compile(
+    r"(?i)^\s*(?:grant|revoke|alter\s+default\s+privileges)\b"
+)
+_ROLE_KEYWORD = re.compile(
+    r'(?i)(\b(?:grant|revoke|for|to|from)\s+|,\s*)role\s+(?=["\w])'
+)
+
+
+def _role_name(ident: str) -> str:
+    """Return the role name an identifier denotes (quoted verbatim, bare folded)."""
+    if ident.startswith('"'):
+        return ident[1:-1].replace('""', '"')
+    return ident.lower()
+
+
+def _rewrite_roles(stmt: str) -> str:
+    """Apply the Redshift role rewrites to one statement."""
+    if m := _CREATE_ROLE.match(stmt):
+        lead, ident, semi, tail = m.group(1), m.group(2), m.group(3), m.group(4)
+        name = _role_name(ident).replace("'", "''")
+        return (
+            f"{lead}DO $oblako_role$ BEGIN CREATE ROLE {ident} NOLOGIN; "
+            f"EXECUTE format('COMMENT ON ROLE %I IS %L', '{name}', "
+            f"'oblako:redshift-role owner=' || current_user); END $oblako_role${semi}{tail}"
+        )
+    if _GRANT_REVOKE_START.match(stmt):
+        return _ROLE_KEYWORD.sub(r"\1", stmt)
+    return stmt
+
 
 # ACL strings: Redshift prefixes a group grantee (`group analysts=r/bi_analyst`),
 # PostgreSQL does not (`analysts=r/bi_analyst`), because roles and groups are
@@ -387,7 +436,8 @@ def rewrite_sql(sql: str) -> str:
     """Rewrite Redshift-only SQL PostgreSQL can't parse.
 
     ``VARCHAR(MAX)`` -> ``varchar(65535)`` and ``PASSWORD DISABLE`` -> ``PASSWORD NULL``
-    (any statement); Redshift ML's CREATE/SHOW/DROP MODEL become calls to the
+    (any statement); Redshift's CREATE ROLE, GRANT ROLE and REVOKE ROLE become
+    marked PostgreSQL roles and plain role grants (see ``_rewrite_roles``); Redshift ML's CREATE/SHOW/DROP MODEL become calls to the
     in-engine Redshift ML functions (see ``redshift_ml``); bare datepart keywords (``DATEADD(month, ...)``) are quoted
     (see ``datepart``); Redshift-only pg_catalog columns
     reflection drivers read are answered with neutral literals (see
@@ -430,6 +480,8 @@ def rewrite_sql(sql: str) -> str:
     s = _VARCHAR_MAX.sub("varchar(65535)", s)
     s = _CREATEUSER.sub("SUPERUSER", s)
     s = _PASSWORD_DISABLE.sub("PASSWORD NULL", s)
+    if re.search(r"(?i)\brole\b", s):
+        s = "".join(_rewrite_roles(stmt) for stmt in _segments(s))
     s = _PG_GROUP.sub(_PG_GROUP_SUB, s)
     s = _ACL_TO_STRING.sub("redshift_acl(", s)
     s = _rewrite_catalog(s)

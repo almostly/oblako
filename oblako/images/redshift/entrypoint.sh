@@ -36,9 +36,10 @@ fi
 # First bring every database up to date: Redshift's system objects in pg_catalog
 # (initdb.d/99_system_catalog.sql), the pg_oblako AVG aggregates the
 # proxy routes avg() to (initdb.d/11_integer_avg.sql), and the Iceberg table
-# functions (initdb.d/13_iceberg.sql). initdb scripts run only on a
+# functions (initdb.d/13_iceberg.sql), and Redshift's identity and privilege
+# views (initdb.d/14_redshift_identities.sql). initdb scripts run only on a
 # fresh volume, and these must also reach databases created before they existed.
-# All three scripts are idempotent.
+# All four scripts are idempotent.
 (
   until pg_isready -h 127.0.0.1 -p "$OBLAKO_PG_PORT" -q 2>/dev/null; do
     sleep 0.5
@@ -56,6 +57,9 @@ fi
     psql -U "${POSTGRES_USER:-postgres}" -p "$OBLAKO_PG_PORT" -d "$db" -q \
       -f /docker-entrypoint-initdb.d/13_iceberg.sql >/dev/null 2>&1 \
       || echo "oblako: could not install the Iceberg table functions in $db"
+    psql -U "${POSTGRES_USER:-postgres}" -p "$OBLAKO_PG_PORT" -d "$db" -q \
+      -f /docker-entrypoint-initdb.d/14_redshift_identities.sql >/dev/null 2>&1 \
+      || echo "oblako: could not install the Redshift identity views in $db"
   done
   exec python3 /usr/local/bin/redshift_proxy.py
 ) &

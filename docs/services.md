@@ -196,6 +196,21 @@ reproducible but not correct, because which seeds are clean is a property of the
 schema, not of redtape. Treat an empty plan from a single run as weak evidence: apply,
 then re-plan. None of this is the compat layer, whose ACL reads are stable.
 
+**Users, groups and roles.** Redshift keeps three kinds of identity apart, and so
+does redshift-local: `CREATE USER`, `CREATE GROUP` with `ALTER GROUP ... ADD USER`,
+and Redshift's role-based access control: `CREATE ROLE`, `GRANT ROLE r TO user`,
+`GRANT ROLE r TO ROLE r2`, `REVOKE ROLE`, and `TO ROLE r` as the grantee of a
+privilege or a default privilege. Underneath they are all PostgreSQL roles; a
+Redshift role is one that can't log in and is marked as a role, so `pg_group` lists
+only real groups, as on Redshift, and an ACL string prefixes only a group.
+
+The privilege views access tools read instead of ACL strings answer with
+Redshift's columns and values (`identity_type` of `user`, `group`, `role` or
+`public`; explicit grants only, not what an owner holds on its own object):
+`svv_roles`, `svv_user_grants`, `svv_role_grants`, `svv_relation_privileges`,
+`svv_schema_privileges`, `svv_database_privileges`, `svv_function_privileges` and
+`svv_default_privileges`.
+
 The catalog compat is installed in every database, not just the one `POSTGRES_DB`
 names, because a tool managing a cluster walks `pg_database` and reconnects per
 entry.
