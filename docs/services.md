@@ -372,6 +372,13 @@ three ways to connect: a Secrets Manager secret, a Glue connection, and
 `connect_temp`, whose `GetClusterCredentials` call issues an `IAMA:<user>` login on
 the cluster's engine that acts as `<user>` until it expires.
 
+`GetClusterCredentialsWithIAM` (a provisioned cluster) and Redshift Serverless's
+`GetCredentials` (a workgroup) work too: the database user is the calling IAM
+identity, `IAM:<user>` or `IAMR:<role>` for an assumed role, created on first use
+with a password that expires, and refreshed on every call. Like any new Redshift
+user it holds no privileges until granted them (`ALTER USER "IAM:ops" CREATEUSER`
+makes it a superuser, `NOCREATEUSER` takes that back).
+
 **SUPER.** `SUPER` columns take JSON (`json_parse`, nested Parquet through
 `COPY`) and PartiQL navigation, with dots or brackets: `data.customer.name`,
 `data.items[0].sku`, `data['customer']['name']`. A navigated value selected on its

@@ -192,10 +192,14 @@ class RedshiftControlProxy:
         """Forward one Redshift call to moto, act on it, and rewrite its endpoints."""
         body = await request.body()
         target = request.headers.get("x-amz-target", "")
+        if target == "RedshiftServerless.GetCredentials":
+            return await serverless_credentials_response(request, body)
         if target.startswith("RedshiftServerless."):
             return await serverless_response(target.split(".", 1)[1], body)
         form = {k: v[0] for k, v in parse_qs(body.decode(errors="replace")).items()}
         action = form.get("Action", "")
+        if action == "GetClusterCredentialsWithIAM":
+            return await iam_credentials_response(request, form)
         refused = self._precheck(action, form)
         if refused is not None:
             return refused
@@ -235,6 +239,110 @@ async def credentials_response(form: dict[str, str]) -> Response:
         "</GetClusterCredentialsResponse>"
     )
     return Response(xml, media_type="text/xml")
+
+
+_ACCESS_KEY = re.compile(r"Credential=([^/,\s]+)/")
+
+
+def _caller(request: Request) -> str:
+    """Return the calling identity's ARN, from the request's access key."""
+    match = _ACCESS_KEY.search(request.headers.get("authorization", ""))
+    return credentials.caller_arn(match.group(1) if match else "oblako")
+
+
+def _cluster_exists(cluster_id: str) -> bool:
+    if clusters.get(cluster_id) is not None:
+        return True
+    import boto3
+
+    moto = boto3.client(
+        "redshift",
+        endpoint_url=f"http://localhost:{ports.MOTO}",
+        region_name="us-east-1",
+        aws_access_key_id="oblako",
+        aws_secret_access_key="oblako",
+    )
+    try:
+        moto.describe_clusters(ClusterIdentifier=cluster_id)
+        return True
+    except moto.exceptions.ClusterNotFoundFault:
+        return False
+
+
+async def iam_credentials_response(request: Request, form: dict[str, str]) -> Response:
+    """Answer GetClusterCredentialsWithIAM: a database user for the calling identity."""
+    cluster_id = form.get("ClusterIdentifier", "")
+    if not await run_in_threadpool(_cluster_exists, cluster_id):
+        return error_response(
+            "ClusterNotFound", f"Cluster {cluster_id} not found.", status=404
+        )
+    try:
+        caller = await run_in_threadpool(_caller, request)
+        user, password, expiration = await run_in_threadpool(
+            credentials.issue_for_identity,
+            caller,
+            cluster_id,
+            int(form.get("DurationSeconds") or 900),
+        )
+    except credentials.CredentialsError as e:
+        return error_response(e.code, str(e))
+    except Exception as e:  # the engine refused or isn't running
+        return error_response("InternalFailure", str(e), status=500)
+    when = expiration.strftime("%Y-%m-%dT%H:%M:%SZ")
+    xml = (
+        f'<GetClusterCredentialsWithIAMResponse xmlns="{_NS}">'
+        "<GetClusterCredentialsWithIAMResult>"
+        f"<DbUser>{user}</DbUser><DbPassword>{password}</DbPassword>"
+        f"<Expiration>{when}</Expiration><NextRefreshTime>{when}</NextRefreshTime>"
+        "</GetClusterCredentialsWithIAMResult>"
+        f"<ResponseMetadata><RequestId>{uuid.uuid4()}</RequestId></ResponseMetadata>"
+        "</GetClusterCredentialsWithIAMResponse>"
+    )
+    return Response(xml, media_type="text/xml")
+
+
+async def serverless_credentials_response(request: Request, body: bytes) -> Response:
+    """Answer Redshift Serverless GetCredentials: a user for the calling identity."""
+    try:
+        req = json.loads(body or b"{}")
+    except json.JSONDecodeError:
+        return _json_response(
+            _json_error("ValidationException", "Invalid JSON body"), 400
+        )
+    workgroup = req.get("workgroupName")
+    if not workgroup or serverless.get_workgroup_record(workgroup) is None:
+        return _json_response(
+            _json_error(
+                "ResourceNotFoundException", f"Workgroup {workgroup} not found"
+            ),
+            400,
+        )
+    try:
+        caller = await run_in_threadpool(_caller, request)
+        user, password, expiration = await run_in_threadpool(
+            credentials.issue_for_identity,
+            caller,
+            None,  # a workgroup runs on the shared engine
+            int(req.get("durationSeconds") or 900),
+        )
+    except credentials.CredentialsError as e:
+        return _json_response(_json_error("ValidationException", str(e)), 400)
+    stamp = expiration.timestamp()
+    return _json_response(
+        {
+            "dbUser": user,
+            "dbPassword": password,
+            "expiration": stamp,
+            "nextRefreshTime": stamp,
+        },
+        200,
+    )
+
+
+def _json_response(result: dict, status: int) -> Response:
+    return Response(
+        json.dumps(result), status_code=status, media_type="application/x-amz-json-1.1"
+    )
 
 
 async def serverless_response(operation: str, body: bytes) -> Response:

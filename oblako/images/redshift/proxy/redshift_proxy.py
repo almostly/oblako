@@ -180,9 +180,10 @@ _STRIPPERS = [
 _VARCHAR_MAX = re.compile(r"(?i)\b(?:character\s+varying|varchar)\s*\(\s*max\s*\)")
 
 # Redshift CREATE USER ... CREATEUSER (a superuser-ish privilege) -> PostgreSQL
-# SUPERUSER. Matches the one-word keyword, not the two-word "CREATE USER". redtape
-# emits this for a superuser in its access-management specs.
-_CREATEUSER = re.compile(r"(?i)\bcreateuser\b")
+# SUPERUSER, and ALTER USER ... NOCREATEUSER -> NOSUPERUSER. Matches the one-word
+# keywords, not the two-word "CREATE USER". redtape emits CREATEUSER for a
+# superuser in its access-management specs.
+_CREATEUSER = re.compile(r"(?i)\b(no)?createuser\b")
 
 # Redshift CREATE/ALTER USER ... PASSWORD DISABLE -> PostgreSQL PASSWORD NULL.
 # DISABLE is how an IAM-only Redshift account is provisioned: the account exists and
@@ -478,7 +479,7 @@ def rewrite_sql(sql: str) -> str:
     if integer_avg is not None:
         s = integer_avg.rewrite_avg(s)  # avg( -> pg_oblako.avg( (BIGINT for ints)
     s = _VARCHAR_MAX.sub("varchar(65535)", s)
-    s = _CREATEUSER.sub("SUPERUSER", s)
+    s = _CREATEUSER.sub(lambda m: "NOSUPERUSER" if m.group(1) else "SUPERUSER", s)
     s = _PASSWORD_DISABLE.sub("PASSWORD NULL", s)
     if re.search(r"(?i)\brole\b", s):
         s = "".join(_rewrite_roles(stmt) for stmt in _segments(s))

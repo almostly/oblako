@@ -370,3 +370,11 @@ def test_create_role_creates_and_marks_a_redshift_role():
 def test_pg_group_leaves_out_redshift_roles():
     out = rewrite_sql("SELECT groname FROM pg_catalog.pg_group")
     assert "NOT LIKE 'oblako:redshift-role%'" in out
+
+
+def test_nocreateuser_becomes_nosuperuser():
+    """ALTER USER ... NOCREATEUSER takes the privilege back, as on Redshift."""
+    assert rewrite_sql('ALTER USER "IAM:ops" NOCREATEUSER') == (
+        'ALTER USER "IAM:ops" NOSUPERUSER'
+    )
+    assert rewrite_sql("ALTER USER ops CREATEUSER") == "ALTER USER ops SUPERUSER"
