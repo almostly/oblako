@@ -58,7 +58,8 @@ def conn():
             "CREATE TABLE ddm.users (id int, email varchar(64))",
             "CREATE ROLE ddm_analyst",
             "CREATE USER ddm_bob PASSWORD 'Abcdef12'",
-            "CREATE MASKING POLICY ddm_full WITH (email varchar(256)) USING ('***')",
+            "CREATE MASKING POLICY ddm_full WITH (email varchar(256)) "
+            "USING ('***'::varchar(256))",
             "CREATE MASKING POLICY ddm_partial WITH (email varchar(256)) "
             "USING (regexp_replace(email, '^[^@]+', '***'))",
         ]:
@@ -171,9 +172,11 @@ def test_forms_redshift_refuses(conn):
 
 
 def test_alter_changes_the_expression_not_its_type(conn):
-    conn.execute("ALTER MASKING POLICY ddm_full USING (email)")  # strings are one
-    with pytest.raises(psycopg.Error, match="different types"):
-        conn.execute("ALTER MASKING POLICY ddm_full USING (42)")
+    conn.execute("ALTER MASKING POLICY ddm_full USING (email)")  # varchar(256) too
+    # compared exactly, as Redshift does: a length or text is another type
+    for expression in ("42", "'#'::varchar(10)", "upper(email)"):
+        with pytest.raises(psycopg.Error, match="different types"):
+            conn.execute(f"ALTER MASKING POLICY ddm_full USING ({expression})")
     (expression,) = conn.execute(
         "SELECT policy_expression FROM svv_masking_policy WHERE policy_name = 'ddm_full'"
     ).fetchone()
@@ -210,3 +213,16 @@ def test_column_privileges(conn):
         ("users", "email", "UPDATE", "ddm_analyst", "role"),
         ("users", "id", "SELECT", "ddm_bob", "user"),
     ]
+
+
+def test_an_expression_of_ambiguous_type_is_refused(conn):
+    with pytest.raises(psycopg.errors.FeatureNotSupported, match="ambiguous type"):
+        conn.execute("CREATE MASKING POLICY ddm_bare WITH (a varchar(9)) USING ('***')")
+    with pytest.raises(psycopg.errors.FeatureNotSupported, match="ambiguous type"):
+        conn.execute("ALTER MASKING POLICY ddm_full USING ('#')")
+    # a literal in a CASE takes its type from the other branch
+    conn.execute(
+        "CREATE MASKING POLICY ddm_bare WITH (a varchar(9)) "
+        "USING (CASE WHEN a LIKE '%@%' THEN '***' ELSE a END)"
+    )
+    conn.execute("DROP MASKING POLICY ddm_bare")

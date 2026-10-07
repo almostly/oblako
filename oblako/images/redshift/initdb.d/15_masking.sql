@@ -5,9 +5,10 @@
 -- attachments in pg_oblako tables and enforce what Redshift Serverless enforces
 -- (checked 2026-10-07):
 --   * a policy name is unique; DROP refuses while the policy is attached;
---   * ALTER changes only the expression, and not its output type (string types
---     count as one: Redshift casts a bare literal to the input type, PostgreSQL
---     calls it text, so text and varchar(n) must not clash);
+--   * an expression of ambiguous type (a bare literal, '***') is refused, on
+--     CREATE and ALTER: it needs a cast ('***'::varchar(256));
+--   * ALTER changes only the expression, and not its output type, compared
+--     exactly (varchar(64) and varchar(10) clash, as do varchar and text);
 --   * on one column two different policies can't share a priority, one policy
 --     can be attached to several grantees at one priority, and to one grantee at
 --     several priorities; DETACH removes all of a grantee's attachments of it;
@@ -60,7 +61,7 @@ END $$;
 -- the type an expression produces over the policy's inputs, as Redshift names it
 -- (character varying(256), text, integer ...): a throwaway view over typed NULLs
 CREATE OR REPLACE FUNCTION pg_oblako.ddm_output_type(
-    names text[], types text[], expression text)
+    policy text, names text[], types text[], expression text)
     RETURNS text LANGUAGE plpgsql AS $$
 DECLARE
     cols text;
@@ -68,6 +69,14 @@ DECLARE
 BEGIN
     SELECT string_agg(format('NULL::%s AS %I', t, n), ', ')
       INTO cols FROM unnest(names, types) AS u(n, t);
+    -- a bare literal has no type until something gives it one; Redshift refuses it
+    EXECUTE format('SELECT pg_typeof((%s))::text FROM (SELECT %s) AS masked_table',
+                   expression, cols) INTO result;
+    IF result = 'unknown' THEN
+        RAISE EXCEPTION 'CREATE MASKING POLICY "%" with ambiguous type is not supported', policy
+            USING ERRCODE = 'feature_not_supported',
+                  HINT = 'The masking expression requires type casting';
+    END IF;
     EXECUTE format('CREATE TEMP VIEW oblako_ddm_probe AS SELECT (%s) AS out FROM (SELECT %s) AS masked_table',
                    expression, cols);
     SELECT format_type(a.atttypid, a.atttypmod) INTO result
@@ -90,15 +99,9 @@ BEGIN
         policy, names,
         ARRAY(SELECT format_type(t::regtype, NULL) || coalesce(
                   substring(t FROM '\([0-9, ]+\)$'), '') FROM unnest(types) AS t),
-        expression, pg_oblako.ddm_output_type(names, types, expression),
+        expression, pg_oblako.ddm_output_type(policy, names, types, expression),
         current_user, now()::timestamp);
 END $$;
-
-CREATE OR REPLACE FUNCTION pg_oblako.ddm_type_category(type_name text)
-    RETURNS "char" LANGUAGE sql STABLE AS $$
-    SELECT t.typcategory FROM pg_catalog.pg_type t
-     WHERE t.oid = (SELECT ty::regtype FROM (SELECT type_name AS ty) AS x)
-$$;
 
 CREATE OR REPLACE FUNCTION pg_oblako.ddm_alter(policy text, expression text)
     RETURNS void LANGUAGE plpgsql AS $$
@@ -111,10 +114,8 @@ BEGIN
     IF NOT FOUND THEN
         RAISE EXCEPTION 'masking policy "%" does not exist', policy;
     END IF;
-    new_type := pg_oblako.ddm_output_type(p.input_names, p.input_types, expression);
-    IF new_type <> p.output_type AND NOT (
-            pg_oblako.ddm_type_category(new_type) = 'S'
-            AND pg_oblako.ddm_type_category(p.output_type) = 'S') THEN
+    new_type := pg_oblako.ddm_output_type(policy, p.input_names, p.input_types, expression);
+    IF new_type <> p.output_type THEN
         RAISE EXCEPTION 'The expressions at position 0 have different types in the masking policy % and the new policy: "%" and "%"',
             policy, p.output_type, new_type;
     END IF;
