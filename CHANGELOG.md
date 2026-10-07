@@ -11,13 +11,23 @@ versioned entries below.
 
 ## Unreleased
 
+## v0.2.0 (2026-10-07)
+
+Redshift's identities, privilege views and dynamic data masking, checked against
+Redshift Serverless; the RDS Data API's arrays as on AWS.
+
 ### Added
 
+- **Redshift**: users, groups and roles kept apart as Redshift keeps them (CREATE ROLE, GRANT ROLE, TO ROLE grantees), and the SVV views access tools read: svv_roles, svv_user_grants, svv_role_grants and svv_relation, schema, database, function and default privileges, matching Redshift Serverless row for row
+- **Redshift**: GetClusterCredentialsWithIAM and Serverless GetCredentials map the caller to an IAM:/IAMR: database user; NOCREATEUSER works
+- **Docs**: the companion book is served at /book/, and docs deploys leave it in place (#69)
 - **Redshift**: queries read masked columns as Redshift's: each user sees what its highest-priority attachment gives it (its own, a role's, PUBLIC's), in joins, subqueries and CTEs; the table stays a plain table, and ALTER, ATTACH and DETACH take effect for the next query
 - **Redshift**: dynamic data masking policies: CREATE, ALTER, DROP, ATTACH and DETACH MASKING POLICY with Redshift Serverless's rules, read back from svv_masking_policy and svv_attached_masking_policy; svv_column_privileges (queries are not masked yet)
 
 ### Changed
 
+- **Redshift**: ACL strings leave out grants to roles, as Redshift's do
+- **Docs**: the quick start, CLI reference, dashboard pages and README services match the code; the diagrams and README carry the oblako icon
 - **Redshift**: masked reads as on Redshift Serverless: a superuser is masked by its own role grants only (PostgreSQL counted it a member of every role), and a user granted some columns of a masked table reads those, `*` included
 - **RDS**: the RDS Data API returns PostgreSQL arrays as `arrayValue` (and as JSON arrays in `formattedRecords`), as AWS does, not as `{a,b}` text
 
