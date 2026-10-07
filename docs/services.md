@@ -221,6 +221,24 @@ is created at its first login, without a password, so making it a superuser need
 a password in the same statement (`ALTER USER "IAM:x" PASSWORD '...' CREATEUSER`),
 whereas redshift-local creates it when the credentials are issued.
 
+**Dynamic data masking.** `CREATE MASKING POLICY [IF NOT EXISTS] p WITH (inputs)
+USING (expression)`, `ALTER MASKING POLICY p USING (...)`, `DROP MASKING POLICY p`,
+`ATTACH MASKING POLICY p ON t (cols) [USING (inputs)] TO { user | ROLE r | PUBLIC }
+[PRIORITY n]` and `DETACH MASKING POLICY ... FROM ...` keep policies and their
+attachments, read back from `svv_masking_policy` and `svv_attached_masking_policy`
+with Redshift's columns and JSON formats. The rules are the ones Redshift
+Serverless enforces (checked 2026-10-07): a different policy can't share a
+priority on a column, one policy can go to several grantees at one priority and to
+one grantee at several, one `DETACH` removes all of a grantee's, `DROP` is refused
+while the policy is attached, `ALTER` keeps the output type, `TO GROUP` is a syntax
+error, dropping a table drops its attachments, and only a superuser manages or sees
+policies. `svv_column_privileges` lists column-level grants.
+
+What differs: queries are not masked yet, so a masked column reads in full; and
+Redshift stores an expression in its own normalised form (`'***'` becomes
+`CAST(CAST('***' AS VARCHAR) AS VARCHAR(256))`), where redshift-local keeps it as
+written, so tools should compare expressions by round trip rather than by text.
+
 The catalog compat is installed in every database, not just the one `POSTGRES_DB`
 names, because a tool managing a cluster walks `pg_database` and reconnects per
 entry.

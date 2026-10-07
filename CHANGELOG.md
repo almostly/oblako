@@ -11,6 +11,10 @@ versioned entries below.
 
 ## Unreleased
 
+### Added
+
+- **Redshift**: dynamic data masking policies: CREATE, ALTER, DROP, ATTACH and DETACH MASKING POLICY with Redshift Serverless's rules, read back from svv_masking_policy and svv_attached_masking_policy; svv_column_privileges (queries are not masked yet)
+
 ## v0.1.0 (2026-10-05)
 
 The first release.

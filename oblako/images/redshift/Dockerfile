@@ -83,6 +83,9 @@ COPY ml_train/ /usr/local/share/oblako/ml_train/
 COPY proxy/pivot_unpivot.py /usr/local/bin/pivot_unpivot.py
 # Iceberg tables: DDL rewriting (proxy) and the plpython3u catalog work.
 COPY proxy/iceberg_tables.py /usr/local/bin/iceberg_tables.py
+# Dynamic data masking: policy DDL rewriting (proxy), the catalog in
+# initdb.d/15_masking.sql.
+COPY proxy/masking.py /usr/local/bin/masking.py
 COPY entrypoint.sh /usr/local/bin/oblako-entrypoint.sh
 RUN chmod +x /usr/local/bin/oblako-entrypoint.sh
 
