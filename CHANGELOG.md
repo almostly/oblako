@@ -19,6 +19,7 @@ versioned entries below.
 ### Changed
 
 - **Redshift**: masked reads as on Redshift Serverless: a superuser is masked by its own role grants only (PostgreSQL counted it a member of every role), and a user granted some columns of a masked table reads those, `*` included
+- **RDS**: the RDS Data API returns PostgreSQL arrays as `arrayValue` (and as JSON arrays in `formattedRecords`), as AWS does, not as `{a,b}` text
 
 ## v0.1.0 (2026-10-05)
 

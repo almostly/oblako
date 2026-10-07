@@ -21,7 +21,38 @@ from typing import Any
 
 from oblako.engines.redshift_data.executor import RedshiftDataExecutor
 
-_encode_field = RedshiftDataExecutor._encode_field  # generic PG/py value -> Field
+_redshift_field = RedshiftDataExecutor._encode_field  # generic PG/py value -> Field
+
+
+def _array_value(values: list | tuple) -> dict:
+    """Return a PostgreSQL array as an ArrayValue, as the RDS Data API does.
+
+    Typed by its elements: ``booleanValues``, ``longValues``, ``doubleValues``,
+    ``stringValues``, or ``arrayValues`` for a multi-dimensional array.
+    """
+    items = [v for v in values if v is not None]
+    if items and all(isinstance(v, (list, tuple)) for v in items):
+        return {"arrayValues": [_array_value(v) for v in values]}
+    if items and all(isinstance(v, bool) for v in items):
+        return {"booleanValues": list(values)}
+    if items and all(isinstance(v, int) and not isinstance(v, bool) for v in items):
+        return {"longValues": list(values)}
+    if items and all(isinstance(v, float) for v in items):
+        return {"doubleValues": list(values)}
+    return {"stringValues": [None if v is None else _json_safe(v) for v in values]}
+
+
+def _encode_field(value: Any) -> dict:
+    """Encode a value as an RDS Data API Field: Redshift's, but arrays as arrays.
+
+    The Redshift Data API returns an array as text (``{a,b}``); the RDS Data API
+    returns ``arrayValue``.
+    """
+    if isinstance(value, (list, tuple)):
+        return {"arrayValue": _array_value(value)}
+    return _redshift_field(value)
+
+
 _NAMED_PARAM = re.compile(r"(?<!:):([a-zA-Z_][a-zA-Z0-9_]*)")
 
 
@@ -55,6 +86,8 @@ def _json_safe(value):
         return base64.b64encode(bytes(value)).decode("ascii")
     if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
         return value.isoformat()
+    if isinstance(value, (list, tuple)):  # an array: a JSON array
+        return [_json_safe(v) for v in value]
     return str(value)
 
 
