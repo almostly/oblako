@@ -500,14 +500,77 @@ def rewrite_sql(sql: str) -> str:
     s = _rewrite_catalog(s)
     if redshift_ml is not None:
         s = redshift_ml.rewrite_ml(s)  # CREATE/SHOW/DROP MODEL -> oblako_ml_* calls
-    if not _CREATE_TABLE.search(s):
-        return s
-    # only the CREATE TABLE statements of a multi-statement string: a SELECT beside
-    # one may name a column distkey or encoding
-    return "".join(
-        _strip_physical_ddl(stmt) if _CREATE_TABLE_START.match(stmt) else stmt
-        for stmt in _segments(s)
-    )
+    if _CREATE_TABLE.search(s):
+        # only the CREATE TABLE statements of a multi-statement string: a SELECT
+        # beside one may name a column distkey or encoding
+        s = "".join(
+            _strip_physical_ddl(stmt) if _CREATE_TABLE_START.match(stmt) else stmt
+            for stmt in _segments(s)
+        )
+    # last: masked tables read by the query become their masking SELECT
+    if masking is not None:
+        s = _mask_reads(s, sql)
+    return s
+
+
+_MASKED_CACHE: dict[str, tuple[float, dict[tuple[str, str], str]]] = {}
+# after DDL the cache is bypassed for a while: the DDL is seen before it runs, so
+# a lookup in between would cache the state it is about to change
+_MASKED_DIRTY: dict[str, float] = {}
+_DDL = re.compile(r"(?i)\b(create|alter|drop|attach|detach|rename|grant|revoke)\b")
+
+
+def _masked_tables(db: str) -> dict[tuple[str, str], str]:
+    """Return the client database's masked tables and the SELECT for each.
+
+    Over the trusted Unix socket, cached for two seconds per database; empty if
+    anything fails (no masking catalog yet, say), so queries then run as sent.
+    """
+    now = time.monotonic()
+    cached = _MASKED_CACHE.get(db)
+    if cached and now - cached[0] < 2 and now >= _MASKED_DIRTY.get(db, 0):
+        return cached[1]
+    tables: dict[tuple[str, str], str] = {}
+    try:
+        import psycopg
+
+        conninfo = (
+            f"host={os.path.dirname(PG_SOCKET)} port={PG_PORT} user={PG_USER} "
+            f"dbname={db} connect_timeout=2"
+        )
+        with psycopg.connect(conninfo, autocommit=True) as conn:
+            row = conn.execute(
+                "SELECT to_regproc('pg_oblako.ddm_masked_tables')"
+            ).fetchone()
+            if row and row[0]:
+                for schema, table, select in conn.execute(
+                    "SELECT * FROM pg_oblako.ddm_masked_tables()"
+                ):
+                    tables[(schema, table)] = select
+    except Exception as exc:  # queries then run unmasked, as before
+        print(f"oblako: masking lookup failed: {exc!r}", flush=True)
+    _MASKED_CACHE[db] = (now, tables)
+    return tables
+
+
+def _mask_reads(sql: str, sent: str) -> str:
+    """Rewrite reads of masked tables (see ``masking.rewrite_reads``).
+
+    ``sent`` is the statement as the client sent it: DDL is recognised there, as
+    the rewrites before this one turn ATTACH MASKING POLICY into a DO block.
+    """
+    db = CLIENT_DATABASE.get() or PG_DATABASE
+    if _DDL.search(sent):
+        _MASKED_DIRTY[db] = time.monotonic() + 2  # attachments or columns may change
+        if _MASKING_POLICY.search(sent):
+            return sql
+    tables = _masked_tables(db)
+    if not tables:
+        return sql
+    lowered = sql.lower()
+    if not any(table.lower() in lowered for _, table in tables):
+        return sql
+    return masking.rewrite_reads(sql, tables)
 
 
 def _strip_physical_ddl(stmt: str) -> str:

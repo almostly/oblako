@@ -86,6 +86,31 @@ BEGIN
     RETURN result;
 END $$;
 
+-- Each policy as a SQL function over its inputs, so a query can apply it:
+-- pg_oblako."ddm_fn_<policy>"(inputs) RETURNS output type. The expression sees
+-- its inputs by name and as masked_table.<name>, as Redshift's does.
+CREATE OR REPLACE FUNCTION pg_oblako.ddm_define_function(policy text)
+    RETURNS void LANGUAGE plpgsql AS $$
+DECLARE
+    p pg_oblako.ddm_policies;
+    params text;
+    cols text;
+BEGIN
+    SELECT * INTO p FROM pg_oblako.ddm_policies WHERE name = policy;
+    SELECT string_agg(format('%I %s', 'oblako_in_' || i, t), ', ' ORDER BY i),
+           string_agg(format('%I AS %I', 'oblako_in_' || i, n), ', ' ORDER BY i)
+      INTO params, cols
+      FROM unnest(p.input_names, p.input_types) WITH ORDINALITY AS u(n, t, i);
+    IF to_regproc(format('pg_oblako.%I', 'ddm_fn_' || policy)) IS NOT NULL THEN
+        EXECUTE format('DROP FUNCTION pg_oblako.%I', 'ddm_fn_' || policy);
+    END IF;
+    EXECUTE format(
+        'CREATE FUNCTION pg_oblako.%I(%s) RETURNS %s LANGUAGE sql IMMUTABLE AS %L',
+        'ddm_fn_' || policy, params, p.output_type,
+        format('SELECT (%s) FROM (SELECT %s) AS masked_table', p.expression, cols));
+    EXECUTE format('GRANT EXECUTE ON FUNCTION pg_oblako.%I TO PUBLIC', 'ddm_fn_' || policy);
+END $$;
+
 CREATE OR REPLACE FUNCTION pg_oblako.ddm_create(
     policy text, names text[], types text[], expression text, if_not_exists boolean)
     RETURNS void LANGUAGE plpgsql AS $$
@@ -101,6 +126,7 @@ BEGIN
                   substring(t FROM '\([0-9, ]+\)$'), '') FROM unnest(types) AS t),
         expression, pg_oblako.ddm_output_type(policy, names, types, expression),
         current_user, now()::timestamp);
+    PERFORM pg_oblako.ddm_define_function(policy);
 END $$;
 
 CREATE OR REPLACE FUNCTION pg_oblako.ddm_alter(policy text, expression text)
@@ -123,6 +149,7 @@ BEGIN
        SET expression = ddm_alter.expression, modified_by = current_user,
            modified_time = now()::timestamp
      WHERE name = policy;
+    PERFORM pg_oblako.ddm_define_function(policy);
 END $$;
 
 CREATE OR REPLACE FUNCTION pg_oblako.ddm_drop(policy text)
@@ -136,6 +163,9 @@ BEGIN
         RAISE EXCEPTION 'cannot drop masking policy % because other objects depend on it', policy;
     END IF;
     DELETE FROM pg_oblako.ddm_policies WHERE name = policy;
+    IF to_regproc(format('pg_oblako.%I', 'ddm_fn_' || policy)) IS NOT NULL THEN
+        EXECUTE format('DROP FUNCTION pg_oblako.%I', 'ddm_fn_' || policy);
+    END IF;
 END $$;
 
 CREATE OR REPLACE FUNCTION pg_oblako.ddm_attach(
@@ -222,6 +252,64 @@ DROP EVENT TRIGGER IF EXISTS oblako_ddm_forget_dropped;
 CREATE EVENT TRIGGER oblako_ddm_forget_dropped ON sql_drop
     EXECUTE FUNCTION pg_oblako.ddm_forget_dropped();
 
+-- Query time. The proxy replaces a masked table read in a query with the SELECT
+-- ddm_masked_select returns: each masked column becomes a CASE on the policy that
+-- applies to the current user, the highest priority among the attachments to
+-- that user, to a role it has (directly or through other roles) and to PUBLIC.
+-- The choice is an uncorrelated subquery, so it is made once per query, not per
+-- row, and it follows SET ROLE as Redshift's does.
+CREATE OR REPLACE FUNCTION pg_oblako.ddm_policy_for(rel oid, col text, who name)
+    RETURNS text LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $$
+    SELECT a.policy FROM pg_oblako.ddm_attachments a
+     WHERE a.relid = rel AND col = ANY (a.output_columns)
+       AND (a.grantee_type = 'public'
+            OR (a.grantee_type = 'user' AND a.grantee = who)
+            OR (a.grantee_type = 'role'
+                AND EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = a.grantee)
+                AND pg_has_role(who, a.grantee, 'MEMBER')))
+     ORDER BY a.priority DESC
+     LIMIT 1
+$$;
+GRANT EXECUTE ON FUNCTION pg_oblako.ddm_policy_for(oid, text, name) TO PUBLIC;
+
+CREATE OR REPLACE FUNCTION pg_oblako.ddm_masked_select(rel oid)
+    RETURNS text LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    cols text;
+BEGIN
+    SELECT string_agg(
+             CASE WHEN m.attname IS NULL THEN quote_ident(a.attname)
+                  ELSE format('CASE (SELECT pg_oblako.ddm_policy_for(%s, %L, current_user)) %s ELSE %I END AS %I',
+                              rel, a.attname, m.branches, a.attname, a.attname)
+             END, ', ' ORDER BY a.attnum)
+      INTO cols
+      FROM pg_catalog.pg_attribute a
+      LEFT JOIN LATERAL (
+          SELECT a.attname, string_agg(
+                   format('WHEN %L THEN pg_oblako.%I(%s)::%s', x.policy, 'ddm_fn_' || x.policy,
+                          (SELECT string_agg(quote_ident(c), ', ') FROM unnest(x.input_columns) AS c),
+                          format_type(a.atttypid, a.atttypmod)),
+                   ' ' ORDER BY x.policy) AS branches
+            FROM (SELECT DISTINCT ON (d.policy) d.policy, d.input_columns
+                    FROM pg_oblako.ddm_attachments d
+                   WHERE d.relid = rel AND a.attname = ANY (d.output_columns)
+                   ORDER BY d.policy, d.priority DESC) x
+          HAVING count(*) > 0
+      ) m ON true
+     WHERE a.attrelid = rel AND a.attnum > 0 AND NOT a.attisdropped;
+    RETURN format('SELECT %s FROM %s', cols, rel::regclass);
+END $$;
+
+-- the masked tables of this database, and the SELECT that stands in for each
+CREATE OR REPLACE FUNCTION pg_oblako.ddm_masked_tables()
+    RETURNS TABLE (schema_name text, table_name text, masked_select text)
+    LANGUAGE sql STABLE AS $$
+    SELECT n.nspname::text, c.relname::text, pg_oblako.ddm_masked_select(c.oid)
+      FROM (SELECT DISTINCT relid FROM pg_oblako.ddm_attachments) a
+      JOIN pg_catalog.pg_class c ON c.oid = a.relid
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+$$;
+
 -- Redshift's JSON text, built by hand to match its spacing and key order
 CREATE OR REPLACE VIEW pg_catalog.svv_masking_policy AS
 SELECT current_database()::text AS policy_database,
@@ -264,6 +352,9 @@ JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 CROSS JOIN LATERAL pg_catalog.aclexplode(a.attacl) x
 WHERE a.attnum > 0 AND NOT a.attisdropped
   AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema';
+
+-- policies kept before query masking existed get their functions
+SELECT pg_oblako.ddm_define_function(name) FROM pg_oblako.ddm_policies;
 
 GRANT SELECT ON pg_catalog.svv_masking_policy, pg_catalog.svv_attached_masking_policy,
     pg_catalog.svv_column_privileges TO PUBLIC;

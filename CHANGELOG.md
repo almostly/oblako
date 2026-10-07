@@ -13,6 +13,7 @@ versioned entries below.
 
 ### Added
 
+- **Redshift**: queries read masked columns as Redshift's: each user sees what its highest-priority attachment gives it (its own, a role's, PUBLIC's), in joins, subqueries and CTEs; the table stays a plain table, and ALTER, ATTACH and DETACH take effect for the next query
 - **Redshift**: dynamic data masking policies: CREATE, ALTER, DROP, ATTACH and DETACH MASKING POLICY with Redshift Serverless's rules, read back from svv_masking_policy and svv_attached_masking_policy; svv_column_privileges (queries are not masked yet)
 
 ## v0.1.0 (2026-10-05)

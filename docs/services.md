@@ -236,8 +236,19 @@ while the policy is attached, `ALTER` keeps the output type exactly
 error, dropping a table drops its attachments, and only a superuser manages or sees
 policies. `svv_column_privileges` lists column-level grants.
 
-What differs: queries are not masked yet, so a masked column reads in full; and
-Redshift stores an expression in its own normalised form (`'***'::varchar(256)`
+A query reads each masked column as the user's highest-priority attachment gives
+it: the user's own, a role it has (directly or through other roles), or PUBLIC.
+The proxy replaces a masked table read in a query (in a FROM list, after JOIN, in
+subqueries and CTEs, not the target of INSERT, UPDATE or DELETE) with a SELECT
+that applies the policies, named as the table, and the policy is chosen per
+query for the current user. The column keeps its type, and the table stays a
+plain table: writes, ALTER TABLE and DROP TABLE work as before. ALTER, ATTACH and
+DETACH take effect for the next query.
+
+What differs: a predicate on a masked column (`WHERE email = ...`) compares the
+masked value, which is how redshift-local applies a mask and isn't yet checked
+against Redshift; a user granted only some columns of a masked table can't read
+it, as the stand-in SELECT names every column; and Redshift stores an expression in its own normalised form (`'***'::varchar(256)`
 becomes `CAST(CAST('***' AS VARCHAR) AS VARCHAR(256))`), where redshift-local keeps
 it as written, so tools should compare expressions by round trip rather than by
 text; and some output types are named differently (Redshift has no `text`, so a
