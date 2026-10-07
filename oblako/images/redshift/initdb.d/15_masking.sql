@@ -255,7 +255,8 @@ CREATE EVENT TRIGGER oblako_ddm_forget_dropped ON sql_drop
 -- Query time. The proxy replaces a masked table read in a query with the SELECT
 -- ddm_masked_select returns: each masked column becomes a CASE on the policy that
 -- applies to the current user, the highest priority among the attachments to
--- that user, to a role it has (directly or through other roles) and to PUBLIC.
+-- that user, to a role granted to it (directly or through other roles) and to
+-- PUBLIC. A superuser is masked like anyone else, as on Redshift.
 -- The choice is an uncorrelated subquery, so it is made once per query, not per
 -- row, and it follows SET ROLE as Redshift's does.
 CREATE OR REPLACE FUNCTION pg_oblako.ddm_policy_for(rel oid, col text, who name)
@@ -264,15 +265,25 @@ CREATE OR REPLACE FUNCTION pg_oblako.ddm_policy_for(rel oid, col text, who name)
      WHERE a.relid = rel AND col = ANY (a.output_columns)
        AND (a.grantee_type = 'public'
             OR (a.grantee_type = 'user' AND a.grantee = who)
-            OR (a.grantee_type = 'role'
-                AND EXISTS (SELECT 1 FROM pg_roles r WHERE r.rolname = a.grantee)
-                AND pg_has_role(who, a.grantee, 'MEMBER')))
+            OR (a.grantee_type = 'role' AND a.grantee IN (
+                -- the roles granted to the user, directly or through other
+                -- roles; not pg_has_role, which counts a superuser a member of
+                -- every role (on Redshift a superuser has only its grants)
+                WITH RECURSIVE held(oid) AS (
+                    SELECT m.roleid FROM pg_auth_members m
+                      JOIN pg_roles u ON u.oid = m.member WHERE u.rolname = who
+                    UNION
+                    SELECT m.roleid FROM pg_auth_members m JOIN held ON m.member = held.oid)
+                SELECT r.rolname FROM held JOIN pg_roles r ON r.oid = held.oid)))
      ORDER BY a.priority DESC
      LIMIT 1
 $$;
 GRANT EXECUTE ON FUNCTION pg_oblako.ddm_policy_for(oid, text, name) TO PUBLIC;
 
-CREATE OR REPLACE FUNCTION pg_oblako.ddm_masked_select(rel oid)
+-- for one user: the columns it may read (Redshift expands * to those and refuses
+-- a named other one), or, if none, the plain table so the read is refused
+DROP FUNCTION IF EXISTS pg_oblako.ddm_masked_select(oid);
+CREATE OR REPLACE FUNCTION pg_oblako.ddm_masked_select(rel oid, who name)
     RETURNS text LANGUAGE plpgsql STABLE AS $$
 DECLARE
     cols text;
@@ -296,15 +307,21 @@ BEGIN
                    ORDER BY d.policy, d.priority DESC) x
           HAVING count(*) > 0
       ) m ON true
-     WHERE a.attrelid = rel AND a.attnum > 0 AND NOT a.attisdropped;
+     WHERE a.attrelid = rel AND a.attnum > 0 AND NOT a.attisdropped
+       AND has_column_privilege(who, rel, a.attnum, 'SELECT');
+    IF cols IS NULL THEN
+        RETURN format('SELECT * FROM %s', rel::regclass);
+    END IF;
     RETURN format('SELECT %s FROM %s', cols, rel::regclass);
 END $$;
 
--- the masked tables of this database, and the SELECT that stands in for each
-CREATE OR REPLACE FUNCTION pg_oblako.ddm_masked_tables()
+-- the masked tables of this database, and the SELECT that stands in for each, for
+-- one user
+DROP FUNCTION IF EXISTS pg_oblako.ddm_masked_tables();
+CREATE OR REPLACE FUNCTION pg_oblako.ddm_masked_tables(who name)
     RETURNS TABLE (schema_name text, table_name text, masked_select text)
     LANGUAGE sql STABLE AS $$
-    SELECT n.nspname::text, c.relname::text, pg_oblako.ddm_masked_select(c.oid)
+    SELECT n.nspname::text, c.relname::text, pg_oblako.ddm_masked_select(c.oid, who)
       FROM (SELECT DISTINCT relid FROM pg_oblako.ddm_attachments) a
       JOIN pg_catalog.pg_class c ON c.oid = a.relid
       JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace

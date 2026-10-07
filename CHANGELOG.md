@@ -16,6 +16,10 @@ versioned entries below.
 - **Redshift**: queries read masked columns as Redshift's: each user sees what its highest-priority attachment gives it (its own, a role's, PUBLIC's), in joins, subqueries and CTEs; the table stays a plain table, and ALTER, ATTACH and DETACH take effect for the next query
 - **Redshift**: dynamic data masking policies: CREATE, ALTER, DROP, ATTACH and DETACH MASKING POLICY with Redshift Serverless's rules, read back from svv_masking_policy and svv_attached_masking_policy; svv_column_privileges (queries are not masked yet)
 
+### Changed
+
+- **Redshift**: masked reads as on Redshift Serverless: a superuser is masked by its own role grants only (PostgreSQL counted it a member of every role), and a user granted some columns of a masked table reads those, `*` included
+
 ## v0.1.0 (2026-10-05)
 
 The first release.

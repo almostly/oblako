@@ -245,10 +245,15 @@ query for the current user. The column keeps its type, and the table stays a
 plain table: writes, ALTER TABLE and DROP TABLE work as before. ALTER, ATTACH and
 DETACH take effect for the next query.
 
-What differs: a predicate on a masked column (`WHERE email = ...`) compares the
-masked value, which is how redshift-local applies a mask and isn't yet checked
-against Redshift; a user granted only some columns of a masked table can't read
-it, as the stand-in SELECT names every column; and Redshift stores an expression in its own normalised form (`'***'::varchar(256)`
+As on Redshift Serverless (checked 2026-10-07): a filter on a masked column
+(`WHERE email = ...`, `LIKE`, `count(DISTINCT ...)`) sees the masked value; a
+superuser is masked like anyone else, by its own grants (it is not taken to hold
+every role); and a user granted only some columns of a masked table reads those,
+`*` included, while a column it wasn't granted is refused.
+
+What differs: naming a column the user wasn't granted fails with "column does
+not exist" here, where Redshift says "permission denied for relation"; and
+Redshift stores an expression in its own normalised form (`'***'::varchar(256)`
 becomes `CAST(CAST('***' AS VARCHAR) AS VARCHAR(256))`), where redshift-local keeps
 it as written, so tools should compare expressions by round trip rather than by
 text; and some output types are named differently (Redshift has no `text`, so a

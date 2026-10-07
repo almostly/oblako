@@ -232,7 +232,7 @@ def test_an_expression_of_ambiguous_type_is_refused(conn):
 # ---------------------------------------------------------------------------
 # Query time: what each user reads
 # ---------------------------------------------------------------------------
-READERS = ("ddm_plain", "ddm_sup", "ddm_both")
+READERS = ("ddm_plain", "ddm_sup", "ddm_both", "ddm_col")
 
 
 def _drop_readers(c) -> None:
@@ -264,7 +264,8 @@ def readers():
             "GRANT ROLE ddm_support TO ddm_both",
             "GRANT ROLE ddm_pii TO ddm_both",
             "GRANT USAGE ON SCHEMA ddm TO PUBLIC",
-            "GRANT SELECT ON ddm.customers TO PUBLIC",
+            "GRANT SELECT ON ddm.customers TO ddm_plain, ddm_sup, ddm_both",
+            "GRANT SELECT (id) ON ddm.customers TO ddm_col",
             "CREATE MASKING POLICY ddm_redact WITH (email varchar(64)) "
             "USING ('***'::varchar(64))",
             "CREATE MASKING POLICY ddm_domain WITH (email varchar(64)) "
@@ -344,3 +345,36 @@ def test_the_table_stays_a_table(readers):
     assert readers.execute(
         "SELECT count(*) FROM svv_attached_masking_policy WHERE schema_name = 'ddm'"
     ).fetchone() == (0,)
+
+
+# as Redshift Serverless answered, 2026-10-07
+def test_a_filter_compares_the_masked_value(readers):
+    assert _read(
+        "ddm_plain",
+        "SELECT count(*) FROM ddm.customers WHERE email = 'ann@example.com'",
+    ) == [(0,)]
+    assert _read(
+        "ddm_plain", "SELECT count(*) FROM ddm.customers WHERE email = '***'"
+    ) == [(2,)]
+    assert _read("ddm_plain", "SELECT count(DISTINCT email) FROM ddm.customers") == [
+        (1,)
+    ]
+
+
+def test_a_public_attachment_masks_superusers_too(readers):
+    assert readers.execute(
+        "SELECT email FROM ddm.customers WHERE id = 1"
+    ).fetchone() == ("***",)
+
+
+def test_a_user_granted_some_columns_reads_those(readers):
+    assert _read("ddm_col", "SELECT id FROM ddm.customers ORDER BY id") == [(1,), (2,)]
+    assert _read("ddm_col", "SELECT count(*) FROM ddm.customers") == [(2,)]
+    # * is the columns it may read, as on Redshift
+    assert _read("ddm_col", "SELECT * FROM ddm.customers ORDER BY id") == [(1,), (2,)]
+    for sql in (
+        "SELECT email FROM ddm.customers",
+        "SELECT id FROM ddm.customers WHERE email = '***'",
+    ):
+        with pytest.raises(psycopg.Error):
+            _read("ddm_col", sql)

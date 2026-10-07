@@ -347,7 +347,18 @@ _EXTERNAL_CACHE: tuple[float, set[str]] = (0.0, set())
 CLIENT_DATABASE: contextvars.ContextVar[str] = contextvars.ContextVar(
     "client_database", default=""
 )
+# and the user it signed in as (masked tables read as that user's columns)
+CLIENT_USER: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "client_user", default=""
+)
 _MOUNTED: dict[tuple[str, str], float] = {}
+
+
+def _startup_user(startup: bytes) -> str:
+    """Return the ``user`` parameter of a StartupMessage."""
+    fields = startup[8:].split(b"\x00")
+    params = dict(zip(fields[0::2], fields[1::2]))
+    return params.get(b"user", b"").decode("utf-8", "replace")
 
 
 def _startup_database(startup: bytes) -> str:
@@ -513,21 +524,23 @@ def rewrite_sql(sql: str) -> str:
     return s
 
 
-_MASKED_CACHE: dict[str, tuple[float, dict[tuple[str, str], str]]] = {}
+_MASKED_CACHE: dict[tuple[str, str], tuple[float, dict[tuple[str, str], str]]] = {}
 # after DDL the cache is bypassed for a while: the DDL is seen before it runs, so
 # a lookup in between would cache the state it is about to change
 _MASKED_DIRTY: dict[str, float] = {}
 _DDL = re.compile(r"(?i)\b(create|alter|drop|attach|detach|rename|grant|revoke)\b")
 
 
-def _masked_tables(db: str) -> dict[tuple[str, str], str]:
+def _masked_tables(db: str, user: str) -> dict[tuple[str, str], str]:
     """Return the client database's masked tables and the SELECT for each.
 
-    Over the trusted Unix socket, cached for two seconds per database; empty if
-    anything fails (no masking catalog yet, say), so queries then run as sent.
+    The SELECT reads only the columns ``user`` may read, as Redshift expands
+    ``*`` for a user granted some columns. Over the trusted Unix socket, cached
+    for two seconds per database and user; empty if anything fails (no masking
+    catalog yet, say), so queries then run as sent.
     """
     now = time.monotonic()
-    cached = _MASKED_CACHE.get(db)
+    cached = _MASKED_CACHE.get((db, user))
     if cached and now - cached[0] < 2 and now >= _MASKED_DIRTY.get(db, 0):
         return cached[1]
     tables: dict[tuple[str, str], str] = {}
@@ -540,16 +553,16 @@ def _masked_tables(db: str) -> dict[tuple[str, str], str]:
         )
         with psycopg.connect(conninfo, autocommit=True) as conn:
             row = conn.execute(
-                "SELECT to_regproc('pg_oblako.ddm_masked_tables')"
+                "SELECT to_regprocedure('pg_oblako.ddm_masked_tables(name)')"
             ).fetchone()
             if row and row[0]:
                 for schema, table, select in conn.execute(
-                    "SELECT * FROM pg_oblako.ddm_masked_tables()"
+                    "SELECT * FROM pg_oblako.ddm_masked_tables(%s)", (user or PG_USER,)
                 ):
                     tables[(schema, table)] = select
     except Exception as exc:  # queries then run unmasked, as before
         print(f"oblako: masking lookup failed: {exc!r}", flush=True)
-    _MASKED_CACHE[db] = (now, tables)
+    _MASKED_CACHE[(db, user)] = (now, tables)
     return tables
 
 
@@ -564,7 +577,7 @@ def _mask_reads(sql: str, sent: str) -> str:
         _MASKED_DIRTY[db] = time.monotonic() + 2  # attachments or columns may change
         if _MASKING_POLICY.search(sent):
             return sql
-    tables = _masked_tables(db)
+    tables = _masked_tables(db, CLIENT_USER.get())
     if not tables:
         return sql
     lowered = sql.lower()
@@ -893,6 +906,7 @@ async def _handle(client_reader, client_writer) -> None:
             client_writer.close()
         return
     CLIENT_DATABASE.set(_startup_database(startup))  # seen by this connection's tasks
+    CLIENT_USER.set(_startup_user(startup))
     server_writer.write(startup)  # forward the StartupMessage plaintext to PG
     await server_writer.drain()
     # Per-connection distribution state (Citus variant only): `queue` holds one
