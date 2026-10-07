@@ -97,6 +97,12 @@ try:
 except Exception:  # any import failure disables the feature
     redshift_ml = None
 
+# CREATE/ALTER/DROP/ATTACH/DETACH MASKING POLICY -> pg_oblako calls. Pure-stdlib.
+try:
+    import masking
+except Exception:  # any import failure disables the feature
+    masking = None
+
 # PIVOT/UNPIVOT -> standard SQL (needs sqlglot as a parser). Optional.
 try:
     import pivot_unpivot
@@ -104,6 +110,7 @@ except Exception:  # any import failure disables the feature
     pivot_unpivot = None
 
 LISTEN_PORT = int(os.environ.get("OBLAKO_PROXY_PORT", "5439"))
+_MASKING_POLICY = re.compile(r"(?i)\bmasking\s+policy\b")
 PG_HOST = os.environ.get("OBLAKO_PG_HOST", "127.0.0.1")
 PG_PORT = int(os.environ.get("OBLAKO_PG_PORT", "5433"))
 # The proxy's own connections (auto-distribution) use the Unix socket, which is
@@ -447,10 +454,15 @@ def rewrite_sql(sql: str) -> str:
     DISTKEY/SORTKEY/ENCODE/BACKUP) are stripped from CREATE TABLE; ``COPY``/
     ``UNLOAD`` to/from ``s3://`` are rewritten into oblako_* S3 bridge calls (see
     ``copy_unload``); external schemas, ``CREATE TABLE ... USING ICEBERG`` and
-    ``SHOW TABLE`` become pg_oblako calls (see ``iceberg_tables``). Everything
-    else is left untouched.
+    ``SHOW TABLE`` become pg_oblako calls (see ``iceberg_tables``); dynamic data
+    masking statements become pg_oblako calls (see ``masking``). Everything else
+    is left untouched.
     """
     s = sql
+    # masking DDL first: a policy's expression becomes a string literal the
+    # rewrites below leave alone (the policy is rewritten when it's used)
+    if masking is not None and _MASKING_POLICY.search(s):
+        s = "".join(masking.rewrite_masking(stmt) for stmt in _segments(s))
     # awsdatacatalog.<db>.<table> first: the rest then see a two-part name
     if iceberg_tables is not None and "awsdatacatalog" in s.lower():
         s, glue_databases = iceberg_tables.rewrite_awsdatacatalog(s)
