@@ -4,8 +4,9 @@ Requires the engine (docker compose up redshift). redshift-local keeps masking
 policies and their attachments and answers svv_masking_policy and
 svv_attached_masking_policy with Redshift's columns and JSON formats; it enforces
 the rules Redshift Serverless enforces (checked 2026-10-07): priorities, clashes,
-DROP while attached, ALTER keeping the output type, superusers only. Queries are
-not masked yet.
+DROP while attached, ALTER keeping the output type, superusers only. A query
+then reads each masked column as the highest-priority attachment for the user
+gives it.
 
 Override the port with OBLAKO_TEST_RS_PORT to run against an isolated stack.
 """
@@ -226,3 +227,120 @@ def test_an_expression_of_ambiguous_type_is_refused(conn):
         "USING (CASE WHEN a LIKE '%@%' THEN '***' ELSE a END)"
     )
     conn.execute("DROP MASKING POLICY ddm_bare")
+
+
+# ---------------------------------------------------------------------------
+# Query time: what each user reads
+# ---------------------------------------------------------------------------
+READERS = ("ddm_plain", "ddm_sup", "ddm_both")
+
+
+def _drop_readers(c) -> None:
+    for stmt in [
+        "DROP SCHEMA IF EXISTS ddm CASCADE",
+        *(f"DROP MASKING POLICY {p}" for p in ("ddm_redact", "ddm_domain", "ddm_raw")),
+        *(f"DROP USER IF EXISTS {u}" for u in READERS),
+        "DROP ROLE IF EXISTS ddm_support",
+        "DROP ROLE IF EXISTS ddm_pii",
+    ]:
+        try:
+            c.execute(stmt)
+        except psycopg.Error:
+            pass  # not there yet
+
+
+@pytest.fixture
+def readers():
+    with psycopg.connect(autocommit=True, **RS) as c:
+        _drop_readers(c)
+        for stmt in [
+            "CREATE SCHEMA ddm",
+            "CREATE TABLE ddm.customers (id int, email varchar(64))",
+            "INSERT INTO ddm.customers VALUES (1, 'ann@example.com'), (2, 'bob@example.com')",
+            "CREATE ROLE ddm_support",
+            "CREATE ROLE ddm_pii",
+            *(f"CREATE USER {u} PASSWORD 'Abcdef12'" for u in READERS),
+            "GRANT ROLE ddm_support TO ddm_sup",
+            "GRANT ROLE ddm_support TO ddm_both",
+            "GRANT ROLE ddm_pii TO ddm_both",
+            "GRANT USAGE ON SCHEMA ddm TO PUBLIC",
+            "GRANT SELECT ON ddm.customers TO PUBLIC",
+            "CREATE MASKING POLICY ddm_redact WITH (email varchar(64)) "
+            "USING ('***'::varchar(64))",
+            "CREATE MASKING POLICY ddm_domain WITH (email varchar(64)) "
+            "USING (regexp_replace(email, '^[^@]+', '***'))",
+            "CREATE MASKING POLICY ddm_raw WITH (email varchar(64)) USING (email)",
+            "ATTACH MASKING POLICY ddm_redact ON ddm.customers(email) TO PUBLIC PRIORITY 10",
+            "ATTACH MASKING POLICY ddm_domain ON ddm.customers(email) "
+            "TO ROLE ddm_support PRIORITY 20",
+            "ATTACH MASKING POLICY ddm_raw ON ddm.customers(email) TO ROLE ddm_pii PRIORITY 1000",
+        ]:
+            c.execute(stmt)
+        yield c
+        _drop_readers(c)
+
+
+def _read(user: str, sql: str, params=None) -> list[tuple]:
+    with psycopg.connect(**{**RS, "user": user, "password": "Abcdef12"}) as c:
+        return c.execute(sql, params).fetchall()
+
+
+def test_each_user_reads_what_the_highest_priority_gives_them(readers):
+    query = "SELECT id, email FROM ddm.customers ORDER BY id"
+    # straight after the ATTACHes: nothing cached from before them
+    assert _read("ddm_plain", query) == [(1, "***"), (2, "***")]
+    assert _read("ddm_sup", query) == [(1, "***@example.com"), (2, "***@example.com")]
+    assert _read("ddm_both", query) == [(1, "ann@example.com"), (2, "bob@example.com")]
+
+
+def test_masking_reaches_every_way_of_reading_the_table(readers):
+    for sql, params in [
+        ("SELECT c.email FROM ddm.customers c WHERE c.id = 1", None),
+        ("SELECT customers.email FROM ddm.customers WHERE id = 1", None),
+        ("SELECT email FROM ddm.customers WHERE id = %s", (1,)),  # extended protocol
+        (
+            "SELECT email FROM (SELECT email, id FROM ddm.customers) s WHERE id = 1",
+            None,
+        ),
+        (
+            "WITH x AS (SELECT * FROM ddm.customers) SELECT email FROM x WHERE id = 1",
+            None,
+        ),
+        (
+            "SELECT o.email FROM (SELECT 1 AS id) i JOIN ddm.customers o ON o.id = i.id",
+            None,
+        ),
+        (
+            "SELECT email FROM (SELECT 1 AS id) i, ddm.customers WHERE customers.id = 1",
+            None,
+        ),
+    ]:
+        assert _read("ddm_plain", sql, params) == [("***",)], sql
+
+
+def test_the_column_keeps_its_type(readers):
+    with psycopg.connect(**{**RS, "user": "ddm_sup", "password": "Abcdef12"}) as c:
+        cur = c.execute("SELECT email FROM ddm.customers LIMIT 1")
+        assert cur.description[0].type_code == 1043  # varchar
+
+
+def test_alter_and_detach_take_effect_at_once(readers):
+    query = "SELECT email FROM ddm.customers WHERE id = 1"
+    readers.execute("ALTER MASKING POLICY ddm_redact USING ('#####'::varchar(64))")
+    assert _read("ddm_plain", query) == [("#####",)]
+    readers.execute(
+        "DETACH MASKING POLICY ddm_redact ON ddm.customers(email) FROM PUBLIC"
+    )
+    assert _read("ddm_plain", query) == [("ann@example.com",)]
+
+
+def test_the_table_stays_a_table(readers):
+    readers.execute("INSERT INTO ddm.customers VALUES (3, 'cy@example.com')")
+    readers.execute("UPDATE ddm.customers SET email = 'cy@example.org' WHERE id = 3")
+    readers.execute("ALTER TABLE ddm.customers ADD COLUMN tier int")
+    rows = _read("ddm_plain", "SELECT * FROM ddm.customers WHERE id = 3")
+    assert rows == [(3, "***", None)]
+    readers.execute("DROP TABLE ddm.customers")  # nothing depends on it
+    assert readers.execute(
+        "SELECT count(*) FROM svv_attached_masking_policy WHERE schema_name = 'ddm'"
+    ).fetchone() == (0,)

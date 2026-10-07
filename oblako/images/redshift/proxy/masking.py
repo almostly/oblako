@@ -242,3 +242,184 @@ def _rewrite(verb: str, lead: str, body: str, semi: str) -> str | None:
         ],
         semi,
     )
+
+
+# ---------------------------------------------------------------------------
+# Query time: masked table reads
+# ---------------------------------------------------------------------------
+# words that end a FROM list, or can't be a table's alias
+_CLAUSE_END = {
+    "where",
+    "group",
+    "order",
+    "limit",
+    "offset",
+    "union",
+    "except",
+    "intersect",
+    "having",
+    "window",
+    "fetch",
+    "for",
+    "returning",
+    "set",
+    "values",
+    "into",
+    "select",
+    "with",
+}
+_NOT_ALIAS = _CLAUSE_END | {
+    "join",
+    "inner",
+    "left",
+    "right",
+    "full",
+    "outer",
+    "cross",
+    "natural",
+    "on",
+    "using",
+    "tablesample",
+}
+_WORD = re.compile(r"[a-z_][\w$]*", re.I)
+_QUOTED = re.compile(r'"(?:[^"]|"")*"')
+
+
+def _skip_noise(sql: str, i: int) -> int:
+    """Return the index past whitespace and comments from ``i``."""
+    while i < len(sql):
+        if sql[i].isspace():
+            i += 1
+        elif sql.startswith("--", i):
+            end = sql.find("\n", i)
+            i = len(sql) if end < 0 else end + 1
+        elif sql.startswith("/*", i):
+            end = sql.find("*/", i + 2)
+            i = len(sql) if end < 0 else end + 2
+        else:
+            break
+    return i
+
+
+def _ident_at(sql: str, i: int) -> tuple[str, str, int] | None:
+    """Return (name as written, name it denotes, end) for an identifier at ``i``."""
+    m = _QUOTED.match(sql, i)
+    if m:
+        return m.group(0), m.group(0)[1:-1].replace('""', '"'), m.end()
+    m = _WORD.match(sql, i)
+    if m:
+        return m.group(0), m.group(0).lower(), m.end()
+    return None
+
+
+def _relation_at(sql: str, i: int):
+    """Return ((schema, table), end) for a table name at ``i``, or None."""
+    first = _ident_at(sql, i)
+    if first is None:
+        return None
+    end = first[2]
+    j = _skip_noise(sql, end)
+    if j < len(sql) and sql[j] == ".":
+        second = _ident_at(sql, _skip_noise(sql, j + 1))
+        if second is None:
+            return None
+        k = _skip_noise(sql, second[2])
+        if k < len(sql) and sql[k] in ".(":  # db.schema.table, or a function
+            return None
+        return (first[1], second[1]), second[2]
+    if j < len(sql) and sql[j] == "(":
+        return None  # a set-returning function
+    return ("public", first[1]), end
+
+
+def rewrite_reads(sql: str, masked: dict[tuple[str, str], str]) -> str:
+    """Replace each masked table read in a query with its masking SELECT.
+
+    ``masked`` maps (schema, table) to the SELECT that stands in for the table
+    (from pg_oblako.ddm_masked_tables). A read is a table in a FROM list or after
+    JOIN; the target of DELETE FROM is not one. An unqualified name is taken as
+    public's, as Redshift's default search path has it. The replacement keeps the
+    table's name as its alias, so table.column still resolves.
+    """
+    out: list[str] = []
+    i, last = 0, 0
+    depth = 0
+    from_depth: list[int] = []  # paren depths at which a FROM list is open
+    previous = ""  # the last keyword seen
+    expect_relation = False
+    only_at: int | None = None  # where a FROM ONLY began
+    while i < len(sql):
+        ch = sql[i]
+        if ch == "'":  # a string: skip to its end
+            end = i + 1
+            while end < len(sql):
+                if sql[end] == "'" and sql[end + 1 : end + 2] == "'":
+                    end += 2
+                elif sql[end] == "'":
+                    break
+                else:
+                    end += 1
+            i = end + 1
+            continue
+        if ch == "$":
+            m = re.match(r"\$[a-z_]*\$", sql[i:], re.I)
+            if m:
+                end = sql.find(m.group(0), i + len(m.group(0)))
+                i = len(sql) if end < 0 else end + len(m.group(0))
+                continue
+        if sql.startswith("--", i) or sql.startswith("/*", i):
+            i = _skip_noise(sql, i)
+            continue
+        if expect_relation and (ch.isalpha() or ch in '_"'):
+            word = _WORD.match(sql, i)
+            if word and word.group(0).lower() == "only":  # FROM ONLY t: still t
+                only_at = i
+                i = _skip_noise(sql, word.end())
+                continue
+            expect_relation = False
+            found = _relation_at(sql, i)
+            if found and found[0] in masked:
+                (schema, table), end = found
+                j = _skip_noise(sql, end)
+                alias = _ident_at(sql, j)
+                has_alias = alias is not None and alias[1] not in _NOT_ALIAS
+                out.append(sql[last : only_at if only_at is not None else i])
+                out.append(f"({masked[(schema, table)]})")
+                if not has_alias:
+                    out.append(' AS "' + table.replace('"', '""') + '"')
+                last = i = end
+                only_at = None
+                continue
+            only_at = None
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            while from_depth and from_depth[-1] > depth:
+                from_depth.pop()
+        elif ch == ";":
+            from_depth.clear()
+            previous = ""
+        elif ch == "," and from_depth and from_depth[-1] == depth:
+            expect_relation = True
+        word = _WORD.match(sql, i) if (ch.isalpha() or ch == "_") else None
+        if word and (i == 0 or not (sql[i - 1].isalnum() or sql[i - 1] in '_$."')):
+            w = word.group(0).lower()
+            if w == "from":
+                if previous != "delete":
+                    from_depth.append(depth)
+                    expect_relation = True
+            elif w == "join":
+                expect_relation = True
+            elif w in _CLAUSE_END and from_depth and from_depth[-1] == depth:
+                from_depth.pop()
+            elif w != "lateral":  # LATERAL keeps the relation coming
+                expect_relation = False
+            previous = w
+            i = word.end()
+            continue
+        if not ch.isspace() and ch not in "(,":
+            expect_relation = False  # an expression, not a table name
+        i += 1
+    out.append(sql[last:])
+    return "".join(out)

@@ -85,3 +85,52 @@ def test_forms_redshift_refuses_are_left_as_written():
 
 def test_other_statements_are_untouched():
     assert r("SELECT 'masking policy'") == "SELECT 'masking policy'"
+
+
+# ---------------------------------------------------------------------------
+# Query time: masked table reads
+# ---------------------------------------------------------------------------
+reads = _mod.rewrite_reads
+MASKED = {("crm", "customers"): "M", ("public", "t"): "T"}
+
+
+def test_a_read_becomes_the_masking_select_named_as_the_table():
+    assert (
+        reads("select email from crm.customers where id = 1", MASKED)
+        == 'select email from (M) AS "customers" where id = 1'
+    )
+    assert (
+        reads('SELECT * FROM "crm"."customers" AS c', MASKED)
+        == "SELECT * FROM (M) AS c"
+    )
+    assert reads("select * from crm.customers c join t on true", MASKED) == (
+        'select * from (M) c join (T) AS "t" on true'
+    )
+
+
+def test_every_item_of_a_from_list_and_nested_queries():
+    assert reads("select * from x, crm.customers, (select 1 from t) s", MASKED) == (
+        'select * from x, (M) AS "customers", (select 1 from (T) AS "t") s'
+    )
+    assert reads("select * from only crm.customers", MASKED) == (
+        'select * from (M) AS "customers"'
+    )
+
+
+def test_writes_strings_comments_and_functions_are_left_alone():
+    for sql in [
+        "insert into crm.customers values (1)",
+        "update crm.customers set email = 'x'",
+        "delete from crm.customers",
+        "select 'from crm.customers' -- from crm.customers\nfrom other",
+        "select * from generate_series(1, 3) t",
+        "do $$ begin perform 1 from crm.customers; end $$",
+        "select crm.customers.email from other",
+    ]:
+        assert reads(sql, MASKED) == sql, sql
+
+
+def test_a_delete_reads_its_subqueries_masked():
+    assert reads(
+        "delete from t where id in (select id from crm.customers)", MASKED
+    ) == ('delete from t where id in (select id from (M) AS "customers")')
