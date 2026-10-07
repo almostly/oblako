@@ -218,3 +218,28 @@ def test_result_set_options(data):
         **ARN,
     )
     assert json.loads(r["formattedRecords"]) == [{"price": 13.2, "whole": 4, "n": "7"}]
+
+
+def test_arrays_come_back_as_array_values(data):
+    # the RDS Data API returns an array as arrayValue (the Redshift Data API as text)
+    out = data.execute_statement(
+        sql="SELECT ARRAY['a', 'b c']::text[], ARRAY[1, 2], ARRAY[[1, 2], [3, 4]], "
+        "'{}'::text[]",
+        **ARN,
+    )
+    assert out["records"] == [
+        [
+            {"arrayValue": {"stringValues": ["a", "b c"]}},
+            {"arrayValue": {"longValues": [1, 2]}},
+            {
+                "arrayValue": {
+                    "arrayValues": [{"longValues": [1, 2]}, {"longValues": [3, 4]}]
+                }
+            },
+            {"arrayValue": {"stringValues": []}},
+        ]
+    ]
+    out = data.execute_statement(
+        sql="SELECT ARRAY['a', 'b'] AS tags", formatRecordsAs="JSON", **ARN
+    )
+    assert json.loads(out["formattedRecords"]) == [{"tags": ["a", "b"]}]
