@@ -400,3 +400,15 @@ def test_connect_elsewhere_is_untouched():
         "SELECT 'connect on database' FROM t",
     ):
         assert rewrite_sql(stmt) == stmt
+
+
+def test_drop_role_goes_to_pg_oblako():
+    """DROP ROLE [IF EXISTS] r [FORCE | RESTRICT] calls pg_oblako.drop_role."""
+    assert rewrite_sql('DROP ROLE "Reader" FORCE;') == (
+        "DO $oblako_role$ BEGIN PERFORM pg_oblako.drop_role('Reader', False, True); "
+        "END $oblako_role$;"
+    )
+    assert "drop_role('r', True, False)" in rewrite_sql(
+        "drop role if exists R restrict"
+    )
+    assert "drop_role('r', False, False)" in rewrite_sql("DROP ROLE r")

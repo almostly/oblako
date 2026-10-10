@@ -263,6 +263,14 @@ _CREATE_ROLE = re.compile(
     r'(?i)^(\s*)create\s+role\s+("(?:[^"]|"")+"|[a-z_][\w$]*)'
     r"(?:\s+externalid\s+(?:'(?:[^']|'')*'|\S+))?\s*(;?)(\s*)$"
 )
+# Redshift's DROP ROLE r [ FORCE | RESTRICT ]: RESTRICT (the default) refuses a
+# role that is still granted or holds another role, which PostgreSQL would drop
+# along with its memberships. It becomes a call to pg_oblako.drop_role
+# (initdb.d/14_redshift_identities.sql), which checks and drops.
+_DROP_ROLE = re.compile(
+    r'(?i)^(\s*)drop\s+role\s+(if\s+exists\s+)?("(?:[^"]|"")+"|[a-z_][\w$]*)'
+    r"(?:\s+(force|restrict))?\s*(;?)(\s*)$"
+)
 # GRANT ROLE r TO u, GRANT ROLE r TO ROLE r2, REVOKE [ADMIN OPTION FOR] ROLE r
 # FROM u, and the TO ROLE / FROM ROLE grantee of any GRANT, REVOKE or ALTER
 # DEFAULT PRIVILEGES: PostgreSQL spells all of them without the ROLE keyword. Only a ROLE that follows GRANT,
@@ -292,6 +300,14 @@ def _rewrite_roles(stmt: str) -> str:
             f"{lead}DO $oblako_role$ BEGIN CREATE ROLE {ident} NOLOGIN; "
             f"EXECUTE format('COMMENT ON ROLE %I IS %L', '{name}', "
             f"'oblako:redshift-role owner=' || current_user); END $oblako_role${semi}{tail}"
+        )
+    if m := _DROP_ROLE.match(stmt):
+        lead, if_exists, ident, option, semi, tail = m.groups()
+        name = _role_name(ident).replace("'", "''")
+        force = (option or "").lower() == "force"
+        return (
+            f"{lead}DO $oblako_role$ BEGIN PERFORM pg_oblako.drop_role('{name}', "
+            f"{bool(if_exists)}, {force}); END $oblako_role${semi}{tail}"
         )
     if _GRANT_REVOKE_START.match(stmt):
         return _ROLE_KEYWORD.sub(r"\1", stmt)

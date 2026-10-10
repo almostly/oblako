@@ -204,7 +204,8 @@ names as written too.
 **Users, groups and roles.** Redshift keeps three kinds of identity apart, and so
 does redshift-local: `CREATE USER`, `CREATE GROUP` with `ALTER GROUP ... ADD USER`,
 and Redshift's role-based access control: `CREATE ROLE`, `GRANT ROLE r TO user`,
-`GRANT ROLE r TO ROLE r2`, `REVOKE ROLE`, and `TO ROLE r` as the grantee of a
+`GRANT ROLE r TO ROLE r2`, `REVOKE ROLE`, `DROP ROLE r [ FORCE | RESTRICT ]` (a
+role still granted, or holding another, drops only with `FORCE`), and `TO ROLE r` as the grantee of a
 privilege or a default privilege. Underneath they are all PostgreSQL roles; a
 Redshift role is one that can't log in and is marked as a role, so `pg_group` lists
 only real groups, as on Redshift, and an ACL string prefixes only a group.

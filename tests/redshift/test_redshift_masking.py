@@ -42,7 +42,7 @@ def _drop(c) -> None:
         "DROP SCHEMA IF EXISTS ddm CASCADE",
         *(f"DROP MASKING POLICY {p}" for p in POLICIES),
         "DROP USER IF EXISTS ddm_bob",
-        "DROP ROLE IF EXISTS ddm_analyst",
+        "DROP ROLE IF EXISTS ddm_analyst FORCE",
     ]:
         try:
             c.execute(stmt)
@@ -235,7 +235,7 @@ def test_a_sys_secadmin_member_manages_and_sees_policies(conn):
             )
             bob.execute("DROP MASKING POLICY ddm_bobs")
     finally:
-        conn.execute("DROP ROLE ddm_sec")
+        conn.execute("DROP ROLE ddm_sec FORCE")
 
 
 def test_column_privileges(conn):
@@ -276,8 +276,8 @@ def _drop_readers(c) -> None:
         "DROP SCHEMA IF EXISTS ddm CASCADE",
         *(f"DROP MASKING POLICY {p}" for p in ("ddm_redact", "ddm_domain", "ddm_raw")),
         *(f"DROP USER IF EXISTS {u}" for u in READERS),
-        "DROP ROLE IF EXISTS ddm_support",
-        "DROP ROLE IF EXISTS ddm_pii",
+        "DROP ROLE IF EXISTS ddm_support FORCE",
+        "DROP ROLE IF EXISTS ddm_pii FORCE",
     ]:
         try:
             c.execute(stmt)

@@ -57,8 +57,8 @@ def _drop(c) -> None:
         "DROP USER IF EXISTS idt_alice",
         "DROP USER IF EXISTS idt_bob",
         "DROP GROUP IF EXISTS idt_analysts",
-        "DROP ROLE IF EXISTS idt_writer",
-        "DROP ROLE IF EXISTS idt_reader",
+        "DROP ROLE IF EXISTS idt_writer FORCE",
+        "DROP ROLE IF EXISTS idt_reader FORCE",
     ]:
         try:
             c.execute(stmt)
@@ -247,7 +247,7 @@ def alter_drop(conn):
         "DROP SCHEMA IF EXISTS idt_ad CASCADE",
         "DROP SCHEMA IF EXISTS idt_ad2 CASCADE",
         "DROP USER IF EXISTS idt_erin",
-        "DROP ROLE IF EXISTS idt_ad_role",
+        "DROP ROLE IF EXISTS idt_ad_role FORCE",
         "CREATE SCHEMA idt_ad",
         "CREATE TABLE idt_ad.scratch (id int)",
         "CREATE VIEW idt_ad.v AS SELECT 1 AS x",
@@ -264,7 +264,7 @@ def alter_drop(conn):
         "DROP SCHEMA IF EXISTS idt_ad CASCADE",
         "DROP SCHEMA IF EXISTS idt_ad2 CASCADE",
         "DROP USER IF EXISTS idt_erin",
-        "DROP ROLE IF EXISTS idt_ad_role",
+        "DROP ROLE IF EXISTS idt_ad_role FORCE",
     ]:
         conn.execute(stmt)
 
@@ -357,3 +357,21 @@ def test_system_roles(conn):
         autocommit=True, **{**RS, "user": "idt_bob", "password": "Abcdef12"}
     ) as bob:
         bob.execute("DROP TABLE idt.events")
+
+
+def test_drop_role_restrict_and_force(conn):
+    """As on Redshift: a granted role, or one holding another, drops only with FORCE."""
+    with pytest.raises(psycopg.errors.DependentObjectsStillExist, match="on a user"):
+        conn.execute("DROP ROLE idt_reader")
+    with pytest.raises(psycopg.errors.DependentObjectsStillExist, match="another role"):
+        conn.execute("DROP ROLE idt_writer RESTRICT")
+    conn.execute("DROP ROLE idt_writer FORCE")
+    conn.execute("REVOKE ROLE idt_reader FROM idt_alice")
+    conn.execute("REVOKE SELECT ON idt.events FROM ROLE idt_reader")
+    conn.execute("REVOKE USAGE ON SCHEMA idt FROM ROLE idt_reader")
+    conn.execute(
+        "ALTER DEFAULT PRIVILEGES FOR USER oblako IN SCHEMA idt "
+        "REVOKE SELECT ON TABLES FROM ROLE idt_reader"
+    )
+    conn.execute("DROP ROLE idt_reader")
+    assert _rows(conn, "SELECT 1 FROM svv_roles WHERE role_name LIKE 'idt%'") == []

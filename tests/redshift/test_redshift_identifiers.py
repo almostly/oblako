@@ -25,9 +25,10 @@ def cursor():
     cur.execute('DROP SCHEMA IF EXISTS "Idf_Mixed Schema" CASCADE')
     cur.execute('DROP USER IF EXISTS "IDF_Mixed"')
     yield cur
-    cur.execute("RESET enable_case_sensitive_identifier")
     cur.execute('DROP SCHEMA IF EXISTS "Idf_Mixed Schema" CASCADE')
+    cur.execute("SET enable_case_sensitive_identifier TO true")  # "Idf_Kept" as made
     cur.execute('DROP SCHEMA IF EXISTS "Idf_Kept" CASCADE')
+    cur.execute("RESET enable_case_sensitive_identifier")
     cur.execute('DROP USER IF EXISTS "IDF_Mixed"')
     conn.close()
 

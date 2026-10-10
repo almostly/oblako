@@ -161,6 +161,38 @@ WHERE pg_catalog.oblako_identity_type(r.oid) = 'role'
        OR pg_catalog.shobj_description(r.oid, 'pg_authid')
           = 'oblako:redshift-role owner=' || current_user);
 
+-- DROP ROLE r [ FORCE | RESTRICT ], which the proxy routes here. RESTRICT, the
+-- default, refuses a role still granted to a user or a role, or one that holds
+-- another role, with Redshift's errors; FORCE removes those assignments first
+-- (PostgreSQL's DROP ROLE does that by itself).
+CREATE OR REPLACE FUNCTION pg_oblako.drop_role(name text, if_exists boolean, force boolean)
+    RETURNS void LANGUAGE plpgsql AS $$
+DECLARE
+    role_oid oid := (SELECT r.oid FROM pg_catalog.pg_roles r WHERE r.rolname = name);
+BEGIN
+    IF role_oid IS NULL THEN
+        IF if_exists THEN
+            RAISE NOTICE 'role "%" does not exist, skipping', name;
+            RETURN;
+        END IF;
+        RAISE EXCEPTION 'role "%" does not exist', name USING ERRCODE = 'undefined_object';
+    END IF;
+    IF NOT force THEN
+        IF EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m
+                    WHERE m.roleid = role_oid
+                      AND pg_catalog.oblako_identity_type(m.member) = 'user') THEN
+            RAISE EXCEPTION 'cannot drop this role since it has been granted on a user'
+                USING ERRCODE = 'dependent_objects_still_exist';
+        END IF;
+        IF EXISTS (SELECT 1 FROM pg_catalog.pg_auth_members m
+                    WHERE m.roleid = role_oid OR m.member = role_oid) THEN
+            RAISE EXCEPTION 'cannot drop this role since it depends on another role'
+                USING ERRCODE = 'dependent_objects_still_exist';
+        END IF;
+    END IF;
+    EXECUTE format('DROP ROLE %I', name);
+END $$;
+
 -- ALTER and DROP on tables, views and schemas: Redshift privileges PostgreSQL
 -- doesn't have. The proxy sends a GRANT or REVOKE of them to
 -- pg_oblako.object_privilege, which keeps them here; the privilege views below
