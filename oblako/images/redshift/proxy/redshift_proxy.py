@@ -103,6 +103,12 @@ try:
 except Exception:  # any import failure disables the feature
     masking = None
 
+# Quoted object names folded to lower case, as Redshift does. Pure-stdlib.
+try:
+    import identifiers
+except Exception:  # any import failure disables the feature
+    identifiers = None
+
 # PIVOT/UNPIVOT -> standard SQL (needs sqlglot as a parser). Optional.
 try:
     import pivot_unpivot
@@ -373,6 +379,10 @@ CLIENT_DATABASE: contextvars.ContextVar[str] = contextvars.ContextVar(
 CLIENT_USER: contextvars.ContextVar[str] = contextvars.ContextVar(
     "client_user", default=""
 )
+# The session's enable_case_sensitive_identifier, which the client SETs and RESETs
+CASE_SENSITIVE: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "case_sensitive", default=False
+)
 _MOUNTED: dict[tuple[str, str], float] = {}
 
 
@@ -492,6 +502,10 @@ def rewrite_sql(sql: str) -> str:
     is left untouched.
     """
     s = sql
+    # quoted object names first, so every rewrite below sees Redshift's names
+    if identifiers is not None and ('"' in s or "case_sensitive" in s.lower()):
+        s, sensitive = identifiers.fold(s, CASE_SENSITIVE.get())
+        CASE_SENSITIVE.set(sensitive)
     # masking DDL first: a policy's expression becomes a string literal the
     # rewrites below leave alone (the policy is rewritten when it's used)
     if masking is not None and _MASKING_POLICY.search(s):

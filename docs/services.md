@@ -194,6 +194,13 @@ It also renders ACL strings the Redshift way. Redshift prefixes a group grantee,
 the identical grant `analysts=r/bi_analyst`. A client parsing the string would
 otherwise file the group as a user and read it as holding nothing.
 
+**Identifiers.** As on Redshift, a quoted database, schema, table or column name
+is folded to lower case: `CREATE SCHEMA "Sales"` makes `sales`, and `SELECT "Id"
+AS "MyAlias"` returns `myalias`. `SET enable_case_sensitive_identifier TO true`
+keeps the case for the rest of the session, until `RESET`. A quoted user name
+keeps its case either way (`"IAM:alice"`), and redshift-local keeps role and group
+names as written too.
+
 **Users, groups and roles.** Redshift keeps three kinds of identity apart, and so
 does redshift-local: `CREATE USER`, `CREATE GROUP` with `ALTER GROUP ... ADD USER`,
 and Redshift's role-based access control: `CREATE ROLE`, `GRANT ROLE r TO user`,

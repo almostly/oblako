@@ -86,6 +86,8 @@ COPY proxy/iceberg_tables.py /usr/local/bin/iceberg_tables.py
 # Dynamic data masking: policy DDL rewriting (proxy), the catalog in
 # initdb.d/15_masking.sql.
 COPY proxy/masking.py /usr/local/bin/masking.py
+# Quoted object names folded to lower case, as Redshift does; imported by the proxy.
+COPY proxy/identifiers.py /usr/local/bin/identifiers.py
 COPY entrypoint.sh /usr/local/bin/oblako-entrypoint.sh
 RUN chmod +x /usr/local/bin/oblako-entrypoint.sh
 
