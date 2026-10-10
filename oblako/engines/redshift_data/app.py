@@ -20,6 +20,9 @@ from oblako.engines.redshift_control import serverless
 
 from .executor import RedshiftDataExecutor
 
+# BatchExecuteStatement takes at most this many statements (Sqls), as on AWS
+MAX_BATCH_SQLS = 40
+
 
 def _jsonable(obj):
     """JSON-encode, converting datetimes to unix epoch (json protocol timestamps)."""
@@ -113,6 +116,13 @@ class RedshiftDataApp:
         sqls = req.get("Sqls") or []
         if not sqls:
             return _error("ValidationException", "Sqls is required")
+        if len(sqls) > MAX_BATCH_SQLS:
+            return _error(
+                "ValidationException",
+                f"1 validation error detected: Value '[{', '.join(sqls)}]' at 'sqls' "
+                "failed to satisfy constraint: Member must have length less than or "
+                f"equal to {MAX_BATCH_SQLS}",
+            )
         ids = [
             self.executor.execute(
                 sql=sql,

@@ -9,6 +9,7 @@ SQL against the Redshift engine) clients.
 
 import boto3
 import pytest
+from botocore.exceptions import ClientError
 
 from oblako import ports
 from oblako.engines.redshift_data import start_in_thread
@@ -91,6 +92,17 @@ def test_failed_statement(data_client):
     desc = data_client.describe_statement(Id=sid)
     assert desc["Status"] == "FAILED"
     assert "no_such_table" in desc.get("Error", "")
+
+
+def test_batch_takes_at_most_40_statements(data_client):
+    """As on AWS: 40 statements run, 41 are refused before any of them runs."""
+    sid = data_client.batch_execute_statement(
+        Database="oblako", Sqls=["SELECT 1"] * 40
+    )["Id"]
+    assert data_client.describe_statement(Id=sid)["Status"] == "FINISHED"
+    with pytest.raises(ClientError, match="less than or equal to 40") as err:
+        data_client.batch_execute_statement(Database="oblako", Sqls=["SELECT 1"] * 41)
+    assert err.value.response["Error"]["Code"] == "ValidationException"
 
 
 def test_get_statement_result_not_found(data_client):
