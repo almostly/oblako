@@ -220,6 +220,14 @@ grants to roles, which show only in these views. A user who isn't a superuser se
 own roles in `svv_user_grants`, and in `svv_role_grants` only the roles it has or
 owns, as on Redshift.
 
+Redshift's `ALTER` and `DROP` privileges, which PostgreSQL doesn't have, work too:
+`GRANT ALTER, DROP ON [TABLE] t | ON SCHEMA s | ON ALL TABLES IN SCHEMA s TO ...`
+and their `REVOKE`, read back from `svv_relation_privileges` and
+`svv_schema_privileges`. A user holding one can `ALTER` or `DROP` (and rename) an
+object it doesn't own, as on Redshift Serverless (checked 2026-10-10), without
+being able to read it. Only the owner, or a holder `WITH GRANT OPTION`, can grant
+them, and a dropped object takes its grants with it.
+
 What still differs from Redshift Serverless here: an ACL string spells an owner's
 privileges PostgreSQL's way (`arwdDxt`), where Redshift writes its own letters
 (`arwdRxtDPA`); Serverless has built-in `sys:*` roles (`sys:dba`, `sys:superuser`,

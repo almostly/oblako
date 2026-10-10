@@ -103,6 +103,12 @@ try:
 except Exception:  # any import failure disables the feature
     masking = None
 
+# GRANT/REVOKE of ALTER and DROP -> pg_oblako.object_privilege. Pure-stdlib.
+try:
+    import object_privileges
+except Exception:  # any import failure disables the feature
+    object_privileges = None
+
 # Quoted object names folded to lower case, as Redshift does. Pure-stdlib.
 try:
     import identifiers
@@ -542,6 +548,10 @@ def rewrite_sql(sql: str) -> str:
     s = _PASSWORD_DISABLE.sub("PASSWORD NULL", s)
     if re.search(r"(?i)\bconnect\b", s):
         s = "".join(_refuse_connect(stmt) for stmt in _segments(s))
+    if object_privileges is not None and re.search(r"(?i)\b(?:alter|drop)\b", s):
+        s = "".join(
+            object_privileges.rewrite_object_privileges(stmt) for stmt in _segments(s)
+        )
     if re.search(r"(?i)\brole\b", s):
         s = "".join(_rewrite_roles(stmt) for stmt in _segments(s))
     s = _PG_GROUP.sub(_PG_GROUP_SUB, s)

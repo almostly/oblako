@@ -238,3 +238,92 @@ def test_views_have_redshifts_columns(conn):
     for view, columns in expected.items():
         cur = conn.execute(f"SELECT * FROM {view} LIMIT 0")
         assert [d.name for d in cur.description] == columns, view
+
+
+@pytest.fixture
+def alter_drop(conn):
+    """A role granted ALTER and DROP, a user in it, and objects to act on."""
+    for stmt in [
+        "DROP SCHEMA IF EXISTS idt_ad CASCADE",
+        "DROP SCHEMA IF EXISTS idt_ad2 CASCADE",
+        "DROP USER IF EXISTS idt_erin",
+        "DROP ROLE IF EXISTS idt_ad_role",
+        "CREATE SCHEMA idt_ad",
+        "CREATE TABLE idt_ad.scratch (id int)",
+        "CREATE VIEW idt_ad.v AS SELECT 1 AS x",
+        "CREATE ROLE idt_ad_role",
+        "CREATE USER idt_erin PASSWORD 'Abcdef12'",
+        "GRANT ROLE idt_ad_role TO idt_erin",
+        "GRANT USAGE, ALTER, DROP ON SCHEMA idt_ad TO ROLE idt_ad_role",
+        "GRANT ALTER, DROP ON TABLE idt_ad.scratch TO ROLE idt_ad_role",
+        "GRANT DROP ON TABLE idt_ad.v TO ROLE idt_ad_role",
+    ]:
+        conn.execute(stmt)
+    yield conn
+    for stmt in [
+        "DROP SCHEMA IF EXISTS idt_ad CASCADE",
+        "DROP SCHEMA IF EXISTS idt_ad2 CASCADE",
+        "DROP USER IF EXISTS idt_erin",
+        "DROP ROLE IF EXISTS idt_ad_role",
+    ]:
+        conn.execute(stmt)
+
+
+def _as_erin():
+    return psycopg.connect(
+        autocommit=True, **{**RS, "user": "idt_erin", "password": "Abcdef12"}
+    )
+
+
+def test_alter_and_drop_privileges_read_back(alter_drop):
+    assert _rows(
+        alter_drop,
+        "SELECT relation_name, privilege_type, identity_name, identity_type "
+        "FROM svv_relation_privileges WHERE namespace_name = 'idt_ad' ORDER BY 1, 2",
+    ) == [
+        ("scratch", "ALTER", "idt_ad_role", "role"),
+        ("scratch", "DROP", "idt_ad_role", "role"),
+        ("v", "DROP", "idt_ad_role", "role"),
+    ]
+    assert _rows(
+        alter_drop,
+        "SELECT privilege_type FROM svv_schema_privileges "
+        "WHERE namespace_name = 'idt_ad' ORDER BY 1",
+    ) == [("ALTER",), ("DROP",), ("USAGE",)]
+    alter_drop.execute("REVOKE DROP ON idt_ad.v FROM ROLE idt_ad_role")
+    assert (
+        _rows(
+            alter_drop,
+            "SELECT 1 FROM svv_relation_privileges WHERE relation_name = 'v' "
+            "AND namespace_name = 'idt_ad'",
+        )
+        == []
+    )
+
+
+def test_alter_and_drop_privileges_are_enforced(alter_drop):
+    """As on Redshift Serverless: ALTER and DROP let a user who isn't the owner act."""
+    with _as_erin() as erin:
+        erin.execute("ALTER TABLE idt_ad.scratch ADD COLUMN extra int")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            erin.execute("SELECT count(*) FROM idt_ad.scratch")  # ALTER isn't SELECT
+        erin.execute("DROP VIEW idt_ad.v")
+        erin.execute("DROP TABLE idt_ad.scratch")
+        erin.execute("ALTER SCHEMA idt_ad RENAME TO idt_ad2")
+    # the dropped objects take their grants with them
+    assert (
+        _rows(
+            alter_drop,
+            "SELECT 1 FROM svv_relation_privileges WHERE identity_name = 'idt_ad_role'",
+        )
+        == []
+    )
+
+
+def test_without_the_privilege_only_the_owner_acts_or_grants(alter_drop):
+    alter_drop.execute("CREATE TABLE idt_ad.kept (id int)")
+    with _as_erin() as erin:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            erin.execute("DROP TABLE idt_ad.kept")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            erin.execute("GRANT ALTER ON idt_ad.kept TO idt_erin")

@@ -127,6 +127,150 @@ WHERE pg_catalog.oblako_identity_type(r.oid) = 'role'
        OR pg_catalog.shobj_description(r.oid, 'pg_authid')
           = 'oblako:redshift-role owner=' || current_user);
 
+-- ALTER and DROP on tables, views and schemas: Redshift privileges PostgreSQL
+-- doesn't have. The proxy sends a GRANT or REVOKE of them to
+-- pg_oblako.object_privilege, which keeps them here; the privilege views below
+-- report them, and the oblako_redshift extension enforces them, running an ALTER
+-- or DROP as the object's owner for a user that holds the privilege. Row-level
+-- security lets only the object's owner (or a holder with the grant option)
+-- grant or revoke; superusers bypass it.
+CREATE SCHEMA IF NOT EXISTS pg_oblako;
+GRANT USAGE ON SCHEMA pg_oblako TO PUBLIC;
+CREATE TABLE IF NOT EXISTS pg_oblako.object_privileges (
+    objkind      text NOT NULL,      -- 'relation' or 'schema'
+    objid        oid NOT NULL,
+    privilege    text NOT NULL,      -- 'ALTER' or 'DROP'
+    grantee      oid NOT NULL,       -- 0 for PUBLIC
+    grantor      oid NOT NULL,
+    admin_option boolean NOT NULL,
+    PRIMARY KEY (objkind, objid, privilege, grantee)
+);
+
+-- whether `who` holds the privilege on the object, directly, through a role or
+-- group, or through PUBLIC; with `grantable`, only with the grant option
+CREATE OR REPLACE FUNCTION pg_oblako.holds_object_privilege(
+    kind text, obj oid, priv text, who name, grantable boolean DEFAULT false)
+    RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM pg_oblako.object_privileges p
+         WHERE p.objkind = kind AND p.objid = obj AND p.privilege = priv
+           AND (p.admin_option OR NOT grantable)
+           AND (p.grantee = 0 OR pg_catalog.pg_has_role(who, p.grantee, 'MEMBER')))
+$$;
+
+-- whether `who` may grant or revoke the privilege: the owner, or a holder with
+-- the grant option
+CREATE OR REPLACE FUNCTION pg_oblako.may_grant_object_privilege(
+    kind text, obj oid, priv text, who name)
+    RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $$
+    SELECT coalesce(pg_catalog.pg_has_role(who, CASE kind
+               WHEN 'relation' THEN (SELECT relowner FROM pg_class WHERE oid = obj)
+               ELSE (SELECT nspowner FROM pg_namespace WHERE oid = obj) END, 'USAGE'),
+           false)
+        OR pg_oblako.holds_object_privilege(kind, obj, priv, who, true)
+$$;
+
+ALTER TABLE pg_oblako.object_privileges ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS object_privileges_read ON pg_oblako.object_privileges;
+DROP POLICY IF EXISTS object_privileges_grant ON pg_oblako.object_privileges;
+CREATE POLICY object_privileges_read ON pg_oblako.object_privileges
+    FOR SELECT USING (true);
+CREATE POLICY object_privileges_grant ON pg_oblako.object_privileges
+    FOR ALL USING (pg_oblako.may_grant_object_privilege(objkind, objid, privilege, current_user))
+    WITH CHECK (pg_oblako.may_grant_object_privilege(objkind, objid, privilege, current_user));
+GRANT SELECT, INSERT, UPDATE, DELETE ON pg_oblako.object_privileges TO PUBLIC;
+
+-- GRANT/REVOKE privileges ON kind objects TO/FROM grantees, for ALTER and DROP.
+-- kind is 'relation', 'schema' or 'schema_tables' (ALL TABLES IN SCHEMA); a NULL
+-- grantee is PUBLIC.
+CREATE OR REPLACE FUNCTION pg_oblako.object_privilege(
+    is_grant boolean, privileges text[], kind text, objects text[],
+    grantees text[], grant_option boolean)
+    RETURNS void LANGUAGE plpgsql AS $$
+DECLARE
+    name text;
+    who text;
+    priv text;
+    obj oid;
+    objs oid[] := '{}';
+    grantee_oid oid;
+    grantee_oids oid[] := '{}';
+    target text := CASE kind WHEN 'schema' THEN 'schema' ELSE 'relation' END;
+BEGIN
+    FOREACH name IN ARRAY objects LOOP
+        IF kind = 'relation' THEN
+            obj := to_regclass(name);
+            IF obj IS NULL THEN
+                RAISE EXCEPTION 'relation "%" does not exist', name USING ERRCODE = 'undefined_table';
+            END IF;
+            objs := objs || obj;
+        ELSE
+            obj := to_regnamespace(name);
+            IF obj IS NULL THEN
+                RAISE EXCEPTION 'schema "%" does not exist', name USING ERRCODE = 'invalid_schema_name';
+            END IF;
+            IF kind = 'schema' THEN
+                objs := objs || obj;
+            ELSE
+                objs := objs || ARRAY(SELECT c.oid FROM pg_catalog.pg_class c
+                                       WHERE c.relnamespace = obj AND c.relkind IN ('r', 'p', 'v', 'm', 'f'));
+            END IF;
+        END IF;
+    END LOOP;
+    FOREACH who IN ARRAY grantees LOOP
+        IF who IS NULL THEN
+            grantee_oids := grantee_oids || 0::oid;
+        ELSE
+            SELECT r.oid INTO grantee_oid FROM pg_catalog.pg_roles r WHERE r.rolname = who;
+            IF grantee_oid IS NULL THEN
+                RAISE EXCEPTION 'user "%" does not exist', who USING ERRCODE = 'undefined_object';
+            END IF;
+            grantee_oids := grantee_oids || grantee_oid;
+        END IF;
+    END LOOP;
+    FOREACH obj IN ARRAY objs LOOP
+        FOREACH priv IN ARRAY privileges LOOP
+            IF NOT pg_oblako.may_grant_object_privilege(target, obj, priv, current_user) THEN
+                RAISE EXCEPTION 'permission denied for %',
+                    CASE target WHEN 'schema' THEN 'schema ' || obj::regnamespace::text
+                                ELSE 'relation ' || obj::regclass::text END
+                    USING ERRCODE = 'insufficient_privilege';
+            END IF;
+            FOREACH grantee_oid IN ARRAY grantee_oids LOOP
+                IF is_grant THEN
+                    INSERT INTO pg_oblako.object_privileges AS p
+                    VALUES (target, obj, priv, grantee_oid,
+                            (SELECT r.oid FROM pg_catalog.pg_roles r WHERE r.rolname = current_user),
+                            grant_option)
+                    ON CONFLICT (objkind, objid, privilege, grantee)
+                    DO UPDATE SET admin_option = p.admin_option OR EXCLUDED.admin_option;
+                ELSIF grant_option THEN  -- REVOKE GRANT OPTION FOR
+                    UPDATE pg_oblako.object_privileges p SET admin_option = false
+                     WHERE p.objkind = target AND p.objid = obj AND p.privilege = priv
+                       AND p.grantee = grantee_oid;
+                ELSE
+                    DELETE FROM pg_oblako.object_privileges p
+                     WHERE p.objkind = target AND p.objid = obj AND p.privilege = priv
+                       AND p.grantee = grantee_oid;
+                END IF;
+            END LOOP;
+        END LOOP;
+    END LOOP;
+END $$;
+
+-- a dropped table, view or schema takes its ALTER and DROP grants with it
+CREATE OR REPLACE FUNCTION pg_oblako.forget_object_privileges()
+    RETURNS event_trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
+BEGIN
+    DELETE FROM pg_oblako.object_privileges p
+     WHERE (p.objkind = 'relation' AND NOT EXISTS (SELECT 1 FROM pg_class c WHERE c.oid = p.objid))
+        OR (p.objkind = 'schema' AND NOT EXISTS (SELECT 1 FROM pg_namespace n WHERE n.oid = p.objid));
+END $$;
+
+DROP EVENT TRIGGER IF EXISTS oblako_forget_object_privileges;
+CREATE EVENT TRIGGER oblako_forget_object_privileges ON sql_drop
+    EXECUTE FUNCTION pg_oblako.forget_object_privileges();
+
 CREATE OR REPLACE VIEW pg_catalog.svv_relation_privileges AS
 SELECT n.nspname::text AS namespace_name,
        c.relname::text AS relation_name,
@@ -144,7 +288,17 @@ WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
   AND n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
   AND a.grantee <> c.relowner
   AND a.privilege_type IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'REFERENCES',
-                           'TRUNCATE');
+                           'TRUNCATE')
+UNION ALL
+SELECT n.nspname::text, c.relname::text, p.privilege, p.grantee::bigint::integer,
+       pg_catalog.oblako_identity_name(p.grantee),
+       pg_catalog.oblako_identity_type(p.grantee),
+       p.admin_option AND pg_catalog.oblako_identity_type(p.grantee) IN ('user', 'public')
+FROM pg_oblako.object_privileges p
+JOIN pg_catalog.pg_class c ON c.oid = p.objid
+JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+WHERE p.objkind = 'relation'
+  AND (p.grantee = 0 OR EXISTS (SELECT 1 FROM pg_catalog.pg_roles r WHERE r.oid = p.grantee));
 
 CREATE OR REPLACE VIEW pg_catalog.svv_schema_privileges AS
 SELECT n.nspname::text AS namespace_name,
@@ -159,7 +313,17 @@ SELECT n.nspname::text AS namespace_name,
 FROM pg_catalog.pg_namespace n
 CROSS JOIN LATERAL pg_catalog.aclexplode(n.nspacl) a
 WHERE n.nspname !~ '^pg_' AND n.nspname <> 'information_schema'
-  AND a.grantee <> n.nspowner;
+  AND a.grantee <> n.nspowner
+UNION ALL
+SELECT n.nspname::text, p.privilege, p.grantee::bigint::integer,
+       pg_catalog.oblako_identity_name(p.grantee),
+       pg_catalog.oblako_identity_type(p.grantee),
+       p.admin_option AND pg_catalog.oblako_identity_type(p.grantee) IN ('user', 'public'),
+       'SCHEMA'::text
+FROM pg_oblako.object_privileges p
+JOIN pg_catalog.pg_namespace n ON n.oid = p.objid
+WHERE p.objkind = 'schema'
+  AND (p.grantee = 0 OR EXISTS (SELECT 1 FROM pg_catalog.pg_roles r WHERE r.oid = p.grantee));
 
 CREATE OR REPLACE VIEW pg_catalog.svv_database_privileges AS
 SELECT d.datname::text AS database_name,
