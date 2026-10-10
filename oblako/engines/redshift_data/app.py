@@ -22,6 +22,16 @@ from .executor import RedshiftDataExecutor
 
 # BatchExecuteStatement takes at most this many statements (Sqls), as on AWS
 MAX_BATCH_SQLS = 40
+# a session idles out after SessionKeepAliveSeconds, at most a day, as on AWS
+MAX_SESSION_KEEP_ALIVE = 86400
+# what AWS refuses beside a SessionId: the session already has them
+_SESSION_EXCLUDES = (
+    "Database",
+    "ClusterIdentifier",
+    "WorkgroupName",
+    "SecretArn",
+    "DbUser",
+)
 
 
 def _jsonable(obj):
@@ -77,6 +87,8 @@ class RedshiftDataApp:
             return handler(req)
         except _NotFound as e:
             return _error("ResourceNotFoundException", str(e))
+        except _Invalid as e:
+            return _error("ValidationException", str(e))
         except Exception as e:  # surface backend errors as ValidationException
             return _error("ValidationException", str(e))
 
@@ -90,29 +102,75 @@ class RedshiftDataApp:
             raise _NotFound(stmt_id)
         return stmt
 
+    def _session(self, req: dict) -> str | None:
+        """Return the session a request runs in, opening one if it asks for that.
+
+        With SessionId, the session's connection runs the statement, and AWS
+        refuses a target or credentials beside it. With SessionKeepAliveSeconds,
+        a new session starts, idle-expiring after that many seconds.
+        """
+        if session_id := req.get("SessionId"):
+            beside = [k for k in _SESSION_EXCLUDES if req.get(k)]
+            if beside:
+                raise _Invalid(
+                    f"SessionId can't be used with {', '.join(beside)}: a session "
+                    "keeps the database and credentials it started with"
+                )
+            try:
+                self.executor.session(session_id)
+            except KeyError:
+                raise _Invalid(
+                    f"Session {session_id} doesn't exist or has expired"
+                ) from None
+            return session_id
+        if (keep_alive := req.get("SessionKeepAliveSeconds")) is not None:
+            if not 0 <= int(keep_alive) <= MAX_SESSION_KEEP_ALIVE:
+                raise _Invalid(
+                    "SessionKeepAliveSeconds must be between 0 and "
+                    f"{MAX_SESSION_KEEP_ALIVE}"
+                )
+            return self.executor.open_session(
+                int(keep_alive),
+                database=req.get("Database"),
+                cluster_identifier=req.get("ClusterIdentifier"),
+                workgroup_name=req.get("WorkgroupName"),
+            )
+        return None
+
+    def _response(self, req: dict, stmt: dict) -> Response:
+        """Answer a statement request as AWS does: id, target, database, session."""
+        target = (
+            {"WorkgroupName": stmt["WorkgroupName"]}
+            if stmt.get("WorkgroupName")
+            else {"ClusterIdentifier": stmt["ClusterIdentifier"]}
+        )
+        return _json_response(
+            {
+                "Id": stmt["Id"],
+                **target,
+                "Database": stmt["Database"],
+                "CreatedAt": stmt["CreatedAt"],
+                **({"SessionId": stmt["SessionId"]} if stmt.get("SessionId") else {}),
+            }
+        )
+
     def op_ExecuteStatement(self, req: dict) -> Response:
         """Execute a single SQL statement and return its statement id."""
         if not req.get("Sql"):
             return _error("ValidationException", "Sql is required")
+        session_id = self._session(req)
         stmt_id = self.executor.execute(
             sql=req["Sql"],
             database=req.get("Database"),
             cluster_identifier=req.get("ClusterIdentifier"),
             parameters=req.get("Parameters"),
             workgroup_name=req.get("WorkgroupName"),
+            session_id=session_id,
         )
-        stmt = self._stored(stmt_id)
-        return _json_response(
-            {
-                "Id": stmt_id,
-                **_target(req),
-                "Database": stmt["Database"],
-                "CreatedAt": stmt["CreatedAt"],
-            }
-        )
+        return self._response(req, self._stored(stmt_id))
 
     def op_BatchExecuteStatement(self, req: dict) -> Response:
-        """Execute multiple SQL statements in sequence and return the last statement id."""
+        """Run the statements as one transaction and return the batch's statement id."""
         sqls = req.get("Sqls") or []
         if not sqls:
             return _error("ValidationException", "Sqls is required")
@@ -123,18 +181,16 @@ class RedshiftDataApp:
                 "failed to satisfy constraint: Member must have length less than or "
                 f"equal to {MAX_BATCH_SQLS}",
             )
-        ids = [
-            self.executor.execute(
-                sql=sql,
-                database=req.get("Database"),
-                cluster_identifier=req.get("ClusterIdentifier"),
-                parameters=req.get("Parameters"),
-                workgroup_name=req.get("WorkgroupName"),
-            )
-            for sql in sqls
-        ]
+        ids = self.executor.execute_batch(
+            sqls,
+            database=req.get("Database"),
+            cluster_identifier=req.get("ClusterIdentifier"),
+            workgroup_name=req.get("WorkgroupName"),
+            session_id=self._session(req),
+        )
         last = self._stored(ids[-1])
-        # link the sub-statements so DescribeStatement can report them
+        # link the sub-statements so DescribeStatement can report them; the batch
+        # has failed if any of them did
         subs = [self._stored(sid) for sid in ids]
         last["SubStatements"] = [
             {
@@ -143,17 +199,13 @@ class RedshiftDataApp:
                 "Status": sub["Status"],
                 "HasResultSet": sub["HasResultSet"],
                 "ResultRows": sub["ResultRows"],
+                **({"Error": sub["Error"]} if sub.get("Error") else {}),
             }
             for sub in subs
         ]
-        return _json_response(
-            {
-                "Id": ids[-1],
-                **_target(req),
-                "Database": last["Database"],
-                "CreatedAt": last["CreatedAt"],
-            }
-        )
+        if failed := next((sub for sub in subs if sub["Status"] == "FAILED"), None):
+            last["Status"], last["Error"] = "FAILED", failed["Error"]
+        return self._response(req, last)
 
     def op_DescribeStatement(self, req: dict) -> Response:
         """Return metadata for a previously submitted statement."""
@@ -230,11 +282,8 @@ class _NotFound(Exception):
     pass
 
 
-def _target(req: dict) -> dict:
-    """Return the cluster or the workgroup a statement ran on, as AWS echoes it."""
-    if req.get("WorkgroupName"):
-        return {"WorkgroupName": req["WorkgroupName"]}
-    return {"ClusterIdentifier": req.get("ClusterIdentifier")}
+class _Invalid(Exception):
+    """Raised for a request AWS refuses with ValidationException."""
 
 
 def _check_workgroup(req: dict) -> Response | None:

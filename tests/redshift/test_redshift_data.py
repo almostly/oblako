@@ -7,11 +7,13 @@ Exercises real boto3 'redshift' (control plane) and 'redshift-data' (executing
 SQL against the Redshift engine) clients.
 """
 
+import os
+import socket
+
 import boto3
 import pytest
 from botocore.exceptions import ClientError
 
-from oblako import ports
 from oblako.engines.redshift_data import start_in_thread
 from oblako.engines.redshift_data.executor import RedshiftDataExecutor
 
@@ -20,12 +22,26 @@ CREDS = dict(
 )
 
 
+RS_PORT = int(os.environ.get("OBLAKO_TEST_RS_PORT", "5439"))
+
+
+def _free_port() -> int:
+    """Return a port nothing listens on, so the test runs this server, not another."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 @pytest.fixture(scope="module")
 def data_client():
     executor = RedshiftDataExecutor(
-        host="localhost", port=5439, user="oblako", password="oblako", database="oblako"
+        host="localhost",
+        port=RS_PORT,
+        user="oblako",
+        password="oblako",
+        database="oblako",
     )
-    url = start_in_thread(port=ports.REDSHIFT_DATA, executor=executor)
+    url = start_in_thread(port=_free_port(), executor=executor)
     return boto3.client("redshift-data", endpoint_url=url, **CREDS)
 
 
@@ -103,6 +119,100 @@ def test_batch_takes_at_most_40_statements(data_client):
     with pytest.raises(ClientError, match="less than or equal to 40") as err:
         data_client.batch_execute_statement(Database="oblako", Sqls=["SELECT 1"] * 41)
     assert err.value.response["Error"]["Code"] == "ValidationException"
+
+
+def _status(client, sid: str) -> str:
+    return client.describe_statement(Id=sid)["Status"]
+
+
+def _count(client, sql: str) -> int:
+    sid = client.execute_statement(Database="oblako", Sql=sql)["Id"]
+    return client.get_statement_result(Id=sid)["Records"][0][0]["longValue"]
+
+
+@pytest.fixture
+def no_rsd_tables(data_client):
+    """Drop the rsd_s* tables the session tests make, before and after."""
+
+    def drop():
+        for i in range(45):
+            data_client.execute_statement(
+                Database="oblako", Sql=f"DROP TABLE IF EXISTS rsd_s{i}"
+            )
+
+    drop()
+    yield
+    drop()
+
+
+def test_a_session_shares_one_transaction(data_client, no_rsd_tables):
+    """As on AWS: BEGIN opens a session; a failure and ROLLBACK leave nothing."""
+    first = data_client.execute_statement(
+        Database="oblako", Sql="BEGIN", SessionKeepAliveSeconds=300
+    )
+    sid = first["SessionId"]
+    for i in range(45):
+        sql = "SELECT 1/0" if i == 30 else f"CREATE TABLE rsd_s{i} (id int)"
+        out = data_client.execute_statement(Sql=sql, SessionId=sid)
+        assert out["SessionId"] == sid
+        if i == 30:
+            assert _status(data_client, out["Id"]) == "FAILED"
+            break
+    data_client.execute_statement(Sql="ROLLBACK", SessionId=sid)
+    assert (
+        _count(data_client, "SELECT count(*) FROM pg_tables WHERE tablename ~ '^rsd_s'")
+        == 0
+    )
+
+
+def test_a_session_commits_all_its_statements(data_client, no_rsd_tables):
+    sid = data_client.execute_statement(
+        Database="oblako", Sql="BEGIN", SessionKeepAliveSeconds=300
+    )["SessionId"]
+    for i in range(45):
+        data_client.execute_statement(
+            Sql=f"CREATE TABLE rsd_s{i} (id int)", SessionId=sid
+        )
+    data_client.execute_statement(Sql="COMMIT", SessionId=sid)
+    assert (
+        _count(data_client, "SELECT count(*) FROM pg_tables WHERE tablename ~ '^rsd_s'")
+        == 45
+    )
+
+
+def test_a_session_refuses_a_target_and_an_unknown_id(data_client):
+    sid = data_client.execute_statement(
+        Database="oblako", Sql="SELECT 1", SessionKeepAliveSeconds=60
+    )["SessionId"]
+    with pytest.raises(ClientError, match="SessionId can't be used with Database"):
+        data_client.execute_statement(Sql="SELECT 1", SessionId=sid, Database="oblako")
+    with pytest.raises(ClientError, match="doesn't exist or has expired"):
+        data_client.execute_statement(
+            Sql="SELECT 1", SessionId="00000000-0000-0000-0000-000000000000"
+        )
+
+
+def test_a_batch_is_one_transaction(data_client, no_rsd_tables):
+    """A failing statement rolls the batch back; the ones after it are ABORTED."""
+    out = data_client.batch_execute_statement(
+        Database="oblako",
+        Sqls=[
+            "CREATE TABLE rsd_s0 (id int)",
+            "SELECT 1/0",
+            "CREATE TABLE rsd_s1 (id int)",
+        ],
+    )
+    desc = data_client.describe_statement(Id=out["Id"])
+    assert desc["Status"] == "FAILED"
+    assert [s["Status"] for s in desc["SubStatements"]] == [
+        "FINISHED",
+        "FAILED",
+        "ABORTED",
+    ]
+    assert (
+        _count(data_client, "SELECT count(*) FROM pg_tables WHERE tablename ~ '^rsd_s'")
+        == 0
+    )
 
 
 def test_get_statement_result_not_found(data_client):

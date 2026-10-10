@@ -8,14 +8,17 @@ single local oblako/redshift container instead of a per-cluster Postgres server.
 from __future__ import annotations
 
 import base64
+import contextlib
 import datetime
 import decimal
 import re
 import threading
+import time
 import uuid
 from typing import Any
 
 import psycopg2
+from psycopg2.extensions import TRANSACTION_STATUS_IDLE as _IDLE
 
 # Redshift Data API uses named params like `:name`; psycopg2 wants `%(name)s`.
 # Match `:name` but not `::cast`.
@@ -40,6 +43,7 @@ class RedshiftDataExecutor:
         self.password = password
         self.database = database
         self._statements: dict[str, dict] = {}
+        self._sessions: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._oid_to_typename: dict[int, str] | None = None
 
@@ -139,27 +143,23 @@ class RedshiftDataExecutor:
     # -------------------------------------------------------------------------------
     # Statement execution
     # -------------------------------------------------------------------------------
-    def execute(
+    def _record(
         self,
         sql: str,
-        database: str | None = None,
-        cluster_identifier: str | None = None,
-        parameters: list[dict] | None = None,
-        workgroup_name: str | None = None,
-    ) -> str:
-        """Run SQL, store the statement + result, return the statement id.
-
-        A Serverless workgroup is the shared engine, so ``workgroup_name`` only
-        labels the statement.
-        """
-        stmt_id = str(uuid.uuid4())
+        database: str | None,
+        cluster_identifier: str | None,
+        workgroup_name: str | None,
+        session_id: str | None,
+    ) -> dict:
+        """Return a new statement record, not yet run."""
         now = datetime.datetime.now(datetime.timezone.utc)
-        statement = {
-            "Id": stmt_id,
+        return {
+            "Id": str(uuid.uuid4()),
             "QueryString": sql,
             "Database": database or self.database,
             "ClusterIdentifier": cluster_identifier,
             **({"WorkgroupName": workgroup_name} if workgroup_name else {}),
+            **({"SessionId": session_id} if session_id else {}),
             "CreatedAt": now,
             "UpdatedAt": now,
             "Status": "STARTED",
@@ -168,41 +168,178 @@ class RedshiftDataExecutor:
             "_records": [],
             "_columns": [],
         }
+
+    def _run(self, conn, statement: dict, parameters: list[dict] | None) -> None:
+        """Run the statement on ``conn`` and record its result or its error."""
         start = datetime.datetime.now()
         try:
-            bound_sql, params = self._bind_params(sql, parameters)
-            conn = self._connect(database, cluster_identifier)
-            try:
-                with conn.cursor() as cur:
-                    cur.execute(bound_sql, params)
-                    if cur.description:
-                        columns = self._column_metadata(conn, cur.description)
-                        records = [
-                            [self._encode_field(v) for v in row]
-                            for row in cur.fetchall()
-                        ]
-                        statement["_columns"] = columns
-                        statement["_records"] = records
-                        statement["HasResultSet"] = True
-                        statement["ResultRows"] = len(records)
-                    else:
-                        statement["ResultRows"] = cur.rowcount
-            finally:
-                conn.close()
+            bound_sql, params = self._bind_params(statement["QueryString"], parameters)
+            with conn.cursor() as cur:
+                cur.execute(bound_sql, params)
+                if cur.description:
+                    columns = self._column_metadata(conn, cur.description)
+                    records = [
+                        [self._encode_field(v) for v in row] for row in cur.fetchall()
+                    ]
+                    statement["_columns"] = columns
+                    statement["_records"] = records
+                    statement["HasResultSet"] = True
+                    statement["ResultRows"] = len(records)
+                else:
+                    statement["ResultRows"] = cur.rowcount
             statement["Status"] = "FINISHED"
-        except psycopg2.Error as err:
-            statement["Status"] = "FAILED"
-            statement["Error"] = str(err).strip()
-        except Exception as err:  # parameter binding, connection errors
+        except Exception as err:  # SQL errors, parameter binding
             statement["Status"] = "FAILED"
             statement["Error"] = str(err).strip()
         statement["UpdatedAt"] = datetime.datetime.now(datetime.timezone.utc)
         statement["Duration"] = int(
             (datetime.datetime.now() - start).total_seconds() * 1e9
         )  # nanoseconds, like the real API
+
+    def _store(self, statement: dict) -> str:
+        """Keep the statement for DescribeStatement and GetStatementResult."""
         with self._lock:
-            self._statements[stmt_id] = statement
-        return stmt_id
+            self._statements[statement["Id"]] = statement
+        return statement["Id"]
+
+    def execute(
+        self,
+        sql: str,
+        database: str | None = None,
+        cluster_identifier: str | None = None,
+        parameters: list[dict] | None = None,
+        workgroup_name: str | None = None,
+        session_id: str | None = None,
+    ) -> str:
+        """Run SQL, store the statement + result, return the statement id.
+
+        A Serverless workgroup is the shared engine, so ``workgroup_name`` only
+        labels the statement. With ``session_id`` the statement runs on that
+        session's connection, so it shares the session's transaction.
+        """
+        session = self.session(session_id) if session_id else None
+        if session is not None:
+            database, cluster_identifier = session["database"], session["cluster"]
+            workgroup_name = session["workgroup"]
+        statement = self._record(
+            sql, database, cluster_identifier, workgroup_name, session_id
+        )
+        if session is not None:
+            with session["lock"]:
+                self._run(session["conn"], statement, parameters)
+                self._touch(session)
+            return self._store(statement)
+        try:
+            conn = self._connect(database, cluster_identifier)
+        except Exception as err:  # connection errors
+            statement["Status"] = "FAILED"
+            statement["Error"] = str(err).strip()
+            return self._store(statement)
+        try:
+            self._run(conn, statement, parameters)
+        finally:
+            conn.close()
+        return self._store(statement)
+
+    def execute_batch(
+        self,
+        sqls: list[str],
+        database: str | None = None,
+        cluster_identifier: str | None = None,
+        workgroup_name: str | None = None,
+        session_id: str | None = None,
+    ) -> list[str]:
+        """Run the statements in order as one transaction; return their ids.
+
+        As on AWS: a statement that fails rolls the batch back, and the ones after
+        it are ABORTED, never run. In a session that already has a transaction
+        open, the batch runs inside it and leaves the outcome to the session.
+        """
+        session = self.session(session_id) if session_id else None
+        if session is not None:
+            database, cluster_identifier = session["database"], session["cluster"]
+            workgroup_name = session["workgroup"]
+        statements = [
+            self._record(sql, database, cluster_identifier, workgroup_name, session_id)
+            for sql in sqls
+        ]
+        conn = (
+            session["conn"]
+            if session is not None
+            else self._connect(database, cluster_identifier)
+        )
+        lock = session["lock"] if session is not None else threading.Lock()
+        try:
+            with lock:
+                own = conn.info.transaction_status == _IDLE
+                if own:
+                    conn.cursor().execute("BEGIN")
+                failed = False
+                for statement in statements:
+                    if failed:
+                        statement["Status"] = "ABORTED"
+                        continue
+                    self._run(conn, statement, None)
+                    failed = statement["Status"] == "FAILED"
+                if own:
+                    conn.cursor().execute("ROLLBACK" if failed else "COMMIT")
+                if session is not None:
+                    self._touch(session)
+        finally:
+            if session is None:
+                conn.close()
+        return [self._store(statement) for statement in statements]
+
+    # -------------------------------------------------------------------------------
+    # Sessions
+    # -------------------------------------------------------------------------------
+    def open_session(
+        self,
+        keep_alive: int,
+        database: str | None = None,
+        cluster_identifier: str | None = None,
+        workgroup_name: str | None = None,
+    ) -> str:
+        """Open a session: one engine connection its statements share; return its id."""
+        self._expire_sessions()
+        session_id = str(uuid.uuid4())
+        session = {
+            "conn": self._connect(database, cluster_identifier),
+            "database": database or self.database,
+            "cluster": cluster_identifier,
+            "workgroup": workgroup_name,
+            "keep_alive": keep_alive,
+            "lock": threading.Lock(),
+        }
+        self._touch(session)
+        with self._lock:
+            self._sessions[session_id] = session
+        return session_id
+
+    def session(self, session_id: str) -> dict:
+        """Return an open session, or raise KeyError for one unknown or expired."""
+        self._expire_sessions()
+        with self._lock:
+            return self._sessions[session_id]
+
+    @staticmethod
+    def _touch(session: dict) -> None:
+        """Keep the session alive for its keep-alive seconds from now."""
+        session["expires"] = time.monotonic() + session["keep_alive"]
+
+    def _expire_sessions(self) -> None:
+        """Close the sessions idle past their keep-alive (an open transaction rolls back)."""
+        now = time.monotonic()
+        with self._lock:
+            gone = [
+                sid
+                for sid, s in self._sessions.items()
+                if s["expires"] < now and not s["lock"].locked()
+            ]
+            for sid in gone:
+                with contextlib.suppress(Exception):
+                    self._sessions[sid]["conn"].close()
+                del self._sessions[sid]
 
     def get(self, stmt_id: str) -> dict | None:
         """Return the raw statement record, or None if not found."""
