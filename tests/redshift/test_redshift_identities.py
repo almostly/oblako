@@ -375,3 +375,52 @@ def test_drop_role_restrict_and_force(conn):
     )
     conn.execute("DROP ROLE idt_reader")
     assert _rows(conn, "SELECT 1 FROM svv_roles WHERE role_name LIKE 'idt%'") == []
+
+
+def test_access_system_table_through_a_role_sees_everything(conn):
+    """As on Redshift Serverless: ACCESS SYSTEM TABLE, held through roles, shows every
+    row of the SVV views and answers membership for other users, without data access."""
+    conn.execute("CREATE USER idt_bob PASSWORD 'Abcdef12'")
+    conn.execute("CREATE ROLE idt_ast")
+    conn.execute("CREATE ROLE idt_ast_outer")
+    try:
+        conn.execute("GRANT ROLE idt_ast TO ROLE idt_ast_outer")
+        conn.execute("GRANT ROLE idt_ast_outer TO idt_bob")
+        with psycopg.connect(
+            autocommit=True, **{**RS, "user": "idt_bob", "password": "Abcdef12"}
+        ) as bob:
+            assert ("idt_alice", "idt_reader") not in _rows(
+                bob, "SELECT user_name, role_name FROM svv_user_grants"
+            )
+            with pytest.raises(
+                psycopg.errors.InsufficientPrivilege, match="ACCESS SYSTEM"
+            ):
+                bob.execute("SELECT user_is_member_of('idt_alice', 'idt_reader')")
+            conn.execute("GRANT ACCESS SYSTEM TABLE TO ROLE idt_ast")
+            assert ("idt_alice", "idt_reader") in _rows(
+                bob, "SELECT user_name, role_name FROM svv_user_grants"
+            )
+            assert _rows(
+                bob, "SELECT user_is_member_of('idt_alice', 'idt_reader')"
+            ) == [(True,)]
+            assert _rows(
+                bob, "SELECT role_is_member_of('idt_writer', 'idt_reader')"
+            ) == [(True,)]
+            assert ("ACCESS SYSTEM TABLE", "idt_ast", "role") in _rows(
+                bob,
+                "SELECT system_privilege, identity_name, identity_type "
+                "FROM svv_system_privileges",
+            )
+            assert _rows(
+                bob, "SELECT usesuper FROM pg_user WHERE usename = 'idt_bob'"
+            ) == [(False,)]
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                bob.execute("SELECT * FROM idt.events")
+            conn.execute("REVOKE ACCESS SYSTEM TABLE FROM ROLE idt_ast")
+            assert ("idt_alice", "idt_reader") not in _rows(
+                bob, "SELECT user_name, role_name FROM svv_user_grants"
+            )
+    finally:
+        conn.execute("DROP USER IF EXISTS idt_bob")
+        conn.execute("DROP ROLE IF EXISTS idt_ast_outer FORCE")
+        conn.execute("DROP ROLE IF EXISTS idt_ast FORCE")

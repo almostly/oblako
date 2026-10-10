@@ -259,3 +259,16 @@ def test_a_late_binding_view_is_created_granted_and_read(cursor):
         assert cursor.fetchone() == (2,)
     finally:
         cursor.execute("DROP SCHEMA acc_lb CASCADE")
+
+
+def test_pg_group_with_an_alias_or_no_schema_shows_only_groups(cursor):
+    """As on Redshift: every spelling of pg_group lists only real groups."""
+    for query in (
+        "SELECT groname FROM pg_catalog.pg_group g",
+        "SELECT groname FROM pg_group",
+        "SELECT g.groname FROM pg_group AS g",
+    ):
+        cursor.execute(query)
+        assert not any(
+            name.startswith(("pg_", "sys:")) for (name,) in cursor.fetchall()
+        )

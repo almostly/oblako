@@ -228,7 +228,14 @@ Redshift's columns and values (`identity_type` of `user`, `group`, `role` or
 gives the same rows in every one of them. As on Redshift, an ACL string leaves out
 grants to roles, which show only in these views. A user who isn't a superuser sees only its
 own roles in `svv_user_grants`, and in `svv_role_grants` only the roles it has or
-owns, as on Redshift.
+owns, as on Redshift. Redshift's `ACCESS SYSTEM TABLE` system permission, granted to a
+role (`GRANT ACCESS SYSTEM TABLE TO ROLE r`) and held through roles, shows every row
+again, without making its holder a superuser or giving it any data; it's listed in
+`svv_system_privileges`. `USER_IS_MEMBER_OF(user, role)` and
+`ROLE_IS_MEMBER_OF(role, role)` answer through grants followed role to role, and,
+as on Redshift, asking about another user takes a superuser or that permission.
+`pg_group` lists only groups however a query names it, with an alias or without
+`pg_catalog.`
 
 Redshift's `ALTER` and `DROP` privileges, which PostgreSQL doesn't have, work too:
 `GRANT ALTER, DROP ON [TABLE] t | ON SCHEMA s | ON ALL TABLES IN SCHEMA s TO ...`

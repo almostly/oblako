@@ -113,14 +113,111 @@ CREATE OR REPLACE FUNCTION pg_catalog.oblako_has_role(role_name text)
                       AND pg_catalog.pg_has_role(current_user, r.oid, 'MEMBER'))
 $$;
 
+-- whether `member` holds `role_oid`, through grants followed role to role. Not
+-- pg_has_role, which counts a superuser a member of every role: on Redshift a
+-- superuser has only the roles granted to it.
+CREATE OR REPLACE FUNCTION pg_catalog.oblako_is_member(member oid, role_oid oid)
+    RETURNS boolean LANGUAGE sql STABLE AS $$
+    WITH RECURSIVE held(oid) AS (
+        SELECT member
+        UNION
+        SELECT m.roleid FROM pg_catalog.pg_auth_members m JOIN held ON m.member = held.oid)
+    SELECT EXISTS (SELECT 1 FROM held WHERE held.oid = role_oid)
+$$;
+
+-- Redshift's system permissions granted to roles (GRANT ACCESS SYSTEM TABLE TO
+-- ROLE r, which the proxy routes to pg_oblako.system_privilege), read back from
+-- svv_system_privileges below
+CREATE SCHEMA IF NOT EXISTS pg_oblako;
+GRANT USAGE ON SCHEMA pg_oblako TO PUBLIC;
+CREATE TABLE IF NOT EXISTS pg_oblako.system_privileges (
+    privilege text NOT NULL,
+    grantee   oid NOT NULL,
+    PRIMARY KEY (privilege, grantee)
+);
+GRANT SELECT ON pg_oblako.system_privileges TO PUBLIC;
+
+-- whether the current user holds a system permission, through its roles
+CREATE OR REPLACE FUNCTION pg_catalog.oblako_holds_system_privilege(priv text)
+    RETURNS boolean LANGUAGE sql STABLE AS $$
+    SELECT EXISTS (
+        SELECT 1 FROM pg_oblako.system_privileges p
+         WHERE p.privilege = priv
+           AND pg_catalog.oblako_is_member(
+                   (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user),
+                   p.grantee))
+$$;
+
+-- GRANT/REVOKE a system permission TO/FROM ROLE r; a superuser grants them
+CREATE OR REPLACE FUNCTION pg_oblako.system_privilege(is_grant boolean, priv text, role_name text)
+    RETURNS void LANGUAGE plpgsql AS $$
+DECLARE
+    role_oid oid := (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = role_name);
+BEGIN
+    IF NOT (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user) THEN
+        RAISE EXCEPTION 'permission denied to grant system permission %', priv
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF role_oid IS NULL OR pg_catalog.oblako_identity_type(role_oid) <> 'role' THEN
+        RAISE EXCEPTION 'role "%" does not exist', role_name USING ERRCODE = 'undefined_object';
+    END IF;
+    IF is_grant THEN
+        INSERT INTO pg_oblako.system_privileges VALUES (priv, role_oid) ON CONFLICT DO NOTHING;
+    ELSE
+        DELETE FROM pg_oblako.system_privileges p WHERE p.privilege = priv AND p.grantee = role_oid;
+    END IF;
+END $$;
+
 -- whether the current user sees every row of the grant views: a superuser does,
--- and so do the system roles with access to system tables
+-- a holder of ACCESS SYSTEM TABLE does, and so do the system roles that have it
 CREATE OR REPLACE FUNCTION pg_catalog.oblako_sees_all()
     RETURNS boolean LANGUAGE sql STABLE AS $$
     SELECT (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user)
         OR pg_catalog.oblako_has_role('sys:monitor')
         OR pg_catalog.oblako_has_role('sys:superuser')
+        OR pg_catalog.oblako_holds_system_privilege('ACCESS SYSTEM TABLE')
 $$;
+
+-- USER_IS_MEMBER_OF(user, role or group) and ROLE_IS_MEMBER_OF(role, role or
+-- group): membership through grants followed role to role. As on Redshift, asking
+-- about another user (or a role the asker doesn't hold) takes a superuser or
+-- ACCESS SYSTEM TABLE.
+CREATE OR REPLACE FUNCTION pg_catalog.oblako_role_oid(name text, kind text)
+    RETURNS oid LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    found oid := (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = name);
+BEGIN
+    IF found IS NULL THEN
+        RAISE EXCEPTION '% "%" does not exist', kind, name USING ERRCODE = 'undefined_object';
+    END IF;
+    RETURN found;
+END $$;
+
+CREATE OR REPLACE FUNCTION pg_catalog.user_is_member_of(user_name text, role_name text)
+    RETURNS boolean LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    IF user_name <> current_user AND NOT pg_catalog.oblako_sees_all() THEN
+        RAISE EXCEPTION 'must be superuser or have ''ACCESS SYSTEM TABLE'' privilege to check membership for another user'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN pg_catalog.oblako_is_member(pg_catalog.oblako_role_oid(user_name, 'user'),
+                                       pg_catalog.oblako_role_oid(role_name, 'role'));
+END $$;
+
+CREATE OR REPLACE FUNCTION pg_catalog.role_is_member_of(role_name text, granted_role_name text)
+    RETURNS boolean LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    role_oid oid := pg_catalog.oblako_role_oid(role_name, 'role');
+BEGIN
+    IF NOT pg_catalog.oblako_sees_all()
+       AND NOT pg_catalog.oblako_is_member(
+               (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user), role_oid) THEN
+        RAISE EXCEPTION 'must be superuser or have ''ACCESS SYSTEM TABLE'' privilege to check membership for another user'
+            USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RETURN pg_catalog.oblako_is_member(role_oid,
+                                       pg_catalog.oblako_role_oid(granted_role_name, 'role'));
+END $$;
 
 CREATE OR REPLACE VIEW pg_catalog.svv_roles AS
 SELECT r.oid::bigint::integer AS role_id,
@@ -342,6 +439,25 @@ DROP EVENT TRIGGER IF EXISTS oblako_forget_object_privileges;
 CREATE EVENT TRIGGER oblako_forget_object_privileges ON sql_drop
     EXECUTE FUNCTION pg_oblako.forget_object_privileges();
 
+-- system permissions: the ones granted, and ACCESS SYSTEM TABLE as the system
+-- roles hold it. Others see the rows for themselves and their roles.
+CREATE OR REPLACE VIEW pg_catalog.svv_system_privileges AS
+SELECT v.system_privilege, v.identity_id, v.identity_name, v.identity_type
+FROM (
+    SELECT p.privilege AS system_privilege, p.grantee::bigint::integer AS identity_id,
+           r.rolname::text AS identity_name,
+           pg_catalog.oblako_identity_type(p.grantee) AS identity_type, p.grantee AS oid
+    FROM pg_oblako.system_privileges p
+    JOIN pg_catalog.pg_roles r ON r.oid = p.grantee
+    UNION ALL
+    SELECT 'ACCESS SYSTEM TABLE', r.oid::bigint::integer, r.rolname::text, 'role', r.oid
+    FROM pg_catalog.pg_roles r
+    WHERE r.rolname IN ('sys:monitor', 'sys:operator', 'sys:dba', 'sys:superuser')
+) v
+WHERE pg_catalog.oblako_sees_all()
+   OR pg_catalog.oblako_is_member(
+          (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user), v.oid);
+
 CREATE OR REPLACE VIEW pg_catalog.svv_relation_privileges AS
 SELECT n.nspname::text AS namespace_name,
        c.relname::text AS relation_name,
@@ -453,6 +569,7 @@ WHERE d.defaclobjtype IN ('r', 'f')
   AND a.privilege_type IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'REFERENCES',
                            'TRUNCATE', 'EXECUTE');
 
+GRANT SELECT ON pg_catalog.svv_system_privileges TO PUBLIC;
 GRANT SELECT ON pg_catalog.svv_roles, pg_catalog.svv_user_grants,
     pg_catalog.svv_role_grants, pg_catalog.svv_relation_privileges,
     pg_catalog.svv_schema_privileges, pg_catalog.svv_database_privileges,

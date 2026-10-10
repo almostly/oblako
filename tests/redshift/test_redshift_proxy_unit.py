@@ -422,3 +422,25 @@ def test_late_binding_view_clause_is_dropped():
     assert rewrite_sql("SELECT 'with no schema binding'") == (
         "SELECT 'with no schema binding'"
     )
+
+
+def test_pg_group_takes_an_alias_and_no_schema():
+    """pg_group, qualified or not, aliased or not, becomes the filtered subquery."""
+    out = rewrite_sql("select count(*) from pg_catalog.pg_group g")
+    assert out.endswith("NOT LIKE 'oblako:redshift-role%') AS g")
+    out = rewrite_sql("select * from pg_group join pg_user u on true")
+    assert ") AS pg_group join pg_user u" in out
+    out = rewrite_sql("select pg_group.groname from pg_group order by 1")
+    assert out.startswith("select pg_group.groname from (SELECT")
+    assert out.endswith(") AS pg_group order by 1")
+
+
+def test_access_system_table_goes_to_pg_oblako():
+    """GRANT/REVOKE ACCESS SYSTEM TABLE TO/FROM ROLE r calls pg_oblako.system_privilege."""
+    assert rewrite_sql("GRANT ACCESS SYSTEM TABLE TO ROLE r;") == (
+        "DO $oblako_role$ BEGIN PERFORM pg_oblako.system_privilege(True, "
+        "'ACCESS SYSTEM TABLE', 'r'); END $oblako_role$;"
+    )
+    assert "system_privilege(False, 'ACCESS SYSTEM TABLE', 'R')" in rewrite_sql(
+        'revoke access system table from role "R"'
+    )

@@ -215,17 +215,41 @@ _CREATEUSER = re.compile(r"(?i)\b(no)?createuser\b")
 # over loopback, so no password is checked for any account either way.
 _PASSWORD_DISABLE = re.compile(r"(?i)\bpassword\s+disable\b")
 
-# Hide PostgreSQL's predefined pg_* roles from pg_catalog.pg_group, so Redshift
-# access tools (pgsesame) see only real groups (Redshift has no pg_* roles). Wrap
-# the table in a filtered subquery: re.sub does not re-scan its replacement, so the
-# inner pg_catalog.pg_group is not itself rewritten (no recursion, no stored view
-# that the catalog tests would re-create through the proxy into a self-reference).
-_PG_GROUP = re.compile(r"(?i)\bpg_catalog\.pg_group\b")
+# Hide PostgreSQL's predefined pg_* roles from pg_group, so Redshift access tools
+# (pgsesame) see only real groups (Redshift has no pg_* roles), whether the query
+# names it pg_catalog.pg_group or pg_group, with an alias or without. Wrap the table
+# in a filtered subquery named as the query names it: re.sub does not re-scan its
+# replacement, so the inner pg_catalog.pg_group is not itself rewritten (no
+# recursion, no stored view that the catalog tests would re-create through the
+# proxy into a self-reference). A pg_group followed by a dot is a qualifier (as in
+# pg_group.groname) and stays.
+_PG_GROUP = re.compile(
+    r"(?i)(?<![\w.\"])(?:pg_catalog\s*\.\s*)?pg_group\b(?!\s*\.)"
+    r"(?:\s+(?:as\s+)?(?!(?:where|join|left|right|inner|outer|full|cross|natural|on"
+    r"|using|group|order|limit|offset|union|except|intersect|having|window|fetch|for"
+    r")\b)([a-z_][\w$]*))?"
+)
 _PG_GROUP_SUB = (
     "(SELECT groname, grosysid, grolist FROM pg_catalog.pg_group "
     "WHERE groname !~ '^pg_' AND coalesce(pg_catalog.shobj_description(grosysid, "
-    "'pg_authid'), '') NOT LIKE 'oblako:redshift-role%') AS pg_group"
+    "'pg_authid'), '') NOT LIKE 'oblako:redshift-role%') AS {alias}"
 )
+
+
+def _pg_group(m: re.Match) -> str:
+    """Return the filtered pg_group subquery, under the query's alias if it has one."""
+    return _PG_GROUP_SUB.format(alias=m.group(1) or "pg_group")
+
+
+# Redshift's system permission ACCESS SYSTEM TABLE, granted to a role, lets its
+# holders read every row of the SVV views as a superuser does. PostgreSQL has no
+# such permission; the grant goes to pg_oblako.system_privilege
+# (initdb.d/14_redshift_identities.sql).
+_SYSTEM_PRIVILEGE = re.compile(
+    r"(?i)^(\s*)(grant|revoke)\s+access\s+system\s+table\s+(?:to|from)\s+role\s+"
+    r'("(?:[^"]|"")+"|[a-z_][\w$]*)\s*(;?)(\s*)$'
+)
+
 
 # Redshift's late-binding view, CREATE VIEW ... WITH NO SCHEMA BINDING, isn't bound
 # to the tables it reads. PostgreSQL has no such view, so the clause is dropped and
@@ -310,6 +334,14 @@ def _rewrite_roles(stmt: str) -> str:
             f"{lead}DO $oblako_role$ BEGIN CREATE ROLE {ident} NOLOGIN; "
             f"EXECUTE format('COMMENT ON ROLE %I IS %L', '{name}', "
             f"'oblako:redshift-role owner=' || current_user); END $oblako_role${semi}{tail}"
+        )
+    if m := _SYSTEM_PRIVILEGE.match(stmt):
+        lead, verb, ident, semi, tail = m.groups()
+        name = _role_name(ident).replace("'", "''")
+        return (
+            f"{lead}DO $oblako_role$ BEGIN PERFORM pg_oblako.system_privilege("
+            f"{verb.lower() == 'grant'}, 'ACCESS SYSTEM TABLE', '{name}'); "
+            f"END $oblako_role${semi}{tail}"
         )
     if m := _DROP_ROLE.match(stmt):
         lead, if_exists, ident, option, semi, tail = m.groups()
@@ -583,7 +615,7 @@ def rewrite_sql(sql: str) -> str:
         )
     if re.search(r"(?i)\brole\b", s):
         s = "".join(_rewrite_roles(stmt) for stmt in _segments(s))
-    s = _PG_GROUP.sub(_PG_GROUP_SUB, s)
+    s = _PG_GROUP.sub(_pg_group, s)
     s = _ACL_TO_STRING.sub("redshift_acl(", s)
     s = _rewrite_catalog(s)
     if redshift_ml is not None:
