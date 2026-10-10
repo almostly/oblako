@@ -82,6 +82,12 @@ CREATE OR REPLACE FUNCTION pg_catalog.redshift_acl(acl aclitem[], sep text)
     ), '') END;
 $$;
 
+-- whether the current user sees every row of the grant views: a superuser does
+CREATE OR REPLACE FUNCTION pg_catalog.oblako_sees_all()
+    RETURNS boolean LANGUAGE sql STABLE AS $$
+    SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user
+$$;
+
 CREATE OR REPLACE VIEW pg_catalog.svv_roles AS
 SELECT r.oid::bigint::integer AS role_id,
        r.rolname::text AS role_name,
@@ -101,7 +107,9 @@ FROM pg_catalog.pg_auth_members m
 JOIN pg_catalog.pg_roles u ON u.oid = m.member
 JOIN pg_catalog.pg_roles g ON g.oid = m.roleid
 WHERE pg_catalog.oblako_identity_type(u.oid) = 'user'
-  AND pg_catalog.oblako_identity_type(g.oid) = 'role';
+  AND pg_catalog.oblako_identity_type(g.oid) = 'role'
+  -- as on Redshift, a user who isn't a superuser sees only its own roles
+  AND (pg_catalog.oblako_sees_all() OR u.rolname = current_user);
 
 CREATE OR REPLACE VIEW pg_catalog.svv_role_grants AS
 SELECT r.oid::bigint::integer AS role_id,
@@ -112,7 +120,12 @@ FROM pg_catalog.pg_auth_members m
 JOIN pg_catalog.pg_roles r ON r.oid = m.member
 JOIN pg_catalog.pg_roles g ON g.oid = m.roleid
 WHERE pg_catalog.oblako_identity_type(r.oid) = 'role'
-  AND pg_catalog.oblako_identity_type(g.oid) = 'role';
+  AND pg_catalog.oblako_identity_type(g.oid) = 'role'
+  -- as on Redshift, a user who isn't a superuser sees the roles it has or owns
+  AND (pg_catalog.oblako_sees_all()
+       OR pg_catalog.pg_has_role(current_user, r.oid, 'MEMBER')
+       OR pg_catalog.shobj_description(r.oid, 'pg_authid')
+          = 'oblako:redshift-role owner=' || current_user);
 
 CREATE OR REPLACE VIEW pg_catalog.svv_relation_privileges AS
 SELECT n.nspname::text AS namespace_name,

@@ -216,7 +216,9 @@ Redshift's columns and values (`identity_type` of `user`, `group`, `role` or
 `svv_schema_privileges`, `svv_database_privileges`, `svv_function_privileges` and
 `svv_default_privileges`. The same scenario run on Redshift Serverless (2026-10-06)
 gives the same rows in every one of them. As on Redshift, an ACL string leaves out
-grants to roles, which show only in these views.
+grants to roles, which show only in these views. A user who isn't a superuser sees only its
+own roles in `svv_user_grants`, and in `svv_role_grants` only the roles it has or
+owns, as on Redshift.
 
 What still differs from Redshift Serverless here: an ACL string spells an owner's
 privileges PostgreSQL's way (`arwdDxt`), where Redshift writes its own letters

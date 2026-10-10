@@ -55,6 +55,7 @@ def _drop(c) -> None:
         "REVOKE SELECT ON TABLES FROM ROLE idt_reader",
         "DROP SCHEMA IF EXISTS idt CASCADE",
         "DROP USER IF EXISTS idt_alice",
+        "DROP USER IF EXISTS idt_bob",
         "DROP GROUP IF EXISTS idt_analysts",
         "DROP ROLE IF EXISTS idt_writer",
         "DROP ROLE IF EXISTS idt_reader",
@@ -105,6 +106,27 @@ def test_role_grants(conn):
     conn.execute("REVOKE ROLE idt_reader FROM idt_alice")
     assert (
         _rows(conn, "SELECT 1 FROM svv_user_grants WHERE user_name = 'idt_alice'") == []
+    )
+
+
+def test_a_regular_user_sees_only_its_own_role_grants(conn):
+    """As on Redshift: svv_user_grants shows a non-superuser its own roles only,
+    and svv_role_grants the roles it has or owns."""
+    conn.execute("CREATE USER idt_bob PASSWORD 'Abcdef12'")
+    conn.execute("GRANT ROLE idt_writer TO idt_bob")
+    with psycopg.connect(
+        autocommit=True, **{**RS, "user": "idt_alice", "password": "Abcdef12"}
+    ) as alice:
+        assert _rows(
+            alice, "SELECT user_name, role_name FROM svv_user_grants ORDER BY 1, 2"
+        ) == [("idt_alice", "idt_reader")]
+        assert _rows(alice, "SELECT role_name FROM svv_role_grants") == []
+        conn.execute("GRANT ROLE idt_writer TO idt_alice")
+        assert _rows(
+            alice, "SELECT role_name, granted_role_name FROM svv_role_grants"
+        ) == [("idt_writer", "idt_reader")]
+    assert ("idt_bob", "idt_writer") in _rows(
+        conn, "SELECT user_name, role_name FROM svv_user_grants"
     )
 
 
