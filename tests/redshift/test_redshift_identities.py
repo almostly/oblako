@@ -327,3 +327,33 @@ def test_without_the_privilege_only_the_owner_acts_or_grants(alter_drop):
             erin.execute("DROP TABLE idt_ad.kept")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             erin.execute("GRANT ALTER ON idt_ad.kept TO idt_erin")
+
+
+def test_system_roles(conn):
+    """Redshift's sys:* roles exist as roles; sys:operator reads every role grant,
+    and sys:dba drops a table it doesn't own."""
+    assert _rows(
+        conn, "SELECT role_name FROM svv_roles WHERE role_name LIKE 'sys:%' ORDER BY 1"
+    ) == [
+        ("sys:dba",),
+        ("sys:monitor",),
+        ("sys:operator",),
+        ("sys:secadmin",),
+        ("sys:superuser",),
+    ]
+    conn.execute("CREATE USER idt_bob PASSWORD 'Abcdef12'")
+    conn.execute('GRANT ROLE "sys:operator" TO idt_bob')
+    with psycopg.connect(
+        autocommit=True, **{**RS, "user": "idt_bob", "password": "Abcdef12"}
+    ) as bob:
+        assert ("idt_alice", "idt_reader") in _rows(
+            bob, "SELECT user_name, role_name FROM svv_user_grants"
+        )
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            bob.execute("DROP TABLE idt.events")
+    conn.execute('GRANT ROLE "sys:dba" TO idt_bob')
+    conn.execute("GRANT USAGE ON SCHEMA idt TO idt_bob")
+    with psycopg.connect(
+        autocommit=True, **{**RS, "user": "idt_bob", "password": "Abcdef12"}
+    ) as bob:
+        bob.execute("DROP TABLE idt.events")

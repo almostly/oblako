@@ -213,6 +213,31 @@ def test_only_superusers_see_and_manage_policies(conn):
             bob.execute("CREATE MASKING POLICY ddm_bobs WITH (a int) USING (a)")
 
 
+def test_a_sys_secadmin_member_manages_and_sees_policies(conn):
+    """As on Redshift: sys:secadmin, through a role, manages masking like a superuser."""
+    conn.execute("CREATE ROLE ddm_sec")
+    try:
+        conn.execute('GRANT ROLE "sys:secadmin" TO ROLE ddm_sec')
+        conn.execute("GRANT ROLE ddm_sec TO ddm_bob")
+        with psycopg.connect(
+            **{**RS, "user": "ddm_bob", "password": "Abcdef12"}, autocommit=True
+        ) as bob:
+            bob.execute(
+                "CREATE MASKING POLICY ddm_bobs WITH (v varchar(64)) "
+                "USING ('***'::varchar(64))"
+            )
+            bob.execute("ATTACH MASKING POLICY ddm_bobs ON ddm.users(email) TO PUBLIC")
+            assert bob.execute(
+                "SELECT count(*) FROM svv_attached_masking_policy"
+            ).fetchone() == (1,)
+            bob.execute(
+                "DETACH MASKING POLICY ddm_bobs ON ddm.users(email) FROM PUBLIC"
+            )
+            bob.execute("DROP MASKING POLICY ddm_bobs")
+    finally:
+        conn.execute("DROP ROLE ddm_sec")
+
+
 def test_column_privileges(conn):
     conn.execute("GRANT SELECT (id, email) ON ddm.users TO ddm_bob")
     conn.execute("GRANT UPDATE (email) ON ddm.users TO ROLE ddm_analyst")

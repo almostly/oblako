@@ -82,10 +82,44 @@ CREATE OR REPLACE FUNCTION pg_catalog.redshift_acl(acl aclitem[], sep text)
     ), '') END;
 $$;
 
--- whether the current user sees every row of the grant views: a superuser does
+-- Redshift's system-defined roles, as Redshift roles (marked, can't log in), with
+-- no owner. Their members are recognised where redshift-local checks for them:
+-- the four that can read system tables see every row of the grant views below;
+-- sys:dba and sys:superuser may drop schemas and tables (the oblako_redshift
+-- extension enforces it, as for a DROP grant); sys:secadmin manages masking
+-- policies (15_masking.sql). What a role can't carry in PostgreSQL, such as
+-- creating users, still needs a superuser.
+DO $sys_roles$
+DECLARE
+    name text;
+BEGIN
+    FOREACH name IN ARRAY ARRAY['sys:monitor', 'sys:operator', 'sys:dba',
+                                'sys:superuser', 'sys:secadmin'] LOOP
+        IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = name) THEN
+            EXECUTE format('CREATE ROLE %I NOLOGIN', name);
+        END IF;
+        EXECUTE format('COMMENT ON ROLE %I IS %L', name, 'oblako:redshift-role');
+    END LOOP;
+END $sys_roles$;
+-- the system roles inherit as on Redshift
+GRANT "sys:monitor" TO "sys:operator";
+GRANT "sys:operator" TO "sys:dba";
+
+-- whether the current user is a member of the named role, if that role exists
+CREATE OR REPLACE FUNCTION pg_catalog.oblako_has_role(role_name text)
+    RETURNS boolean LANGUAGE sql STABLE AS $$
+    SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles r
+                    WHERE r.rolname = role_name
+                      AND pg_catalog.pg_has_role(current_user, r.oid, 'MEMBER'))
+$$;
+
+-- whether the current user sees every row of the grant views: a superuser does,
+-- and so do the system roles with access to system tables
 CREATE OR REPLACE FUNCTION pg_catalog.oblako_sees_all()
     RETURNS boolean LANGUAGE sql STABLE AS $$
-    SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user
+    SELECT (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user)
+        OR pg_catalog.oblako_has_role('sys:monitor')
+        OR pg_catalog.oblako_has_role('sys:superuser')
 $$;
 
 CREATE OR REPLACE VIEW pg_catalog.svv_roles AS
@@ -156,6 +190,11 @@ CREATE OR REPLACE FUNCTION pg_oblako.holds_object_privilege(
          WHERE p.objkind = kind AND p.objid = obj AND p.privilege = priv
            AND (p.admin_option OR NOT grantable)
            AND (p.grantee = 0 OR pg_catalog.pg_has_role(who, p.grantee, 'MEMBER')))
+        -- sys:dba and sys:superuser may drop schemas and tables
+        OR (priv = 'DROP' AND NOT grantable AND EXISTS (
+            SELECT 1 FROM pg_catalog.pg_roles r
+             WHERE r.rolname IN ('sys:dba', 'sys:superuser')
+               AND pg_catalog.pg_has_role(who, r.oid, 'MEMBER')))
 $$;
 
 -- whether `who` may grant or revoke the privilege: the owner, or a holder with

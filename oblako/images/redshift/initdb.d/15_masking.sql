@@ -55,7 +55,8 @@ CREATE TABLE IF NOT EXISTS pg_oblako.ddm_attachments (
 CREATE OR REPLACE FUNCTION pg_oblako.ddm_require_superuser()
     RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
-    IF NOT (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user) THEN
+    IF NOT ((SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user)
+            OR pg_catalog.oblako_has_role('sys:secadmin')) THEN
         RAISE EXCEPTION 'permission denied: only superusers and users with sys:secadmin can manage masking policies';
     END IF;
 END $$;
@@ -90,9 +91,10 @@ END $$;
 
 -- Each policy as a SQL function over its inputs, so a query can apply it:
 -- pg_oblako."ddm_fn_<policy>"(inputs) RETURNS output type. The expression sees
--- its inputs by name and as masked_table.<name>, as Redshift's does.
+-- its inputs by name and as masked_table.<name>, as Redshift's does. Made by the
+-- catalog's owner, so any sys:secadmin member can replace it later.
 CREATE OR REPLACE FUNCTION pg_oblako.ddm_define_function(policy text)
-    RETURNS void LANGUAGE plpgsql AS $$
+    RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
 DECLARE
     p pg_oblako.ddm_policies;
     params text;
@@ -165,10 +167,25 @@ BEGIN
         RAISE EXCEPTION 'cannot drop masking policy % because other objects depend on it', policy;
     END IF;
     DELETE FROM pg_oblako.ddm_policies WHERE name = policy;
+    PERFORM pg_oblako.ddm_drop_function(policy);
+END $$;
+
+-- drops pg_oblako."ddm_fn_<policy>", as its owner
+CREATE OR REPLACE FUNCTION pg_oblako.ddm_drop_function(policy text)
+    RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
+BEGIN
     IF to_regproc(format('pg_oblako.%I', 'ddm_fn_' || policy)) IS NOT NULL THEN
         EXECUTE format('DROP FUNCTION pg_oblako.%I', 'ddm_fn_' || policy);
     END IF;
 END $$;
+
+-- the table a masking statement names, looked up as the catalog's owner: a
+-- sys:secadmin member manages policies without needing access to the table.
+-- No fixed search_path, so an unqualified name resolves as the caller's would.
+CREATE OR REPLACE FUNCTION pg_oblako.ddm_regclass(relation text)
+    RETURNS oid LANGUAGE sql STABLE SECURITY DEFINER AS $$
+    SELECT to_regclass(relation)::oid
+$$;
 
 CREATE OR REPLACE FUNCTION pg_oblako.ddm_attach(
     policy text, relation text, outputs text[], inputs text[],
@@ -183,7 +200,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_oblako.ddm_policies WHERE name = policy) THEN
         RAISE EXCEPTION 'masking policy "%" does not exist', policy;
     END IF;
-    rel := to_regclass(relation);
+    rel := pg_oblako.ddm_regclass(relation);
     IF rel IS NULL THEN
         RAISE EXCEPTION 'relation "%" does not exist', relation;
     END IF;
@@ -235,7 +252,7 @@ DECLARE
     removed integer;
 BEGIN
     PERFORM pg_oblako.ddm_require_superuser();
-    rel := to_regclass(relation);
+    rel := pg_oblako.ddm_regclass(relation);
     IF rel IS NULL THEN
         RAISE EXCEPTION 'relation "%" does not exist', relation;
     END IF;
@@ -346,7 +363,8 @@ SELECT current_database()::text AS policy_database,
        p.modified_by AS policy_modified_by,
        p.modified_time AS policy_modified_time
 FROM pg_oblako.ddm_policies p
-WHERE (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user);
+WHERE (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user)
+   OR pg_catalog.oblako_has_role('sys:secadmin');
 
 CREATE OR REPLACE VIEW pg_catalog.svv_attached_masking_policy AS
 SELECT a.policy AS policy_name,
@@ -361,7 +379,8 @@ SELECT a.policy AS policy_name,
        (SELECT '[' || string_agg(to_json(c)::text, ',') || ']' FROM unnest(a.output_columns) AS c) AS output_columns,
        false AS is_masking_datashare_on
 FROM pg_oblako.ddm_attachments a
-WHERE (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user);
+WHERE (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user)
+   OR pg_catalog.oblako_has_role('sys:secadmin');
 
 -- column-level grants, as Redshift lists them
 CREATE OR REPLACE VIEW pg_catalog.svv_column_privileges AS
@@ -381,6 +400,15 @@ WHERE a.attnum > 0 AND NOT a.attisdropped
 
 -- policies kept before query masking existed get their functions
 SELECT pg_oblako.ddm_define_function(name) FROM pg_oblako.ddm_policies;
+
+-- sys:secadmin manages policies: it writes the catalog and has the owner make and
+-- drop a policy's function
+GRANT SELECT, INSERT, UPDATE, DELETE ON pg_oblako.ddm_policies, pg_oblako.ddm_attachments
+    TO "sys:secadmin";
+REVOKE EXECUTE ON FUNCTION pg_oblako.ddm_define_function(text),
+    pg_oblako.ddm_drop_function(text), pg_oblako.ddm_regclass(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION pg_oblako.ddm_define_function(text),
+    pg_oblako.ddm_drop_function(text), pg_oblako.ddm_regclass(text) TO "sys:secadmin";
 
 GRANT SELECT ON pg_catalog.svv_masking_policy, pg_catalog.svv_attached_masking_policy,
     pg_catalog.svv_column_privileges TO PUBLIC;

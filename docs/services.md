@@ -228,10 +228,17 @@ object it doesn't own, as on Redshift Serverless (checked 2026-10-10), without
 being able to read it. Only the owner, or a holder `WITH GRANT OPTION`, can grant
 them, and a dropped object takes its grants with it.
 
+Redshift's system-defined roles exist too, as roles: `sys:monitor`, `sys:operator`,
+`sys:dba`, `sys:superuser` and `sys:secadmin`, granted with `GRANT ROLE` like any
+other. A member of `sys:monitor` (and so of `sys:operator` and `sys:dba`) or of
+`sys:superuser` sees every row of the grant views; `sys:dba` and `sys:superuser`
+may drop schemas and tables they don't own; `sys:secadmin` manages masking
+policies and reads the masking views. What PostgreSQL can't pass on through a
+role, such as creating users, still takes a superuser.
+
 What still differs from Redshift Serverless here: an ACL string spells an owner's
 privileges PostgreSQL's way (`arwdDxt`), where Redshift writes its own letters
-(`arwdRxtDPA`); Serverless has built-in `sys:*` roles (`sys:dba`, `sys:superuser`,
-...) that redshift-local doesn't; and on Redshift the user an IAM identity maps to
+(`arwdRxtDPA`); and on Redshift the user an IAM identity maps to
 is created at its first login, without a password, so making it a superuser needs
 a password in the same statement (`ALTER USER "IAM:x" PASSWORD '...' CREATEUSER`),
 whereas redshift-local creates it when the credentials are issued.
