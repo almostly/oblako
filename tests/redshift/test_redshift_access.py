@@ -213,3 +213,32 @@ def test_connect_on_database_is_a_syntax_error(cursor):
     ):
         with pytest.raises(psycopg2.errors.SyntaxError, match='near "DATABASE"'):
             cursor.execute(stmt)
+
+
+def test_a_user_drops_what_it_owns(cursor):
+    """A user who isn't a superuser drops its own table, view and schema.
+
+    The engine's drop event triggers (Iceberg, masking, ALTER/DROP grants) tidy
+    their catalogs as their owner, so they don't refuse an ordinary DROP.
+    """
+    cursor.execute("DROP SCHEMA IF EXISTS acc_own CASCADE")
+    cursor.execute("DROP USER IF EXISTS acc_owner")
+    cursor.execute("CREATE USER acc_owner PASSWORD 'Owner_123'")
+    cursor.execute("GRANT CREATE ON DATABASE oblako TO acc_owner")
+    conn = psycopg2.connect(
+        **{**RS_CONFIG, "user": "acc_owner", "password": "Owner_123"}
+    )
+    conn.autocommit = True
+    try:
+        with conn.cursor() as own:
+            own.execute("CREATE SCHEMA acc_own")
+            own.execute("CREATE TABLE acc_own.t (id int)")
+            own.execute("CREATE VIEW acc_own.v AS SELECT id FROM acc_own.t")
+            own.execute("DROP VIEW acc_own.v")
+            own.execute("DROP TABLE acc_own.t")
+            own.execute("DROP SCHEMA acc_own")
+    finally:
+        conn.close()
+        cursor.execute("DROP SCHEMA IF EXISTS acc_own CASCADE")
+        cursor.execute("REVOKE CREATE ON DATABASE oblako FROM acc_owner")
+        cursor.execute("DROP USER acc_owner")

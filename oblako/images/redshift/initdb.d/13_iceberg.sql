@@ -180,18 +180,26 @@ import iceberg_tables
 iceberg_tables.on_drop_table(plpy, query)
 $$;
 
+-- whether any Iceberg table is registered: a check every DROP TABLE makes, so
+-- it reads the registry as its owner (a user who isn't a superuser can't)
+CREATE OR REPLACE FUNCTION pg_oblako.iceberg_any() RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog AS $$
+    SELECT EXISTS (SELECT 1 FROM pg_oblako.iceberg_tables)
+$$;
+
 CREATE OR REPLACE FUNCTION pg_oblako.iceberg_on_drop_table() RETURNS event_trigger
 LANGUAGE plpgsql AS $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_oblako.iceberg_tables) THEN
+    IF pg_oblako.iceberg_any() THEN
         PERFORM pg_oblako.iceberg_drop_tables(current_query());
     END IF;
 END $$;
 
 -- A dropped view (DROP TABLE above, DROP VIEW, DROP SCHEMA ... CASCADE) takes its
--- staging table and registry row with it; a dropped schema its registry row.
+-- staging table and registry row with it; a dropped schema its registry row. As
+-- the registry's owner: it tidies up after objects the user has already dropped.
 CREATE OR REPLACE FUNCTION pg_oblako.iceberg_on_sql_drop() RETURNS event_trigger
-LANGUAGE plpgsql AS $$
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
 DECLARE
     gone record;
 BEGIN

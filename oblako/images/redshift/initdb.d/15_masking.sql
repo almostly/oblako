@@ -248,9 +248,10 @@ BEGIN
     END IF;
 END $$;
 
--- a dropped table (or schema) takes its attachments with it
+-- a dropped table (or schema) takes its attachments with it; as the catalog's
+-- owner, since any user may drop its own table
 CREATE OR REPLACE FUNCTION pg_oblako.ddm_forget_dropped()
-    RETURNS event_trigger LANGUAGE plpgsql AS $$
+    RETURNS event_trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog AS $$
 BEGIN
     DELETE FROM pg_oblako.ddm_attachments a
      WHERE NOT EXISTS (SELECT 1 FROM pg_catalog.pg_class c WHERE c.oid = a.relid);
