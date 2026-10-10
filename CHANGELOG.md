@@ -11,6 +11,19 @@ versioned entries below.
 
 ## Unreleased
 
+## v0.4.0 (2026-10-10)
+
+Two more Redshift gaps from pgsesame's Serverless parity run: the ACCESS SYSTEM TABLE
+system permission, and pg_group however a query names it.
+
+### Added
+
+- **Redshift**: the ACCESS SYSTEM TABLE system permission (GRANT/REVOKE ... TO/FROM ROLE), held through roles: its holders see every row of the SVV views without becoming superusers; svv_system_privileges; USER_IS_MEMBER_OF and ROLE_IS_MEMBER_OF, which take a superuser or that permission to ask about another user
+
+### Changed
+
+- **Redshift**: pg_group takes an alias and, with pg_catalog. or without, lists only groups
+
 ## v0.3.0 (2026-10-10)
 
 Redshift parity from a run of pgsesame against Redshift Serverless: 127-byte names,
