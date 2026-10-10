@@ -169,32 +169,29 @@ schema, so `public` holds only your objects: reflection lists no `stl_*`/`svv_*`
 relations, and autogenerate, with or without `include_schemas`, proposes no change
 to them. Data volumes from older images are migrated on start.
 
-**Access management as code.** Redshift tools that manage users, groups, and
+**Access management as code.** Redshift tools that manage users, groups, roles and
 privileges declaratively run against the engine too.
-[redtape](https://github.com/tomasfarias/redtape) (MIT) introspects a forked
-`pg_catalog` plus Redshift-only views and functions; the image answers the pieces
-PostgreSQL lacks (`pg_user.usecatupd`, `svv_external_schemas.eskind`, `like_escape`,
-the data-sharing / external-schema set-functions) and owns `public` by a real user
-(PostgreSQL 15+ owns it by `pg_database_owner`, a role Redshift has no concept of, so
-a tool mapping a schema's owner to a user would find nobody).
+[pgsesame](https://github.com/almostly/pgsesame) keeps them in a YAML spec:
+`sesame plan` reads the cluster and lists the statements a change needs, `sesame
+apply` runs them, and a second plan after apply is empty. It reads users and groups
+from `pg_user` and `pg_group`, owners joined to `pg_user`, and privileges from the
+SVV views below, so it runs against redshift-local unchanged:
+
+```bash
+SESAME_DSN="host=localhost port=5439 user=oblako password=oblako dbname=oblako sslmode=require" \
+  sesame plan permissions.yaml
+```
+
+The image answers the catalog pieces PostgreSQL lacks (`pg_user.usecatupd`,
+`svv_external_schemas.eskind`), accepts Redshift's `CREATEUSER` and `PASSWORD
+DISABLE`, and owns `public` by a real user (PostgreSQL 15+ owns it by
+`pg_database_owner`, a role Redshift has no concept of, so a tool mapping a schema's
+owner to a user would find nobody).
 
 It also renders ACL strings the Redshift way. Redshift prefixes a group grantee,
 `group analysts=r/bi_analyst`; PostgreSQL unified roles and groups in 8.1 and writes
-the identical grant `analysts=r/bi_analyst`. That one is what makes the diff
-*converge*: a tool parsing the string would otherwise file the group as a user, read
-the group as holding nothing, and re-plan the same `GRANT`s on every pass.
-
-So `redtape export` reads oblako's users, groups, and grants, and `redtape run` plans
-`CREATE USER`/`GROUP`, `GRANT`/`REVOKE`, and `ALTER GROUP` against the real Postgres
-roles underneath, unchanged. Once the cluster matches the spec the group grants read
-back as granted, so the plan has nothing to change.
-
-redtape itself is less steady than that makes it sound. Its diff depends on Python's
-per-process hash ordering, so it intermittently re-plans grants that are already in
-place, at a rate that varies with the schema. Pinning `PYTHONHASHSEED` makes a plan
-reproducible but not correct, because which seeds are clean is a property of the
-schema, not of redtape. Treat an empty plan from a single run as weak evidence: apply,
-then re-plan. None of this is the compat layer, whose ACL reads are stable.
+the identical grant `analysts=r/bi_analyst`. A client parsing the string would
+otherwise file the group as a user and read it as holding nothing.
 
 **Users, groups and roles.** Redshift keeps three kinds of identity apart, and so
 does redshift-local: `CREATE USER`, `CREATE GROUP` with `ALTER GROUP ... ADD USER`,
@@ -264,7 +261,7 @@ names, because a tool managing a cluster walks `pg_database` and reconnects per
 entry.
 
 ```{figure} _static/diagrams/access.svg
-:alt: redtape spec to redshift-local (svv_*, pg_user/group) to Postgres roles
+:alt: pgsesame spec to redshift-local (svv_*, pg_user/group) to Postgres roles
 :width: 100%
 
 Access management as code: a real Redshift access tool reads and applies against
