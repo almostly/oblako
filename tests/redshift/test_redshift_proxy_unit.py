@@ -412,3 +412,13 @@ def test_drop_role_goes_to_pg_oblako():
         "drop role if exists R restrict"
     )
     assert "drop_role('r', False, False)" in rewrite_sql("DROP ROLE r")
+
+
+def test_late_binding_view_clause_is_dropped():
+    """CREATE VIEW ... WITH NO SCHEMA BINDING becomes an ordinary CREATE VIEW."""
+    assert rewrite_sql(
+        "CREATE OR REPLACE VIEW s.v AS SELECT id FROM s.t WITH NO SCHEMA BINDING;"
+    ) == ("CREATE OR REPLACE VIEW s.v AS SELECT id FROM s.t;")
+    assert rewrite_sql("SELECT 'with no schema binding'") == (
+        "SELECT 'with no schema binding'"
+    )

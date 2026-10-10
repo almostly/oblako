@@ -26,7 +26,7 @@ This page lists what each one provides and where it diverges from AWS.
 | **S3 Vectors** | `s3vectors`: vector buckets → indexes (dimension + distance metric) → `PutVectors` / `QueryVectors` (k-NN) with Mongo-style metadata filters. Fed by Bedrock embeddings. | Brute-force k-NN (cosine / euclidean), not ANN; vectors are in-memory (not persisted across restart). |
 | **DynamoDB** | Amazon's DynamoDB Local behind an oblako proxy on `http://localhost:8007` (`AWS_ENDPOINT_URL_DYNAMODB`), which adds AWS's native **vector search** (boto3 1.43.64+): `VectorIndexes` on `CreateTable` / `VectorIndexUpdates` on `UpdateTable` with `SearchSchema` (a `HASH` vector index partition key, `INLINE_FILTER` attributes), and `SearchVectors` with equality `SearchConditionExpression`, `ProjectionExpression` and the index projection; writes with a vector of the wrong dimensions are rejected. It also adds **tagging** (`TagResource`, `ListTagsOfResource`), which Feast's DynamoDB online store uses. **DynamoDB Streams** are DynamoDB Local's own (`AWS_ENDPOINT_URL_DYNAMODB_STREAMS`, `localhost:8001`). | Single local instance; no Streams→Lambda wiring. `SearchVectors` is exact brute-force k-NN (a full scan), not ANN, and is immediately consistent; `ConsumedCapacity` is not reported. `UpdateItem` isn't checked against vector dimensions. Stream and table ARNs carry DynamoDB Local's region and account (`ddblocal`, `000000000000`). |
 | **Kinesis** | Kinesis Data Streams via kinesalite (`saidsef/aws-kinesis-local`). | Streams only; no Managed Flink. (Firehose is a separate service, see Analytics.) |
-| **Redshift** | PostgreSQL 16 impersonating Redshift; `redshift-connector`/dbt connect natively. A bundled proxy tolerates physical DDL (`DISTKEY`/`SORTKEY`/`ENCODE`, `varchar(max)`), terminates TLS, and bridges `COPY`/`UNLOAD` to/from `s3://` (Parquet, CSV, and delimited text) so awswrangler, dbt, and Feast load/unload for real. `SUPER` (jsonb-backed) with PartiQL navigation (`data.a.b`, `data['a'][0]`), `LISTAGG` (→ `string_agg`), `PIVOT`/`UNPIVOT` (→ standard SQL), unquoted dateparts (`DATEADD(month, 1, d)`), and native JSON functions are supported. | Row-store, not columnar; late-binding views unsupported; Python UDFs are Python 3; the S3 bridge covers Parquet/CSV/text (not JSON/AVRO/ORC); SUPER dot-navigation yields text (numeric compares need a cast); PIVOT/UNPIVOT need a subquery source (a bare table has no schema in the proxy). |
+| **Redshift** | PostgreSQL 16 impersonating Redshift; `redshift-connector`/dbt connect natively. A bundled proxy tolerates physical DDL (`DISTKEY`/`SORTKEY`/`ENCODE`, `varchar(max)`), terminates TLS, and bridges `COPY`/`UNLOAD` to/from `s3://` (Parquet, CSV, and delimited text) so awswrangler, dbt, and Feast load/unload for real. `SUPER` (jsonb-backed) with PartiQL navigation (`data.a.b`, `data['a'][0]`), `LISTAGG` (→ `string_agg`), `PIVOT`/`UNPIVOT` (→ standard SQL), unquoted dateparts (`DATEADD(month, 1, d)`), and native JSON functions are supported. | Row-store, not columnar; late-binding views are bound underneath; Python UDFs are Python 3; the S3 bridge covers Parquet/CSV/text (not JSON/AVRO/ORC); SUPER dot-navigation yields text (numeric compares need a cast); PIVOT/UNPIVOT need a subquery source (a bare table has no schema in the proxy). |
 | **Redshift (control plane)** | `redshift` clusters/nodes/endpoints/snapshots via moto. | Metadata only, the cluster endpoint isn't the queryable engine. |
 | **Redshift Data API** | `redshift-data`; SQL executes for real against the engine (through the same proxy, so its `COPY`/`UNLOAD` reach S3 too). `BatchExecuteStatement` takes at most 40 statements, as on AWS. Feast's Redshift offline store works end to end. | Statement results buffered in memory. |
 | **Redshift ML** | `CREATE MODEL` / `SHOW MODEL` / `DROP MODEL` from any client (psycopg, DBeaver, dbt, the Data API), asynchronous like Redshift: the model trains in a container and `svv_ml_model_info` moves from `TRAINING` to `Model is Ready`; the prediction function runs in-DB. | Needs Docker (the engine mounts `/var/run/docker.sock`); numeric features only (`PREPROCESSORS 'none'`); pure-Python prediction function. |
@@ -205,8 +205,8 @@ names as written too.
 does redshift-local: `CREATE USER`, `CREATE GROUP` with `ALTER GROUP ... ADD USER`,
 and Redshift's role-based access control: `CREATE ROLE`, `GRANT ROLE r TO user`,
 `GRANT ROLE r TO ROLE r2`, `REVOKE ROLE`, `DROP ROLE r [ FORCE | RESTRICT ]` (a
-role still granted, or holding another, drops only with `FORCE`), and `TO ROLE r` as the grantee of a
-privilege or a default privilege. Underneath they are all PostgreSQL roles; a
+role still granted, or holding another, drops only with `FORCE`), and `TO ROLE r`
+as the grantee of a privilege or a default privilege. Underneath they are all PostgreSQL roles; a
 Redshift role is one that can't log in and is marked as a role, so `pg_group` lists
 only real groups, as on Redshift, and an ACL string prefixes only a group.
 
@@ -520,8 +520,9 @@ DROP TABLE lake.orders;  -- removes the catalog entry; the files stay
   and ignored** (the bundled wire proxy strips it before the parser), and
   `varchar(max)` becomes `varchar(65535)`, as Redshift stores it, so awswrangler
   `to_sql`, dbt physical configs, and dlt's Redshift destination all work. It has no storage effect on
-  the PostgreSQL engine. Late-binding views and `VARBYTE` are still
-  unsupported.
+  the PostgreSQL engine. A late-binding view (`WITH NO SCHEMA BINDING`) is created
+  as an ordinary view: its tables must exist when it's made, and dropping one
+  takes `CASCADE`. `VARBYTE` is still unsupported.
 - It's a row-store PostgreSQL, not columnar: no Redshift-style column compression
   / zone maps / sort-key ordering. Query **results** are faithful; storage and
   performance characteristics are not.

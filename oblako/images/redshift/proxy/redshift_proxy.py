@@ -227,6 +227,16 @@ _PG_GROUP_SUB = (
     "'pg_authid'), '') NOT LIKE 'oblako:redshift-role%') AS pg_group"
 )
 
+# Redshift's late-binding view, CREATE VIEW ... WITH NO SCHEMA BINDING, isn't bound
+# to the tables it reads. PostgreSQL has no such view, so the clause is dropped and
+# the view is an ordinary one: created, granted and read as on Redshift, but bound
+# (its tables must exist, and dropping one needs CASCADE).
+_NO_SCHEMA_BINDING = re.compile(
+    r"(?is)^(\s*create\s+(?:or\s+replace\s+)?view\b.*?)\s+with\s+no\s+schema\s+binding"
+    r"(\s*;?\s*)$"
+)
+
+
 # Redshift has no CONNECT privilege: GRANT or REVOKE CONNECT ON DATABASE is a
 # syntax error there, where PostgreSQL would accept it (and the SVV views would
 # never show it). The statement becomes a DO block raising Redshift's error.
@@ -563,6 +573,8 @@ def rewrite_sql(sql: str) -> str:
     s = _VARCHAR_MAX.sub("varchar(65535)", s)
     s = _CREATEUSER.sub(lambda m: "NOSUPERUSER" if m.group(1) else "SUPERUSER", s)
     s = _PASSWORD_DISABLE.sub("PASSWORD NULL", s)
+    if re.search(r"(?i)\bschema\s+binding\b", s):
+        s = "".join(_NO_SCHEMA_BINDING.sub(r"\1\2", stmt) for stmt in _segments(s))
     if re.search(r"(?i)\bconnect\b", s):
         s = "".join(_refuse_connect(stmt) for stmt in _segments(s))
     if object_privileges is not None and re.search(r"(?i)\b(?:alter|drop)\b", s):

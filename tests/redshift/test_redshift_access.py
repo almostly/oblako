@@ -242,3 +242,20 @@ def test_a_user_drops_what_it_owns(cursor):
         cursor.execute("DROP SCHEMA IF EXISTS acc_own CASCADE")
         cursor.execute("REVOKE CREATE ON DATABASE oblako FROM acc_owner")
         cursor.execute("DROP USER acc_owner")
+
+
+def test_a_late_binding_view_is_created_granted_and_read(cursor):
+    """CREATE VIEW ... WITH NO SCHEMA BINDING works, as on Redshift Serverless."""
+    cursor.execute("DROP SCHEMA IF EXISTS acc_lb CASCADE")
+    cursor.execute("CREATE SCHEMA acc_lb")
+    try:
+        cursor.execute("CREATE TABLE acc_lb.events (id int)")
+        cursor.execute("INSERT INTO acc_lb.events VALUES (1), (2)")
+        cursor.execute(
+            "CREATE VIEW acc_lb.v AS SELECT id FROM acc_lb.events WITH NO SCHEMA BINDING"
+        )
+        cursor.execute("GRANT SELECT ON acc_lb.v TO PUBLIC")
+        cursor.execute("SELECT count(*) FROM acc_lb.v")
+        assert cursor.fetchone() == (2,)
+    finally:
+        cursor.execute("DROP SCHEMA acc_lb CASCADE")
