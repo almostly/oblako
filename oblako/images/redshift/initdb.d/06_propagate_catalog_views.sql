@@ -1,7 +1,7 @@
 -- Install the Redshift catalog views into every database a client can reach, not
 -- just POSTGRES_DB. Tools that manage a cluster rather than one database walk
--- pg_database and reconnect per entry (redtape's export does), so a database
--- without the compat layer fails on the first Redshift-only view or function.
+-- pg_database and reconnect per entry, so a database without the compat layer
+-- fails on the first Redshift-only view or function.
 --
 --   template1  so databases created later (e.g. Redshift's conventional `dev`)
 --              inherit them.

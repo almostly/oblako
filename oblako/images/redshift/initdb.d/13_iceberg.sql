@@ -240,7 +240,7 @@ SELECT
     e.databasename,
     NULL::text AS esoptions,
     n.nspowner AS esowner,
-    -- external-schema kind; NULL => local (redtape reads it)
+    -- external-schema kind, as Redshift reports it; NULL => local
     1::smallint AS eskind
 FROM pg_oblako.external_schemas e
 JOIN pg_namespace n ON n.nspname = e.schemaname;

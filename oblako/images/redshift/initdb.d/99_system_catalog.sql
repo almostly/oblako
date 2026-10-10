@@ -56,6 +56,13 @@ BEGIN
     -- result; oblako's copy in public was never reachable unqualified.
     DROP FUNCTION IF EXISTS public.like_escape(text, text);
 
+    -- The empty data-sharing / external-schema set-functions are gone; volumes from
+    -- before still hold them, in public or already in pg_catalog.
+    DROP FUNCTION IF EXISTS public.pg_get_all_external_schemas();
+    DROP FUNCTION IF EXISTS public.pg_get_shared_redshift_schemas();
+    DROP FUNCTION IF EXISTS pg_catalog.pg_get_all_external_schemas();
+    DROP FUNCTION IF EXISTS pg_catalog.pg_get_shared_redshift_schemas();
+
     IF to_regtype('public.super') IS NOT NULL AND to_regtype('pg_catalog.super') IS NULL THEN
         ALTER DOMAIN public.super SET SCHEMA pg_catalog;
     END IF;
@@ -122,9 +129,7 @@ BEGIN
         'oblako_ml_show_models()',
         'oblako_node_rows(regclass)',
         'oblako_unload_to_s3(text, text, text, text)',
-        'pg_get_all_external_schemas()',
         'pg_get_late_binding_view_cols()',
-        'pg_get_shared_redshift_schemas()',
         'redshift_acl(aclitem[], text)',
         'sysdate()',
         'trunc(timestamp without time zone)'

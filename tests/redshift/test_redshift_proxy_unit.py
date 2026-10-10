@@ -234,13 +234,13 @@ def test_server_version_parameter_status_rewritten(monkeypatch):
     )
 
 
-# --- redtape / access-management compat (see tests/redshift/test_redshift_redtape.py) ---
+# --- access-management compat (see tests/redshift/test_redshift_access.py) ---
 
 
 def test_usecatupd_neutralized():
     """Bare pg_user.usecatupd (dropped from PG >= 9.5) is answered as a literal.
 
-    redtape's user introspection selects it; the column name is preserved.
+    Redshift's pg_user has it; the column name is preserved.
     """
     q = (
         "SELECT usename, usesysid, usecreatedb, usesuper, usecatupd, valuntil, "
@@ -279,7 +279,7 @@ def test_pg_group_filters_predefined_roles():
 
 
 def test_acl_array_to_string_becomes_redshift_acl():
-    """redtape's three ACL reads are pointed at redshift_acl (adds "group ")."""
+    """ACL reads over relacl, nspacl and datacl point at redshift_acl (adds "group ")."""
     for expr in (
         "SELECT array_to_string(pgc.relacl, ','::text)::TEXT AS table_acl",
         "SELECT array_to_string(pgn.nspacl, (',')::text)::TEXT AS schema_acl",

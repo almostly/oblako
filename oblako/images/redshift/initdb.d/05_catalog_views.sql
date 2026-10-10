@@ -107,7 +107,7 @@ SELECT
     e.databasename,
     NULL::text AS esoptions,
     n.nspowner AS esowner,
-    -- external-schema kind; NULL => local (redtape reads it)
+    -- external-schema kind, as Redshift reports it; NULL => local
     1::smallint AS eskind
 FROM pg_oblako.external_schemas e
 JOIN pg_namespace n ON n.nspname = e.schemaname;
@@ -145,29 +145,14 @@ CREATE OR REPLACE FUNCTION format_encoding(integer)
 CREATE OR REPLACE FUNCTION pg_get_late_binding_view_cols()
     RETURNS SETOF record LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$;
 
--- Access-management compat: the below let Redshift access tools (e.g. redtape,
--- which manages users/groups/grants as code) introspect on oblako unchanged.
-
--- LIKE_ESCAPE, which redtape's table introspection uses to flag temp schemas, is
--- PostgreSQL's own pg_catalog.like_escape(text, text) and needs nothing here.
-
--- PG_GET_SHARED_REDSHIFT_SCHEMAS / PG_GET_ALL_EXTERNAL_SCHEMAS: Redshift data-
--- sharing and external (Spectrum) schema catalogs. oblako has neither, so both
--- are empty. RETURNS SETOF record, so callers supply the column list (redtape's
--- schema introspection UNION-ALLs these in). Mirrors pg_get_late_binding_view_cols.
-CREATE OR REPLACE FUNCTION pg_get_shared_redshift_schemas()
-    RETURNS SETOF record LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$;
-
-CREATE OR REPLACE FUNCTION pg_get_all_external_schemas()
-    RETURNS SETOF record LANGUAGE plpgsql AS $$ BEGIN RETURN; END $$;
-
 -- redshift_acl (Redshift-style ACL strings) is defined in 14_redshift_identities.sql,
 -- beside the identity model it depends on.
 
 -- Own the public schema by the admin user. PostgreSQL 15+ owns public by the
 -- pg_database_owner predefined role, but Redshift has no such role: schemas are
--- owned by real users, and tools that map a schema's owner to a user (redtape)
--- fail on an owner that isn't in pg_user. CURRENT_USER is the bootstrap admin.
+-- owned by real users, and access tools that map a schema's owner to a user
+-- (pgsesame joins owners to pg_user) find nobody for an owner that isn't one.
+-- CURRENT_USER is the bootstrap admin.
 ALTER SCHEMA public OWNER TO CURRENT_USER;
 
 -- back to the session defaults, for whoever runs this file next in the session

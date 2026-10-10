@@ -52,7 +52,7 @@ $$;
 -- store the same aclitem, but Redshift keeps users and groups apart and prefixes
 -- a group grantee: `group analysts=r/bi_analyst`. PostgreSQL unified roles and
 -- groups in 8.1, so the identical grant reads back `analysts=r/bi_analyst`. Access
--- tools that parse the ACL string (redtape) then file the group as a user, see the
+-- tools that parse the ACL string then file the group as a user, see the
 -- group holding nothing, and re-plan the same GRANTs on every run: the apply never
 -- converges. Prefixing group grantees here makes the parse agree with Redshift.
 --

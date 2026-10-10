@@ -34,7 +34,7 @@ _INTEGRATION_FILES = {
     "tests/bedrock/test_bedrock_openrouter_live.py",
     "tests/redshift/test_redshift.py",
     "tests/redshift/test_redshift_catalog.py",
-    "tests/redshift/test_redshift_redtape.py",
+    "tests/redshift/test_redshift_access.py",
     "tests/redshift/test_redshift_data.py",
     "tests/redshift/test_redshift_serverless.py",
     "tests/redshift/test_redshift_copy_unload.py",

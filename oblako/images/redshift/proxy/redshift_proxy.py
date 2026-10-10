@@ -188,8 +188,7 @@ _VARCHAR_MAX = re.compile(r"(?i)\b(?:character\s+varying|varchar)\s*\(\s*max\s*\
 
 # Redshift CREATE USER ... CREATEUSER (a superuser-ish privilege) -> PostgreSQL
 # SUPERUSER, and ALTER USER ... NOCREATEUSER -> NOSUPERUSER. Matches the one-word
-# keywords, not the two-word "CREATE USER". redtape emits CREATEUSER for a
-# superuser in its access-management specs.
+# keywords, not the two-word "CREATE USER".
 _CREATEUSER = re.compile(r"(?i)\b(no)?createuser\b")
 
 # Redshift CREATE/ALTER USER ... PASSWORD DISABLE -> PostgreSQL PASSWORD NULL.
@@ -205,7 +204,7 @@ _CREATEUSER = re.compile(r"(?i)\b(no)?createuser\b")
 _PASSWORD_DISABLE = re.compile(r"(?i)\bpassword\s+disable\b")
 
 # Hide PostgreSQL's predefined pg_* roles from pg_catalog.pg_group, so Redshift
-# access tools (redtape) see only real groups (Redshift has no pg_* roles). Wrap
+# access tools (pgsesame) see only real groups (Redshift has no pg_* roles). Wrap
 # the table in a filtered subquery: re.sub does not re-scan its replacement, so the
 # inner pg_catalog.pg_group is not itself rewritten (no recursion, no stored view
 # that the catalog tests would re-create through the proxy into a self-reference).
@@ -267,8 +266,8 @@ def _rewrite_roles(stmt: str) -> str:
 # ACL strings: Redshift prefixes a group grantee (`group analysts=r/bi_analyst`),
 # PostgreSQL does not (`analysts=r/bi_analyst`), because roles and groups are
 # unified. Clients parse that string, so without the prefix a group grant reads as a
-# user grant: redtape then files the group as a user, sees it holding nothing, and
-# re-plans the same GRANTs forever. Point any array_to_string over an ACL array at
+# user grant: an access tool then files the group as a user, sees it holding
+# nothing, and re-plans the same GRANTs forever. Point any array_to_string over an ACL array at
 # redshift_acl(), which takes the same two arguments and adds the prefix (see
 # initdb.d/05_catalog_views.sql). Only the function name is replaced, so the
 # arguments and any surrounding cast are left as written.
@@ -279,7 +278,7 @@ def _rewrite_roles(stmt: str) -> str:
 # reader gets the Redshift rendering, which is what the real cluster returns them.
 #
 # Ungated: an array_to_string over an *acl column is specific enough on its own, and
-# redtape's tables query carries none of the catalog markers below.
+# an ACL read need not carry any of the catalog markers below.
 _ACL_TO_STRING = re.compile(
     r"(?i)\b(?:pg_catalog\s*\.\s*)?array_to_string\s*\(\s*"
     r'(?=[\w".]*\b(?:rel|nsp|dat)acl\b)'
@@ -317,8 +316,8 @@ _CATALOG_REWRITES = [
     (re.compile(r"(?i)\b\w+\.attsortkeyord\b"), "0"),
     # pre-PG12 pg_attrdef.adsrc, referenced unqualified (not <alias>.adsrc).
     (re.compile(r'(?i)(?<![."\w])adsrc\b'), "NULL::text AS adsrc"),
-    # pg_user.usecatupd, dropped from PG >= 9.5; redtape's user introspection
-    # selects it bare from pg_catalog.pg_user. Answer as a neutral literal.
+    # pg_user.usecatupd, a Redshift column PostgreSQL dropped in 9.5, selected
+    # bare from pg_catalog.pg_user. Answer as a neutral literal.
     (re.compile(r'(?i)(?<![."\w])usecatupd\b'), "false AS usecatupd"),
     # output-column aliases used in WHERE -> the real columns they alias.
     (re.compile(r"(?i)\band\s+schema\s*=\s*('[^']*')"), r"AND n.nspname = \1"),
