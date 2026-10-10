@@ -203,3 +203,13 @@ def test_compat_layer_reaches_the_postgres_database():
         )
         assert cur.fetchone() == (True, True)
     conn.close()
+
+
+def test_connect_on_database_is_a_syntax_error(cursor):
+    """As on Redshift Serverless: there is no CONNECT privilege to grant or revoke."""
+    for stmt in (
+        "GRANT CONNECT ON DATABASE oblako TO PUBLIC",
+        "REVOKE CONNECT ON DATABASE oblako FROM PUBLIC",
+    ):
+        with pytest.raises(psycopg2.errors.SyntaxError, match='near "DATABASE"'):
+            cursor.execute(stmt)

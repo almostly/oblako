@@ -215,6 +215,29 @@ _PG_GROUP_SUB = (
     "'pg_authid'), '') NOT LIKE 'oblako:redshift-role%') AS pg_group"
 )
 
+# Redshift has no CONNECT privilege: GRANT or REVOKE CONNECT ON DATABASE is a
+# syntax error there, where PostgreSQL would accept it (and the SVV views would
+# never show it). The statement becomes a DO block raising Redshift's error.
+_CONNECT_ON_DATABASE = re.compile(
+    r"(?is)^\s*(grant|revoke)\b(?:(?!\bon\b).)*\bconnect\b.*?\bon\s+database\b"
+)
+
+
+def _refuse_connect(stmt: str) -> str:
+    """Return a statement raising Redshift's syntax error for CONNECT ON DATABASE."""
+    if not (m := _CONNECT_ON_DATABASE.match(stmt)):
+        return stmt
+    message = (
+        f'syntax error at or near "DATABASE" in context "{m.group(1).upper()} '
+        f'CONNECT ON DATABASE"'
+    ).replace("'", "''")
+    semi = ";" if stmt.rstrip().endswith(";") else ""
+    return (
+        f"DO $oblako_connect$ BEGIN RAISE EXCEPTION '{message}' "
+        f"USING ERRCODE = 'syntax_error'; END $oblako_connect${semi}"
+    )
+
+
 # Redshift roles (RBAC). Redshift keeps roles apart from users and groups;
 # PostgreSQL has only roles. A Redshift role is created here as a role that can't
 # log in, marked with a shared comment naming its creator, which is how
@@ -503,6 +526,8 @@ def rewrite_sql(sql: str) -> str:
     s = _VARCHAR_MAX.sub("varchar(65535)", s)
     s = _CREATEUSER.sub(lambda m: "NOSUPERUSER" if m.group(1) else "SUPERUSER", s)
     s = _PASSWORD_DISABLE.sub("PASSWORD NULL", s)
+    if re.search(r"(?i)\bconnect\b", s):
+        s = "".join(_refuse_connect(stmt) for stmt in _segments(s))
     if re.search(r"(?i)\brole\b", s):
         s = "".join(_rewrite_roles(stmt) for stmt in _segments(s))
     s = _PG_GROUP.sub(_PG_GROUP_SUB, s)

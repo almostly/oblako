@@ -378,3 +378,25 @@ def test_nocreateuser_becomes_nosuperuser():
         'ALTER USER "IAM:ops" NOSUPERUSER'
     )
     assert rewrite_sql("ALTER USER ops CREATEUSER") == "ALTER USER ops SUPERUSER"
+
+
+def test_connect_on_database_is_a_syntax_error():
+    """Redshift has no CONNECT privilege: GRANT/REVOKE CONNECT ON DATABASE raise."""
+    for stmt in (
+        "GRANT CONNECT ON DATABASE dev TO alice;",
+        "revoke connect on database dev from alice",
+        "GRANT CREATE, CONNECT ON DATABASE dev TO bob",
+    ):
+        out = rewrite_sql(stmt)
+        assert out.startswith("DO $oblako_connect$")
+        assert "syntax_error" in out
+
+
+def test_connect_elsewhere_is_untouched():
+    """A user, schema or string named connect is not a CONNECT grant."""
+    for stmt in (
+        "GRANT SELECT ON t TO connect_user",
+        "GRANT USAGE ON SCHEMA connect TO x",
+        "SELECT 'connect on database' FROM t",
+    ):
+        assert rewrite_sql(stmt) == stmt

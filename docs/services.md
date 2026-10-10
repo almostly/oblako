@@ -184,7 +184,8 @@ SESAME_DSN="host=localhost port=5439 user=oblako password=oblako dbname=oblako s
 
 The image answers the catalog pieces PostgreSQL lacks (`pg_user.usecatupd`,
 `svv_external_schemas.eskind`), accepts Redshift's `CREATEUSER` and `PASSWORD
-DISABLE`, and owns `public` by a real user (PostgreSQL 15+ owns it by
+DISABLE`, refuses `GRANT CONNECT ON DATABASE` with Redshift's syntax error (Redshift
+has no CONNECT privilege), and owns `public` by a real user (PostgreSQL 15+ owns it by
 `pg_database_owner`, a role Redshift has no concept of, so a tool mapping a schema's
 owner to a user would find nobody).
 
