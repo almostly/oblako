@@ -11,6 +11,35 @@ versioned entries below.
 
 ## Unreleased
 
+## v0.3.0 (2026-10-10)
+
+Redshift parity from a run of pgsesame against Redshift Serverless: 127-byte names,
+ALTER and DROP privileges, the system roles, quoted names folded as Redshift folds
+them, Data API sessions; redtape compat gives way to pgsesame.
+
+### Added
+
+- **Redshift**: names run to 127 bytes as on Redshift, the engine built with NAMEDATALEN 128; a data directory with 63-byte names is dumped and restored on first start (kept in `oblako-names64-backup/`); the multi-node variant isn't moved
+- **Redshift**: ALTER and DROP privileges on tables, views and schemas, granted, read back from the SVV views and enforced as on Redshift Serverless
+- **Redshift**: the system-defined roles sys:monitor, sys:operator, sys:dba, sys:superuser and sys:secadmin; secadmin manages masking, the rest read the grant views, dba drops
+- **Redshift**: DROP ROLE ... FORCE | RESTRICT; RESTRICT, the default, refuses a role still granted or holding another, as on Redshift
+- **Redshift**: CREATE VIEW ... WITH NO SCHEMA BINDING, as an ordinary view: created, granted and read as on Redshift, bound underneath
+- **Redshift Data**: sessions (SessionKeepAliveSeconds, SessionId) share one connection and its transaction, and BatchExecuteStatement runs as one transaction, as on AWS
+
+### Changed
+
+- **Redshift**: quoted object names fold to lower case unless the session sets enable_case_sensitive_identifier, as on Redshift; user names keep their case
+- **Redshift**: a role attached to a masking policy at PUBLIC's priority replaces PUBLIC's attachment, as on Redshift Serverless
+- **Redshift**: GRANT and REVOKE CONNECT ON DATABASE are a syntax error, as on Redshift Serverless
+- **Redshift**: svv_user_grants shows a non-superuser only its own roles, and svv_role_grants the roles it has or owns, as on Redshift
+- **Redshift**: a user who isn't a superuser can drop its own tables, views and schemas; the drop event triggers tidy their catalogs as their owner
+- **Redshift Data**: BatchExecuteStatement refuses more than 40 statements, as AWS does
+- **Docs**: access management as code with pgsesame, and its diagram; every function and class in the package has a docstring, enforced by a test; US spelling
+
+### Removed
+
+- **Redshift**: redtape compat; the access-management catalog checks follow pgsesame's reads
+
 ## v0.2.0 (2026-10-07)
 
 Redshift's identities, privilege views and dynamic data masking, checked against
