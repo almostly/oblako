@@ -54,6 +54,7 @@ ENGINES: dict[str, tuple[str, int]] = {
 
 
 def _pidfile(name: str) -> Path:
+    """Return the pid file for an engine."""
     return STATE / "run" / f"{name}.pid"
 
 

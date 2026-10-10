@@ -57,12 +57,14 @@ _lock = threading.RLock()
 
 
 def _docker():
+    """Return a Docker client."""
     from oblako.services.backends import docker_client
 
     return docker_client()
 
 
 def _image() -> str:
+    """Return the PostgreSQL image instances run."""
     from oblako.services.rds import POSTGRES_IMAGE
 
     return POSTGRES_IMAGE
@@ -79,6 +81,7 @@ def container_name(instance_id: str) -> str:
 
 
 def _volume(instance_id: str) -> str:
+    """Return the name of the instance's data volume."""
     return f"oblako-rds-{instance_id}-data"
 
 
@@ -98,6 +101,7 @@ def get(instance_id: str) -> dict | None:
 
 
 def _save(records: dict[str, dict]) -> None:
+    """Write all instance records to the state file atomically."""
     STATE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE.with_suffix(".tmp")
     tmp.write_text(json.dumps(records, indent=1))
@@ -121,6 +125,7 @@ def _update(instance_id: str, create: bool = False, **fields) -> dict:
 
 
 def _drop(instance_id: str) -> None:
+    """Remove an instance's record."""
     with _lock:
         records = load()
         records.pop(instance_id, None)
@@ -131,6 +136,7 @@ def _in_background(instance_id: str, work, *args) -> None:
     """Run ``work`` in a thread; mark the instance available, or failed with the error."""
 
     def run():
+        """Run the work, then mark the instance available, failed, or clean up if deleted."""
         try:
             work(instance_id, *args)
             if get(instance_id) is not None:
@@ -148,12 +154,14 @@ def _in_background(instance_id: str, work, *args) -> None:
 # Docker plumbing
 # ---------------------------------------------------------------------------
 def _free_port() -> int:
+    """Return a free TCP port on the host."""
     with socket.socket() as s:
         s.bind(("", 0))
         return s.getsockname()[1]
 
 
 def _network(client):
+    """Return the oblako-rds Docker network, creating it if missing."""
     from docker.errors import NotFound
 
     try:
@@ -163,6 +171,7 @@ def _network(client):
 
 
 def _init_dir() -> Path:
+    """Write the replication init script into the initdb folder; return the folder."""
     INITDB.mkdir(parents=True, exist_ok=True)
     script = INITDB / "10-replication.sh"
     script.write_text(_INIT_SCRIPT)
@@ -171,6 +180,7 @@ def _init_dir() -> Path:
 
 
 def _remove_container(client, name: str) -> None:
+    """Force-remove a container, if it exists."""
     from docker.errors import NotFound
 
     try:
@@ -225,6 +235,7 @@ def _wait_ready(container, port: int, timeout: float = 180.0) -> None:
 
 
 def _psql(instance_id: str, record: dict, sql: str) -> str:
+    """Run ``sql`` with psql inside the instance's container; return its output."""
     container = _docker().containers.get(container_name(instance_id))
     result = container.exec_run(
         [
@@ -252,6 +263,7 @@ def _psql(instance_id: str, record: dict, sql: str) -> str:
 # Containers
 # ---------------------------------------------------------------------------
 def _primary_spec(instance_id: str, record: dict) -> dict:
+    """Return the container spec of a primary: postgres settings, env and volumes."""
     port = record["port"]
     wal_level = "logical" if record["logical"] else "replica"
     return {
@@ -279,6 +291,7 @@ def _primary_spec(instance_id: str, record: dict) -> dict:
 
 
 def _replica_spec(instance_id: str, record: dict) -> dict:
+    """Return the container spec of a replica that streams from its source."""
     source = get(record["source"])
     if source is None:
         raise RuntimeError(f"source instance {record['source']} is gone")
@@ -297,6 +310,7 @@ def _replica_spec(instance_id: str, record: dict) -> dict:
 
 
 def _start(instance_id: str) -> None:
+    """Start the instance's container as a primary or replica; record its version."""
     record = get(instance_id)
     if record is None:
         return
@@ -363,6 +377,7 @@ def create_replica(instance_id: str, source_id: str) -> dict:
 
 
 def _promote(instance_id: str) -> None:
+    """Promote the replica with pg_promote and record it as a primary."""
     record = get(instance_id)
     if record is None:
         return
@@ -399,6 +414,7 @@ def delete(instance_id: str) -> None:
 
 
 def _remove(instance_id: str) -> None:
+    """Remove the instance's container and data volume."""
     from docker.errors import NotFound
 
     client = _docker()

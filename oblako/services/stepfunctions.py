@@ -84,6 +84,7 @@ class StepFunctionsService(Service, BotoService):
         return resp["executionArn"]
 
     def _health_check(self) -> bool:
+        """Return True if Step Functions Local lists its state machines."""
         try:
             resp = httpx.post(
                 self.endpoint_url,

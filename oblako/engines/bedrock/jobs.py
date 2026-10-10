@@ -52,9 +52,11 @@ class ModelInvocationJob:
         self.details["status"] = "Stopping"
 
     def _touch(self) -> None:
+        """Stamp the job's ``lastModifiedTime`` with the current UTC time."""
         self.details["lastModifiedTime"] = datetime.datetime.now(datetime.timezone.utc)
 
     def _run(self) -> None:
+        """Invoke the model on each S3 input record and write the outputs."""
         self.details["status"] = "InProgress"
         self._touch()
         try:

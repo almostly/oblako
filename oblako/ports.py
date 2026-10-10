@@ -66,6 +66,7 @@ NOTEBOOK = 8888
 # variable at import, so `oblako up`, `oblako configure` (which writes the profile's
 # endpoints) and the engines agree; set it in your shell profile to keep it.
 def _apply_overrides() -> None:
+    """Apply OBLAKO_PORT_<NAME> environment overrides to the port constants."""
     import os
 
     names = {k for k, v in globals().items() if k.isupper() and isinstance(v, int)}

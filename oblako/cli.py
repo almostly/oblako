@@ -355,6 +355,7 @@ def cmd_trust(args):
 # Helpers
 # -----------------------------------------------------------------------------------------------
 def _get_service(oblako: Oblako, name: str):
+    """Return the service named on the command line, or exit if it is unknown."""
     services = {
         "bedrock": oblako.bedrock,
         "ollama": oblako.bedrock,  # alias (engine)

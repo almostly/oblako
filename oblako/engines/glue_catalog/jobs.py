@@ -39,12 +39,14 @@ _lock = threading.RLock()
 # State: {"jobs": {name: job}, "runs": {name: [run, ...]}}
 # ---------------------------------------------------------------------------
 def _load() -> dict:
+    """Return the jobs state from disk."""
     if STATE.exists():
         return json.loads(STATE.read_text())
     return {"jobs": {}, "runs": {}}
 
 
 def _save(state: dict) -> None:
+    """Write the jobs state to disk atomically."""
     STATE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=1, default=str))
@@ -52,6 +54,7 @@ def _save(state: dict) -> None:
 
 
 def _require_job(state: dict, name: str) -> dict:
+    """Return a job, raising EntityNotFoundException if there is none."""
     job = state["jobs"].get(name)
     if job is None:
         raise _not_found(f"Job {name} not found.")
@@ -59,6 +62,7 @@ def _require_job(state: dict, name: str) -> dict:
 
 
 def _update_run(job_name: str, run_id: str, **fields) -> None:
+    """Set fields on a job run and its LastModifiedOn."""
     with _lock:
         state = _load()
         for run in state["runs"].get(job_name, []):
@@ -88,6 +92,7 @@ _JOB_FIELDS = (
 
 @_action("AWSGlue.CreateJob")
 def _create_job(body):
+    """CreateJob: store a new job definition."""
     name = body["Name"]
     if not (body.get("Command") or {}).get("ScriptLocation"):
         raise GlueError("InvalidInputException", "Command.ScriptLocation is required.")
@@ -107,21 +112,25 @@ def _create_job(body):
 
 @_action("AWSGlue.GetJob")
 def _get_job(body):
+    """GetJob: return one job by name."""
     return {"Job": _require_job(_load(), body["JobName"])}
 
 
 @_action("AWSGlue.GetJobs")
 def _get_jobs(_body):
+    """GetJobs: return every job."""
     return {"Jobs": sorted(_load()["jobs"].values(), key=lambda j: j["Name"])}
 
 
 @_action("AWSGlue.ListJobs")
 def _list_jobs(_body):
+    """ListJobs: return the job names."""
     return {"JobNames": sorted(_load()["jobs"])}
 
 
 @_action("AWSGlue.UpdateJob")
 def _update_job(body):
+    """UpdateJob: change a job's definition."""
     name = body["JobName"]
     with _lock:
         state = _load()
@@ -135,6 +144,7 @@ def _update_job(body):
 
 @_action("AWSGlue.DeleteJob")
 def _delete_job(body):
+    """DeleteJob: remove a job and its runs."""
     name = body["JobName"]
     with _lock:
         state = _load()
@@ -149,6 +159,7 @@ def _delete_job(body):
 # ---------------------------------------------------------------------------
 @_action("AWSGlue.StartJobRun")
 def _start_job_run(body):
+    """StartJobRun: record a run and execute the job's script in the background."""
     name = body["JobName"]
     with _lock:
         state = _load()
@@ -188,6 +199,7 @@ def _start_job_run(body):
 
 
 def _find_run(name: str, run_id: str) -> dict:
+    """Return one run of a job, raising EntityNotFoundException if there is none."""
     state = _load()
     _require_job(state, name)
     for run in state["runs"].get(name, []):
@@ -198,11 +210,13 @@ def _find_run(name: str, run_id: str) -> dict:
 
 @_action("AWSGlue.GetJobRun")
 def _get_job_run(body):
+    """GetJobRun: return one job run by id."""
     return {"JobRun": _find_run(body["JobName"], body["RunId"])}
 
 
 @_action("AWSGlue.GetJobRuns")
 def _get_job_runs(body):
+    """GetJobRuns: return a job's runs, newest first."""
     state = _load()
     _require_job(state, body["JobName"])
     return {"JobRuns": state["runs"].get(body["JobName"], [])}
@@ -220,6 +234,7 @@ def _argv(name: str, run_id: str, arguments: dict) -> list[str]:
 
 
 def _read_script(location: str) -> str:
+    """Return the job script's text from oblako's S3."""
     from oblako.services.boto import client
 
     bucket, _, key = location.removeprefix("s3://").partition("/")
@@ -263,6 +278,7 @@ def _publish_logs(run_id: str, stdout: str, stderr: str) -> None:
 
 
 def _execute(name: str, run_id: str, location: str, arguments: dict, timeout: int):
+    """Run the job's script in the Glue container and record how the run ended."""
     from oblako.services.glue import GlueService
 
     started = time.time()

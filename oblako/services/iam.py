@@ -60,6 +60,7 @@ class IamService(BotoService):
 
     @staticmethod
     def _statements(document) -> list:
+        """Return a policy document's statements as a list."""
         if isinstance(document, dict):
             stmts = document.get("Statement", [])
             return stmts if isinstance(stmts, list) else [stmts]

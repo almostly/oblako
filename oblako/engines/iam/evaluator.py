@@ -23,6 +23,7 @@ IMPLICIT_DENY = "ImplicitDeny"
 
 
 def _as_list(value) -> list:
+    """Return a policy value as a list (None becomes empty)."""
     if value is None:
         return []
     return list(value) if isinstance(value, list) else [value]
@@ -34,10 +35,12 @@ def _glob(pattern: str, value: str) -> bool:
 
 
 def _action_matches(statement_action, action: str) -> bool:
+    """Return True if the action matches any of the statement's Action patterns."""
     return any(_glob(p, action) for p in _as_list(statement_action))
 
 
 def _resource_matches(statement_resource, resource: str) -> bool:
+    """Return True if the resource matches the statement's Resource (or it has none)."""
     patterns = _as_list(statement_resource)
     if not patterns:  # e.g. trust policies omit Resource
         return True

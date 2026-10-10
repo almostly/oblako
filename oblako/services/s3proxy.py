@@ -258,6 +258,7 @@ class S3ProxyService(Service):
         )
 
     def _health_check(self) -> bool:
+        """Return True if S3 answers on its endpoint."""
         try:
             resp = httpx.get(self.endpoint_url, timeout=3.0)
             return resp.status_code in (200, 403)

@@ -35,12 +35,14 @@ from oblako.engines.bedrock.jobs import JobStore, new_job_details
 
 
 def _jsonable(obj):
+    """Encode datetimes as unix epoch seconds for ``json.dumps``."""
     if isinstance(obj, datetime.datetime):
         return obj.timestamp()  # rest-json timestamps are unix epoch
     raise TypeError(f"not JSON serializable: {type(obj)}")
 
 
 def _json(payload: dict, status: int = 200) -> Response:
+    """Return a JSON response, encoding datetimes as unix epoch."""
     return Response(
         json.dumps(payload, default=_jsonable),
         status_code=status,
@@ -51,6 +53,7 @@ def _json(payload: dict, status: int = 200) -> Response:
 def _error(
     message: str, error_type: str = "InternalServerException", status: int = 500
 ) -> Response:
+    """Return a Bedrock-style error response."""
     return JSONResponse(
         {"message": message, "__type": error_type},
         status_code=status,
@@ -59,7 +62,10 @@ def _error(
 
 
 def _s3_factory(region: str):
+    """Return a factory for S3 clients against oblako's local S3."""
+
     def factory():
+        """Create an S3 client for the local S3 endpoint."""
         import boto3
         from botocore.config import Config
 
@@ -107,6 +113,7 @@ class BedrockRuntimeApp:
         body = await request.body()
 
         def frames():
+            """Yield the model's response chunks as event-stream frames."""
             try:
                 for chunk in self.adapter.invoke_model_stream(model_id, body):
                     inner = json.dumps(chunk).encode()
@@ -133,6 +140,7 @@ class BedrockRuntimeApp:
             return _error("Invalid JSON body", "ValidationException", 400)
 
         def frames():
+            """Yield the Converse events as event-stream frames."""
             try:
                 for event_type, payload in self.adapter.converse_stream(
                     model_id=model_id,
@@ -327,6 +335,7 @@ def create_app(
     guardrails = GuardrailApp(GuardrailStore(region=region))
 
     async def health(_request: Request) -> Response:
+        """Report that the server is up."""
         return JSONResponse({"status": "ok"})
 
     return Starlette(

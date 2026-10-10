@@ -110,6 +110,7 @@ class BedrockAdapter:
         return messages
 
     def _format_invoke_response(self, result: dict, model_id: str) -> dict:
+        """Shape a backend result as an Anthropic Messages response."""
         return {
             "id": f"msg_{int(time.time())}",
             "type": "message",
@@ -262,6 +263,7 @@ class BedrockAdapter:
         return self._format_converse_response(result, model_id)
 
     def _format_converse_response(self, result: dict, model_id: str) -> dict:
+        """Shape a backend result as a Bedrock Converse response."""
         input_tokens = result["input_tokens"]
         output_tokens = result["output_tokens"]
         return {

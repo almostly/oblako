@@ -57,6 +57,7 @@ _CLASSIFIER_KINDS = (
 #         "metrics": {name: {...}}}
 # ---------------------------------------------------------------------------
 def _load() -> dict:
+    """Return the crawler state from disk, with every section present."""
     if STATE.exists():
         state = json.loads(STATE.read_text())
     else:
@@ -67,6 +68,7 @@ def _load() -> dict:
 
 
 def _save(state: dict) -> None:
+    """Write the crawler state to disk atomically."""
     STATE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=1, default=str))
@@ -74,6 +76,7 @@ def _save(state: dict) -> None:
 
 
 def _require(state: dict, kind: str, name: str) -> dict:
+    """Return a crawler or classifier, raising EntityNotFoundException if there is none."""
     item = state[kind].get(name)
     if item is None:
         label = "Crawler" if kind == "crawlers" else "Classifier"
@@ -82,6 +85,7 @@ def _require(state: dict, kind: str, name: str) -> dict:
 
 
 def _update_crawler(name: str, **fields) -> None:
+    """Set fields on a stored crawler, if it still exists."""
     with _lock:
         state = _load()
         if name in state["crawlers"]:
@@ -93,6 +97,7 @@ def _update_crawler(name: str, **fields) -> None:
 # Classifiers
 # ---------------------------------------------------------------------------
 def _classifier_body(body: dict) -> tuple[str, dict]:
+    """Return the request's one classifier kind and its spec."""
     kinds = [k for k in _CLASSIFIER_KINDS if body.get(k)]
     if len(kinds) != 1:
         raise GlueError(
@@ -103,6 +108,7 @@ def _classifier_body(body: dict) -> tuple[str, dict]:
 
 @_action("AWSGlue.CreateClassifier")
 def _create_classifier(body):
+    """CreateClassifier: store a new classifier."""
     kind, spec = _classifier_body(body)
     with _lock:
         state = _load()
@@ -120,6 +126,7 @@ def _create_classifier(body):
 
 @_action("AWSGlue.UpdateClassifier")
 def _update_classifier(body):
+    """UpdateClassifier: merge a classifier's new spec and bump its version."""
     kind, spec = _classifier_body(body)
     with _lock:
         state = _load()
@@ -139,16 +146,19 @@ def _update_classifier(body):
 
 @_action("AWSGlue.GetClassifier")
 def _get_classifier(body):
+    """GetClassifier: return one classifier by name."""
     return {"Classifier": _require(_load(), "classifiers", body["Name"])}
 
 
 @_action("AWSGlue.GetClassifiers")
 def _get_classifiers(_body):
+    """GetClassifiers: return every classifier."""
     return {"Classifiers": list(_load()["classifiers"].values())}
 
 
 @_action("AWSGlue.DeleteClassifier")
 def _delete_classifier(body):
+    """DeleteClassifier: remove one classifier."""
     with _lock:
         state = _load()
         _require(state, "classifiers", body["Name"])
@@ -177,6 +187,7 @@ _DEFINITION = (
 
 
 def _schedule(expression: str | None) -> dict | None:
+    """Return a crawler's Schedule for a cron expression, or None."""
     if not expression:
         return None
     return {"ScheduleExpression": expression, "State": "SCHEDULED"}
@@ -184,6 +195,7 @@ def _schedule(expression: str | None) -> dict | None:
 
 @_action("AWSGlue.CreateCrawler")
 def _create_crawler(body):
+    """CreateCrawler: store a new crawler in the READY state."""
     name = body["Name"]
     with _lock:
         state = _load()
@@ -216,6 +228,7 @@ def _create_crawler(body):
 
 @_action("AWSGlue.UpdateCrawler")
 def _update_crawler_action(body):
+    """UpdateCrawler: change a READY crawler's definition and bump its version."""
     name = body["Name"]
     with _lock:
         state = _load()
@@ -235,6 +248,7 @@ def _update_crawler_action(body):
 
 @_action("AWSGlue.UpdateCrawlerSchedule")
 def _update_crawler_schedule(body):
+    """UpdateCrawlerSchedule: set or clear a crawler's schedule."""
     with _lock:
         state = _load()
         crawler = _require(state, "crawlers", body["CrawlerName"])
@@ -245,15 +259,18 @@ def _update_crawler_schedule(body):
 
 @_action("AWSGlue.StartCrawlerSchedule")
 def _start_crawler_schedule(body):
+    """StartCrawlerSchedule: set a crawler's schedule to SCHEDULED."""
     return _set_schedule_state(body["CrawlerName"], "SCHEDULED")
 
 
 @_action("AWSGlue.StopCrawlerSchedule")
 def _stop_crawler_schedule(body):
+    """StopCrawlerSchedule: set a crawler's schedule to NOT_SCHEDULED."""
     return _set_schedule_state(body["CrawlerName"], "NOT_SCHEDULED")
 
 
 def _set_schedule_state(name: str, value: str) -> dict:
+    """Set the state of a crawler's schedule, raising NoScheduleException if it has none."""
     with _lock:
         state = _load()
         crawler = _require(state, "crawlers", name)
@@ -266,21 +283,25 @@ def _set_schedule_state(name: str, value: str) -> dict:
 
 @_action("AWSGlue.GetCrawler")
 def _get_crawler(body):
+    """GetCrawler: return one crawler by name."""
     return {"Crawler": _require(_load(), "crawlers", body["Name"])}
 
 
 @_action("AWSGlue.GetCrawlers")
 def _get_crawlers(_body):
+    """GetCrawlers: return every crawler."""
     return {"Crawlers": list(_load()["crawlers"].values())}
 
 
 @_action("AWSGlue.ListCrawlers")
 def _list_crawlers(_body):
+    """ListCrawlers: return the crawler names."""
     return {"CrawlerNames": sorted(_load()["crawlers"])}
 
 
 @_action("AWSGlue.BatchGetCrawlers")
 def _batch_get_crawlers(body):
+    """BatchGetCrawlers: return the named crawlers and the ones not found."""
     crawlers = _load()["crawlers"]
     names = body.get("CrawlerNames") or []
     return {
@@ -291,6 +312,7 @@ def _batch_get_crawlers(body):
 
 @_action("AWSGlue.DeleteCrawler")
 def _delete_crawler(body):
+    """DeleteCrawler: remove a READY crawler and its metrics."""
     name = body["Name"]
     with _lock:
         state = _load()
@@ -307,6 +329,7 @@ def _delete_crawler(body):
 
 @_action("AWSGlue.GetCrawlerMetrics")
 def _get_crawler_metrics(body):
+    """GetCrawlerMetrics: return the last crawl's runtimes and table counts."""
     state = _load()
     names = body.get("CrawlerNameList") or sorted(state["crawlers"])
     out = []
@@ -337,6 +360,7 @@ _STOP: set[str] = set()
 
 @_action("AWSGlue.StartCrawler")
 def _start_crawler(body):
+    """StartCrawler: start a crawl in the background."""
     start(body["Name"])
     return {}
 
@@ -360,6 +384,7 @@ def start(name: str) -> None:
 
 @_action("AWSGlue.StopCrawler")
 def _stop_crawler(body):
+    """StopCrawler: ask a running crawl to stop."""
     name = body["Name"]
     with _lock:
         state = _load()
@@ -379,6 +404,7 @@ class _Stopped(Exception):
 
 
 def _run(name: str) -> None:
+    """Crawl in the background, then record LastCrawl and the metrics."""
     started = time.time()
     crawler = _load()["crawlers"][name]
     status, error, counts = (
@@ -422,6 +448,7 @@ def _run(name: str) -> None:
 
 
 def _check_stop(name: str) -> None:
+    """Raise _Stopped if StopCrawler was called for the crawler."""
     if name in _STOP:
         raise _Stopped()
 
@@ -445,6 +472,7 @@ _TEXT = {
 
 
 def _s3():
+    """Return a boto3 S3 client for oblako's S3."""
     from oblako.services.boto import client
 
     return client("s3", f"http://localhost:{ports.S3}")
@@ -473,6 +501,7 @@ def _list(s3, path: str, exclusions: list[str]) -> list[dict]:
 
 
 def _format_of(key: str, head: bytes) -> str:
+    """Return a file's format (parquet, json or csv) from its key and first bytes."""
     if head.startswith(b"PAR1") or key.endswith(".parquet"):
         return "parquet"
     stripped = head.lstrip()
@@ -482,6 +511,7 @@ def _format_of(key: str, head: bytes) -> str:
 
 
 def _glue_type_of_arrow(t) -> str:
+    """Return the Glue/Hive type for an Arrow type."""
     import pyarrow as pa
 
     if pa.types.is_boolean(t):
@@ -533,6 +563,7 @@ def _value_type(values: list[str]) -> str:
 
 
 def _json_type(value) -> str:
+    """Return the Glue/Hive type for a JSON value."""
     if isinstance(value, bool):
         return "boolean"
     if isinstance(value, int):
@@ -550,6 +581,7 @@ def _json_type(value) -> str:
 
 
 def _csv_settings(classifiers: list[dict]) -> dict:
+    """Return the first CSV classifier's settings, or {}."""
     for c in classifiers:
         if "CsvClassifier" in c:
             return c["CsvClassifier"]
@@ -557,6 +589,7 @@ def _csv_settings(classifiers: list[dict]) -> dict:
 
 
 def _json_path(classifiers: list[dict]) -> str | None:
+    """Return the first JSON classifier's JsonPath, or None."""
     for c in classifiers:
         if "JsonClassifier" in c:
             return c["JsonClassifier"].get("JsonPath")
@@ -655,6 +688,7 @@ def _schema_of(s3, obj: dict, classifiers: list[dict]) -> dict:
 
 
 def _merge_columns(schemas: list[dict]) -> list[dict]:
+    """Return the columns of all schemas, the first type of each name kept."""
     seen: dict[str, str] = {}
     for s in schemas:
         for c in s["columns"]:
@@ -663,6 +697,7 @@ def _merge_columns(schemas: list[dict]) -> list[dict]:
 
 
 def _compatible(a: dict, b: dict) -> bool:
+    """Return True if two schemas have the same format and column names."""
     return a["format"] == b["format"] and [c["Name"] for c in a["columns"]] == [
         c["Name"] for c in b["columns"]
     ]
@@ -708,6 +743,7 @@ def _tables(s3, root: str, objects: list[dict], classifiers: list[dict]) -> list
 
 
 def _table_name(prefix: str, root: str) -> str:
+    """Return the table name for a data folder, with the crawler's prefix."""
     base = (
         root.rstrip("/").rsplit("/", 1)[-1] or root.removeprefix("s3://").split("/")[0]
     )
@@ -836,6 +872,7 @@ def crawl(crawler: dict) -> dict[str, int]:
 
 
 def _add_partitions(database: str, table: str, storage: dict, partitions: dict) -> None:
+    """Register the partitions the table doesn't have yet, 100 at a time."""
     existing = {
         tuple(p["Values"])
         for p in _ACTIONS["AWSGlue.GetPartitions"](
@@ -929,6 +966,7 @@ def due_crawlers(state: dict, now, fired: dict[str, float]) -> list[str]:
 
 
 def _schedule_loop() -> None:
+    """Start scheduled crawlers when their cron matches, every few seconds."""
     import datetime
 
     fired: dict[str, float] = {}

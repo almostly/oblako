@@ -419,14 +419,17 @@ class KubernetesBackend(ContainerBackend):
         self.kubectl = kubectl
 
     def _run(self, *args, stdin: str | None = None) -> subprocess.CompletedProcess:
+        """Run kubectl with the given arguments and capture its output."""
         return subprocess.run(
             [self.kubectl, *args], input=stdin, text=True, capture_output=True
         )
 
     def _ns(self, *args) -> subprocess.CompletedProcess:
+        """Run kubectl in the oblako namespace."""
         return self._run("-n", self.namespace, *args)
 
     def _require_kubectl(self) -> None:
+        """Raise if kubectl is not on the PATH."""
         if shutil.which(self.kubectl) is None:
             raise RuntimeError(
                 "kubectl not found — install it and point it at a cluster (e.g. minikube start)."
@@ -437,6 +440,7 @@ class KubernetesBackend(ContainerBackend):
         self._require_kubectl()
 
     def _ensure_namespace(self) -> None:
+        """Create the oblako namespace if it doesn't exist."""
         if self._run("get", "namespace", self.namespace).returncode != 0:
             self._run("create", "namespace", self.namespace)
 
@@ -477,6 +481,7 @@ class KubernetesBackend(ContainerBackend):
         self._start_port_forward(name, ports)
 
     def _start_port_forward(self, name: str, ports: dict) -> None:
+        """Forward each host port to the service, restarting the forward until it holds."""
         self._stop_port_forward(name)
         procs = []
         for spec, host_port in ports.items():
@@ -493,6 +498,7 @@ class KubernetesBackend(ContainerBackend):
         _port_forwards[name] = procs
 
     def _stop_port_forward(self, name: str) -> None:
+        """Kill the port-forward loops for a service."""
         for proc in _port_forwards.pop(name, []):
             try:
                 os.killpg(
@@ -568,6 +574,7 @@ class AppleContainerBackend(ContainerBackend):
         self._bin: str = found
 
     def _cli(self, *args, check=True):
+        """Run the container CLI with the given arguments and capture its output."""
         return subprocess.run(
             [self._bin, *args], check=check, text=True, capture_output=True
         )
@@ -654,6 +661,7 @@ class AppleContainerBackend(ContainerBackend):
             raise RuntimeError(f"`container run` failed for '{name}':\n{err}") from e
 
     def _items(self):
+        """Return every container the CLI lists, or an empty list if it fails."""
         result = self._cli("ls", "--all", "--format", "json", check=False)
         if result.returncode != 0 or not result.stdout.strip():
             return []
@@ -697,6 +705,7 @@ def _socket_for(runtime: str) -> str | None:
 
 
 def _docker_backend_for(runtime: str) -> DockerBackend:
+    """Return a DockerBackend on the socket of the given runtime."""
     return DockerBackend(base_url=_socket_for(runtime))
 
 

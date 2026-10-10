@@ -69,6 +69,7 @@ class InvalidArgument(ValueError):
 
 
 def _now() -> datetime.datetime:
+    """Return the current UTC time."""
     return datetime.datetime.now(datetime.timezone.utc)
 
 
@@ -136,6 +137,7 @@ def _java_format(pattern: str, when: datetime.datetime) -> str:
 
 
 def _random_string() -> str:
+    """Return the 11-character random string for ``!{firehose:random-string}``."""
     return "".join(secrets.choice(_ALPHABET) for _ in range(11))
 
 
@@ -147,6 +149,7 @@ def evaluate_prefix(
         prefix = prefix + "!{timestamp:yyyy/MM/dd/HH/}"
 
     def value(m: re.Match) -> str:
+        """Return the replacement for one ``!{namespace:arg}`` expression."""
         namespace, arg = m.group(1), m.group(2)
         if namespace == "timestamp":
             return _java_format(arg, when)
@@ -198,6 +201,7 @@ def object_name(
 # Record format conversion: JSON -> Parquet with a Glue table's schema
 # ---------------------------------------------------------------------------
 def _glue_columns(schema_conf: dict) -> list[tuple[str, str]]:
+    """Return the (name, type) columns of the Glue table in the schema configuration."""
     import boto3
 
     kwargs = {
@@ -217,6 +221,7 @@ def _glue_columns(schema_conf: dict) -> list[tuple[str, str]]:
 
 
 def _arrow_type(hive: str):
+    """Return the Arrow type for a Glue (Hive) column type."""
     import pyarrow as pa
 
     simple = {
@@ -245,6 +250,7 @@ def _arrow_type(hive: str):
 
 
 def _parse_timestamp(value):
+    """Parse epoch seconds or milliseconds, or an ISO string, as a UTC datetime."""
     if isinstance(value, (int, float)):
         seconds = value / 1000 if abs(value) > 1e11 else value
         return datetime.datetime.fromtimestamp(seconds, datetime.timezone.utc)
@@ -253,6 +259,7 @@ def _parse_timestamp(value):
 
 
 def _coerce(value, hive: str):
+    """Coerce a JSON value to the Python type for a Glue (Hive) column type."""
     if value is None:
         return None
     base = hive.split("(")[0]
@@ -360,6 +367,7 @@ class FirehoseExecutor:
                 continue  # a stream that can't start again stays out
 
     def _load(self) -> dict[str, dict]:
+        """Return the persisted CreateDeliveryStream requests, keyed by stream name."""
         if self.state_path.exists():
             try:
                 return json.loads(self.state_path.read_text())
@@ -368,6 +376,7 @@ class FirehoseExecutor:
         return {}
 
     def _persist(self) -> None:
+        """Write every stream's CreateDeliveryStream request atomically."""
         with self._lock:
             requests = {n: s["request"] for n, s in self._streams.items()}
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -388,6 +397,7 @@ class FirehoseExecutor:
         return self._start(req, persist=True)
 
     def _start(self, req: dict, persist: bool) -> str:
+        """Validate and register a stream, start its threads; return its ARN."""
         name = req["DeliveryStreamName"]
         arn = (
             f"arn:aws:firehose:{config.region()}:{config.account_id()}:"
@@ -492,6 +502,7 @@ class FirehoseExecutor:
         self._safe_flush(stream)  # final drain on delete
 
     def _safe_flush(self, stream: dict) -> None:
+        """Flush a stream's buffer, logging instead of raising on failure."""
         try:
             self._flush(stream)
         except Exception as e:
@@ -529,6 +540,7 @@ class FirehoseExecutor:
                 iterators[shard_id] = resp.get("NextShardIterator", iterator)
 
     def _buffer(self, stream: dict, data: bytes) -> None:
+        """Buffer a record; flush once the buffer reaches the size limit."""
         with stream["lock"]:
             if not stream["buffer"]:
                 stream["oldest"] = _now()
@@ -567,6 +579,7 @@ class FirehoseExecutor:
     def _write_errors(
         self, stream: dict, failed: list[tuple[bytes, str]], when: datetime.datetime
     ) -> None:
+        """Write records that failed format conversion under the error prefix."""
         error_type = "format-conversion-failed"
         error_prefix = stream["error_prefix"] or (
             stream["prefix"] + error_type + "/!{timestamp:yyyy/MM/DDD/HH/}"
@@ -666,6 +679,7 @@ class FirehoseExecutor:
         self._persist()
 
     def _require(self, name: str) -> dict:
+        """Return a stream by name, raising KeyError if it doesn't exist."""
         with self._lock:
             stream = self._streams.get(name)
         if stream is None:
@@ -728,7 +742,10 @@ def _copy_into_redshift(conf: dict, bucket: str, key: str) -> None:
 
 
 def _json_response(payload: dict, status: int = 200) -> Response:
+    """Return a Firehose JSON response, encoding datetimes as unix epoch."""
+
     def default(obj):
+        """Encode datetimes as unix epoch seconds."""
         if isinstance(obj, datetime.datetime):
             return obj.timestamp()
         raise TypeError
@@ -739,6 +756,7 @@ def _json_response(payload: dict, status: int = 200) -> Response:
 
 
 def _error(code: str, message: str, status: int = 400) -> Response:
+    """Return a Firehose-style error response."""
     return Response(
         json.dumps({"__type": code, "message": message}),
         status_code=status,

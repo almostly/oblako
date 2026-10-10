@@ -67,6 +67,7 @@ class MotoService(Service):
         return f"http://localhost:{self.host_port}"
 
     def _health_check(self) -> bool:
+        """Return True if the moto API answers."""
         try:
             with urllib.request.urlopen(
                 f"{self.endpoint_url}/moto-api/", timeout=2

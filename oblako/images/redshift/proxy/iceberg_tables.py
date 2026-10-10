@@ -274,6 +274,7 @@ def rewrite_awsdatacatalog(sql: str) -> tuple[str, set[str]]:
     found: set[str] = set()
 
     def repl(m: re.Match) -> str:
+        """Point an awsdatacatalog.<db>.<table> name at the mounted schema."""
         db = split_name(m.group("db"))[0]
         found.add(db)
         return f"{_quote(mount_schema(db))}.{m.group('table')}"

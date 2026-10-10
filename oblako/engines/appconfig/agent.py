@@ -36,10 +36,12 @@ _DEFAULT_POLL_INTERVAL = int(os.environ.get("APPCONFIG_POLL_INTERVAL", "45"))
 
 
 def _config_key(application: str, environment: str, profile: str) -> str:
+    """Return the cache key for an application/environment/profile triple."""
     return f"{application}/{environment}/{profile}"
 
 
 def _write_backup(key: str, value: bytes, backup_dir: Path) -> None:
+    """Write config bytes to the disk backup, logging (not raising) on failure."""
     try:
         backup_dir.mkdir(parents=True, exist_ok=True)
         (backup_dir / f"{key.replace('/', '__')}.json").write_bytes(value)
@@ -48,6 +50,7 @@ def _write_backup(key: str, value: bytes, backup_dir: Path) -> None:
 
 
 def _read_backup(key: str, backup_dir: Path) -> bytes | None:
+    """Return the disk backup for ``key``, or None if missing or unreadable."""
     path = backup_dir / f"{key.replace('/', '__')}.json"
     if path.exists():
         try:
@@ -83,6 +86,7 @@ class AppConfigClient:
         self._backup_dir = backup_dir or _DEFAULT_BACKUP_DIR
 
     def _resolve_id(self, list_method: str, name: str, **kwargs: Any) -> str | None:
+        """Return the Id of the item named (or id'd) ``name`` from a List call, cached."""
         cache_key = f"{list_method}/{name}/" + ",".join(
             f"{k}={v}" for k, v in sorted(kwargs.items())
         )
@@ -173,4 +177,5 @@ class AppConfigClient:
 
     @staticmethod
     def _decode(value: bytes, as_json: bool) -> Any:
+        """Return the bytes parsed as JSON, or unchanged when ``as_json`` is False."""
         return json.loads(value) if as_json else value

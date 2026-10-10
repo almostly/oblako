@@ -48,6 +48,7 @@ class KinesisService(Service, BotoService):
         return f"http://localhost:{self.host_port}"
 
     def _health_check(self) -> bool:
+        """Return True if Kinesis lists its streams."""
         try:
             client("kinesis", self.endpoint_url).list_streams(Limit=1)
             return True

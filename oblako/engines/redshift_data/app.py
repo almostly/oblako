@@ -225,6 +225,8 @@ class RedshiftDataApp:
 
 
 class _NotFound(Exception):
+    """Raised when a statement id is unknown."""
+
     pass
 
 

@@ -61,6 +61,7 @@ _lock = threading.RLock()
 # Iceberg REST catalog
 # ---------------------------------------------------------------------------
 def _iceberg_url() -> str:
+    """Return the Iceberg REST catalog URL."""
     return os.environ.get("OBLAKO_ICEBERG_URL", "http://localhost:8181").rstrip("/")
 
 
@@ -70,6 +71,7 @@ def _ns_path(bucket: str, namespace: str) -> str:
 
 
 def _ice(method: str, path: str, **kw) -> httpx.Response:
+    """Send a request to the Iceberg REST catalog."""
     return httpx.request(method, f"{_iceberg_url()}{path}", timeout=8.0, **kw)
 
 
@@ -77,10 +79,12 @@ def _ice(method: str, path: str, **kw) -> httpx.Response:
 # ARNs / identifiers
 # ---------------------------------------------------------------------------
 def _bucket_arn(name: str) -> str:
+    """Return the ARN of a table bucket."""
     return f"arn:aws:s3tables:{config.region()}:{config.account_id()}:bucket/{name}"
 
 
 def _table_arn(bucket: str, namespace: str, name: str) -> str:
+    """Return the ARN of a table."""
     return f"{_bucket_arn(bucket)}/table/{namespace}/{name}"
 
 
@@ -90,6 +94,7 @@ def _bucket_of(arn: str) -> str:
 
 
 def _version_token(metadata_location: str) -> str:
+    """Return a version token derived from a table's metadata location."""
     return hashlib.sha256((metadata_location or "").encode()).hexdigest()[:16]
 
 
@@ -120,10 +125,12 @@ def _iceberg_schema(metadata: dict | None) -> dict:
 # Responses
 # ---------------------------------------------------------------------------
 def _ok(data: dict | None = None, status: int = 200) -> Response:
+    """Return a JSON success response."""
     return JSONResponse(data or {}, status_code=status)
 
 
 def _err(code: str, message: str, status: int = 400) -> Response:
+    """Return an S3 Tables JSON error response."""
     return JSONResponse(
         {"__type": code, "message": message},
         status_code=status,
@@ -273,6 +280,7 @@ def create_table(arn: str, ns: str, body: dict) -> Response:
 
 
 def _load_table(bucket: str, ns: str, name: str) -> dict | None:
+    """Return a table's Iceberg REST LoadTable result, or None if it's missing."""
     r = _ice(
         "GET",
         f"/v1/namespaces/{_ns_path(bucket, ns)}/tables/{urllib.parse.quote(name)}",
@@ -366,6 +374,7 @@ def get_table_metadata_location(arn: str, ns: str, name: str) -> Response:
 # percent-encoded, so we split the RAW path on literal '/').
 # ---------------------------------------------------------------------------
 async def _dispatch(request: Request) -> Response:
+    """Route an S3 Tables REST request (or the Iceberg endpoint) to its handler."""
     method = request.method
     raw = request.scope.get("raw_path") or request.url.path.encode()
     raw_segs = [

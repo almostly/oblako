@@ -30,6 +30,7 @@ MUTED = (0x8A, 0x94, 0xA3)  # the tagline
 
 
 def _rgb(color: tuple[int, int, int]) -> str:
+    """Return the ANSI escape code for a 24-bit foreground color."""
     return "\033[38;2;{};{};{}m".format(*color)
 
 

@@ -247,6 +247,7 @@ class RedshiftDataExecutor:
     def _scalar_list(
         self, sql: str, database: str | None = None, cluster: str | None = None
     ) -> list[str]:
+        """Run ``sql`` and return the first column of every row."""
         conn = self._connect(database, cluster)
         try:
             with conn.cursor() as cur:
@@ -363,6 +364,7 @@ def _to_pg_array(values) -> str:
     """Convert to pg array helper."""
 
     def fmt(element):
+        """Return one element as a PostgreSQL array literal item, quoted if needed."""
         if element is None:
             return "NULL"
         text = str(element)

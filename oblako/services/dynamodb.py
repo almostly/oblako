@@ -60,6 +60,7 @@ class DynamoDBService(Service, BotoService):
         return dynamodb_vectors.get_client(backend_url=self.endpoint_url)
 
     def _health_check(self) -> bool:
+        """Return True if DynamoDB Local lists its tables."""
         try:
             client("dynamodb", self.endpoint_url).list_tables()
             return True

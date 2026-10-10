@@ -64,6 +64,7 @@ def _without_section(text: str, header: str) -> str:
 
 
 def _replace_sections(path: Path, sections: dict[str, str]) -> None:
+    """Write the given sections to an INI file, replacing any existing ones."""
     text = path.read_text() if path.exists() else ""
     for header in sections:
         text = _without_section(text, header)
@@ -75,6 +76,7 @@ def _replace_sections(path: Path, sections: dict[str, str]) -> None:
 
 
 def _existing_keys(path: Path, name: str) -> tuple[str, str] | None:
+    """Return the access key pair stored under a profile section, if any."""
     if not path.exists():
         return None
     match = re.search(

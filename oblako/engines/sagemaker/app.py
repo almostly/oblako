@@ -39,6 +39,7 @@ def _json_response(
 
 
 def _error(code: str, message: str, status: int = 400) -> Response:
+    """Return a SageMaker-style error response."""
     return _json_response(
         {"__type": code, "message": message}, status=status, error_type=code
     )
@@ -603,10 +604,13 @@ class SageMakerApp:
 
 
 class _NotFound(Exception):
+    """A requested resource doesn't exist."""
+
     pass
 
 
 def _require(req: dict, key: str):
+    """Return ``req[key]``, raising if it's missing."""
     if key not in req or req[key] is None:
         raise Exception(f"{key} is required")
     return req[key]

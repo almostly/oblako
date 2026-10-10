@@ -164,6 +164,7 @@ def parse_create_model(sql: str) -> dict:
     rest = sql[pos:]
 
     def clause(pattern: str):
+        """Return the match of a CREATE MODEL clause, if present."""
         return re.search(pattern, rest, re.IGNORECASE | re.DOTALL)
 
     target = clause(rf"\btarget\s+({_IDENT})")
@@ -375,6 +376,7 @@ _PROBS = """def _probs(ps, labels):
 
 
 def _q(ident: str) -> str:
+    """Return ``ident`` as a quoted identifier."""
     return '"' + ident.replace('"', '""') + '"'
 
 
@@ -421,6 +423,7 @@ x = [float("nan") if v is None else float(v) for v in args]
 # Wire-proxy rewrite: CREATE / SHOW / DROP MODEL -> oblako_ml_* calls
 # -----------------------------------------------------------------------------
 def _dollar(text: str) -> str:
+    """Return ``text`` dollar-quoted with a tag it doesn't contain."""
     tag = "oblako_ml"
     while f"${tag}$" in text:
         tag += "_"
@@ -428,6 +431,7 @@ def _dollar(text: str) -> str:
 
 
 def _literal(text: str) -> str:
+    """Return ``text`` as a SQL string literal."""
     return "'" + text.replace("'", "''") + "'"
 
 
@@ -458,6 +462,7 @@ def _statements(sql: str) -> list[str]:
 
 
 def _rewrite_one(stmt: str) -> str:
+    """Rewrite one CREATE, SHOW or DROP MODEL statement; leave others as written."""
     body = stmt.rstrip()
     semi = ";" if body.endswith(";") else ""
     core = body.rstrip(";")
@@ -492,6 +497,7 @@ def rewrite_ml(sql: str) -> str:
 # plpython3u entry points (run inside PostgreSQL through SPI)
 # -----------------------------------------------------------------------------
 def _resolve(plpy, qualified: str) -> tuple[str, str]:
+    """Return a model name's schema (the current one if unqualified) and name."""
     schema, name = split_name(qualified)
     if schema is None:
         schema = plpy.execute("SELECT current_schema() AS s")[0]["s"]
@@ -499,6 +505,7 @@ def _resolve(plpy, qualified: str) -> tuple[str, str]:
 
 
 def _find(plpy, schema: str, name: str):
+    """Return the model's row in pg_oblako.models, or None."""
     plan = plpy.prepare(
         "SELECT * FROM pg_oblako.models WHERE schema_name = $1 AND model_name = $2",
         ["text", "text"],
@@ -592,6 +599,7 @@ def create_model(plpy, stmt: str) -> None:
 
 
 def _drop_functions(row, execute) -> None:
+    """Drop a model's prediction functions."""
     n = len(json.loads(row["features"]))
     types = ", ".join(["float8"] * n)
     for suffix in ("", "_probabilities"):
@@ -617,6 +625,7 @@ def drop_model(plpy, qualified: str, if_exists: bool) -> None:
 
 
 def _fmt_time(ts) -> str:
+    """Return a timestamp as text, empty when unset."""
     return str(ts or "")
 
 
@@ -691,6 +700,7 @@ def show_models(plpy) -> list[tuple[str, str]]:
 # The training agent (root, outside PostgreSQL): TRAINING -> READY / FAILED
 # -----------------------------------------------------------------------------
 def _hyperparameters(spec: dict, problem_type: str, model_type: str) -> dict:
+    """Return the training job's hyperparameters, as strings."""
     hp = {k: str(v) for k, v in spec["hyperparameters"].items()}
     hp.update(problem_type=problem_type, model_type=model_type, autopilot="true")
     if spec["objective"]:
@@ -774,6 +784,7 @@ def train_one(conn, row: dict) -> None:
     fi = [i for i, c in enumerate(columns) if c != row["target"]]
 
     def num(v):
+        """Return a number as a Python literal (nan for NULL)."""
         return "nan" if v is None else repr(float(v))
 
     y = []
@@ -871,6 +882,7 @@ def train_one(conn, row: dict) -> None:
 
 
 def _connect(dbname: str):
+    """Connect to the engine's database over its Unix socket."""
     import psycopg
     from psycopg.rows import DictRow, dict_row
 
@@ -885,6 +897,7 @@ def _connect(dbname: str):
 
 
 def _job(dbname: str, row: dict) -> None:
+    """Train one model, recording a failure in its model_state."""
     try:
         with _connect(dbname) as conn:
             try:
@@ -902,6 +915,7 @@ def _job(dbname: str, row: dict) -> None:
 
 
 def _claim(dbname: str) -> list[dict]:
+    """Claim the models waiting to train in the database."""
     with _connect(dbname) as conn:
         if (
             conn.execute("SELECT to_regclass('pg_oblako.models')").fetchone()[

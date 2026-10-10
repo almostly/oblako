@@ -34,6 +34,7 @@ class AppConfigService:
         return start_in_thread(port=self.port)
 
     def _ensure(self, autostart: bool) -> None:
+        """Start the AppConfig engine if autostart is on and it isn't running."""
         from oblako.engines import appconfig
 
         if autostart and not appconfig.is_running(self.port):

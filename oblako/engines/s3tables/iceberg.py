@@ -33,6 +33,7 @@ _HOP_BY_HOP = {"content-length", "transfer-encoding", "connection", "content-enc
 
 
 def _iceberg_url() -> str:
+    """Return the Iceberg REST catalog URL."""
     return os.environ.get("OBLAKO_ICEBERG_URL", "http://localhost:8181").rstrip("/")
 
 
@@ -79,6 +80,7 @@ def _body_in(bucket: str, value):
 
 
 def _strip(bucket: str, levels: list) -> list:
+    """Drop a leading bucket level from a namespace."""
     return levels[1:] if levels and levels[0] == bucket else levels
 
 
@@ -175,6 +177,7 @@ async def proxy(request: Request, raw_segments: list[str]) -> Response:
 async def _send(
     method: str, path: str, params: dict, content: bytes | None
 ) -> httpx.Response:
+    """Send a request to the Iceberg REST catalog."""
     async with httpx.AsyncClient(timeout=30.0) as client:
         return await client.request(
             method,

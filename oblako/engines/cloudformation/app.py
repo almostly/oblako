@@ -28,16 +28,19 @@ def _iso(moment) -> str:
 
 
 def _now():
+    """Return the engine's current tick as an ISO timestamp."""
     from .engine import tick
 
     return _iso(tick())
 
 
 def _el(tag, value):
+    """Return ``value`` as an XML element ``<tag>``, escaped."""
     return f"<{tag}>{escape(str(value))}</{tag}>"
 
 
 def _outputs_xml(outputs):
+    """Serialize stack outputs as an ``<Outputs>`` member list."""
     members = "".join(
         "<member>"
         + _el("OutputKey", o["OutputKey"])
@@ -68,6 +71,7 @@ def _parameters_xml(stack):
 
 
 def _stack_xml(stack):
+    """Serialize a stack as a DescribeStacks ``<member>``."""
     description = stack["template"].get("Description")
     updated = stack.get("LastUpdatedTime")
     return (
@@ -97,6 +101,7 @@ def _stack_xml(stack):
 
 
 def _wrap(action, result_inner):
+    """Wrap a result in the ``<Action>Response`` envelope with a request id."""
     return (
         f'<{action}Response xmlns="{NS}"><{action}Result>{result_inner}</{action}Result>'
         f"<ResponseMetadata><RequestId>{uuid.uuid4()}</RequestId></ResponseMetadata></{action}Response>"
@@ -104,10 +109,12 @@ def _wrap(action, result_inner):
 
 
 def _ok(action, result_inner=""):
+    """Return a successful XML response for ``action``."""
     return Response(_wrap(action, result_inner), media_type="text/xml")
 
 
 def _error(message, code="ValidationError", status=400):
+    """Return a CloudFormation XML error response."""
     body = (
         f'<ErrorResponse xmlns="{NS}"><Error><Type>Sender</Type>'
         f"<Code>{code}</Code><Message>{escape(message)}</Message></Error>"
@@ -259,6 +266,7 @@ class CfnApp:
         summary = self.store.template_summary(body, form.get("StackName"))
 
         def members(items):
+            """Serialize items as ``<member>`` elements."""
             return "".join(_el("member", i) for i in items)
 
         params = "".join(
@@ -348,6 +356,7 @@ def create_app(store: StackStore | None = None) -> Starlette:
     handler = CfnApp(store or StackStore(STATE))
 
     async def health(_request):
+        """Report the engine as up."""
         return PlainTextResponse("ok")
 
     return Starlette(

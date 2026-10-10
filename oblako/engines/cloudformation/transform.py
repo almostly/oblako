@@ -76,6 +76,7 @@ def transform_sam(template: dict) -> dict:
 
 
 def _expand_function(logical_id: str, props: dict) -> dict:
+    """Expand AWS::Serverless::Function into a Lambda function and its role."""
     role_id = f"{logical_id}Role"
     role = {
         "Type": "AWS::IAM::Role",
@@ -100,6 +101,7 @@ def _expand_function(logical_id: str, props: dict) -> dict:
 
 
 def _expand_simple_table(props: dict) -> dict:
+    """Expand AWS::Serverless::SimpleTable into an on-demand DynamoDB table."""
     pk = props.get("PrimaryKey", {"Name": "id", "Type": "String"})
     table_props = {
         "AttributeDefinitions": [

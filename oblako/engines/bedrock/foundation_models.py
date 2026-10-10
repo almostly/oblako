@@ -29,6 +29,7 @@ def _model(
     inference=None,
     embedding=False,
 ):
+    """Build a foundation-model detail record (without its ARN)."""
     return {
         "modelId": model_id,
         "modelName": name,
@@ -164,6 +165,7 @@ FOUNDATION_MODELS: dict[str, dict] = {
 
 
 def _with_arn(detail: dict, region: str, partition: str = "aws") -> dict:
+    """Return the model detail with its ``modelArn`` for the region."""
     return {
         **detail,
         "modelArn": _ARN.format(

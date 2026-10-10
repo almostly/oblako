@@ -33,6 +33,7 @@ _KEYWORDS = {"and", "or", "not", "between", "in", "like", "is", "null"}
 
 
 def _tokens(text: str) -> list[tuple[str, str]]:
+    """Split an expression into (kind, value) tokens."""
     out, pos = [], 0
     while pos < len(text.rstrip()):
         match = _TOKEN.match(text, pos)
@@ -53,16 +54,21 @@ def _tokens(text: str) -> list[tuple[str, str]]:
 
 
 class _Parser:
+    """A recursive-descent parser from an expression to a predicate."""
+
     def __init__(self, text: str, types: dict[str, str]):
+        """Tokenize the expression and keep the keys' types."""
         self.tokens = _tokens(text)
         self.pos = 0
         self.types = {k.lower(): v.lower() for k, v in types.items()}
 
     def peek(self, offset: int = 0) -> tuple[str, str] | None:
+        """Return the token ``offset`` ahead, or None at the end."""
         i = self.pos + offset
         return self.tokens[i] if i < len(self.tokens) else None
 
     def take(self, kind: str | None = None, value: str | None = None) -> str:
+        """Consume the next token, which must match, and return its value."""
         token = self.peek()
         if (
             token is None
@@ -74,30 +80,35 @@ class _Parser:
         return token[1]
 
     def accept(self, kind: str, value: str) -> bool:
+        """Consume the next token if it is (kind, value); return whether it was."""
         if self.peek() == (kind, value):
             self.pos += 1
             return True
         return False
 
     def parse(self) -> Predicate:
+        """Return the predicate for the whole expression."""
         pred = self.or_expr()
         if self.peek() is not None:
             raise ValueError(f"unexpected {self.peek()}")
         return pred
 
     def or_expr(self) -> Predicate:
+        """Parse terms joined by OR."""
         parts = [self.and_expr()]
         while self.accept("kw", "or"):
             parts.append(self.and_expr())
         return parts[0] if len(parts) == 1 else (lambda row: any(p(row) for p in parts))
 
     def and_expr(self) -> Predicate:
+        """Parse terms joined by AND."""
         parts = [self.not_expr()]
         while self.accept("kw", "and"):
             parts.append(self.not_expr())
         return parts[0] if len(parts) == 1 else (lambda row: all(p(row) for p in parts))
 
     def not_expr(self) -> Predicate:
+        """Parse a NOT, a parenthesized expression or a comparison."""
         if self.accept("kw", "not"):
             inner = self.not_expr()
             return lambda row: not inner(row)
@@ -108,6 +119,7 @@ class _Parser:
         return self.comparison()
 
     def literal(self) -> str:
+        """Consume a string or number literal and return it."""
         kind, value = self.peek() or ("", "")
         if kind not in ("str", "num"):
             raise ValueError(f"expected a literal, got {self.peek()}")
@@ -115,15 +127,18 @@ class _Parser:
         return value
 
     def comparison(self) -> Predicate:
+        """Parse one condition on a key: IS NULL, BETWEEN, IN, LIKE or an operator."""
         key = self.take("ident").lower()
         numeric = self.types.get(key, "string").startswith(_NUMERIC)
 
         def val(raw):
+            """Return a value as a number for numeric keys, otherwise as a string."""
             if raw is None:
                 return None
             return float(raw) if numeric else str(raw)
 
         def get(row):
+            """Return the key's value in the row, typed as the key is."""
             return val(row.get(key))
 
         if self.accept("kw", "is"):

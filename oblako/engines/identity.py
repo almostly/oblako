@@ -25,10 +25,12 @@ def identify(app, name: str):
     tag = (HEADER.encode(), name.encode())
 
     async def tagged(scope, receive, send):
+        """Call the app, adding the engine header to HTTP responses."""
         if scope["type"] != "http":
             return await app(scope, receive, send)
 
         async def send_tagged(message):
+            """Send the message, adding the engine header to the response start."""
             if message["type"] == "http.response.start":
                 message = {**message, "headers": [*message.get("headers", []), tag]}
             await send(message)

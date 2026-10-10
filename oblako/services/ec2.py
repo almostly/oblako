@@ -31,6 +31,7 @@ INSTANCE_LABEL = "oblako.ec2.instance-id"
 
 
 def _docker():
+    """Return a Docker client for the configured container backend."""
     from .backends import docker_client
 
     return docker_client()  # honours OBLAKO_CONTAINER_BACKEND (docker/podman/colima)
@@ -42,10 +43,12 @@ def _image_for(image_id: str | None) -> str:
 
 
 def _container_name(instance_id: str) -> str:
+    """Return the container name for an instance."""
     return f"oblako-ec2-{instance_id}"
 
 
 def _volume_name(instance_id: str) -> str:
+    """Return the EBS volume name for an instance."""
     return f"oblako-ec2-{instance_id}"  # the instance's EBS volume
 
 
@@ -189,6 +192,7 @@ class Ec2Service(BotoService):
         )
 
     def _with_container(self, instance_id: str, fn) -> None:
+        """Call fn with the instance's container, if it has one."""
         c = self.instance_container(instance_id)
         if c is not None:
             fn(c)

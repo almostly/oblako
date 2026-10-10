@@ -58,6 +58,7 @@ class Target:
 
 
 def _strip_ns(elem: ET.Element) -> ET.Element:
+    """Strip XML namespaces from ``elem`` and its descendants."""
     for node in elem.iter():
         node.tag = node.tag.rsplit("}", 1)[-1]
     return elem
@@ -159,6 +160,7 @@ def record(event: str, bucket: str, key: str, head: dict, config_id: str) -> dic
 
 
 def _client(service: str):
+    """Return a boto3 client for ``service``, on its endpoint override or moto."""
     import boto3
 
     from oblako import ports

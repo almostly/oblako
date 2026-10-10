@@ -59,6 +59,7 @@ _TOKEN_RE = re.compile(
 
 
 def _tokenize(expr: str) -> list[str]:
+    """Split a rule expression into tokens."""
     return _TOKEN_RE.findall(expr)
 
 
@@ -67,6 +68,7 @@ def _tokenize(expr: str) -> list[str]:
 #   ('$', name)             -> context variable reference
 #   str/int/float/bool/None -> static literal
 def _parse_tokens(tokens: list[str], pos: int) -> tuple[Any, int]:
+    """Parse one expression starting at ``pos``; return it and the next position."""
     if pos >= len(tokens):
         raise ValueError("unexpected end of expression")
 

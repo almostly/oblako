@@ -40,6 +40,7 @@ LAUNCH_TYPE_LABEL = "oblako.ecs.launch-type"
 
 
 def _docker():
+    """Return a Docker client for the configured container backend."""
     from .backends import docker_client
 
     return (
@@ -67,6 +68,7 @@ def _task_endpoint_env() -> dict[str, str]:
     host = "host.docker.internal"
 
     def u(port: int) -> str:
+        """Return the URL for a port on the host gateway."""
         return f"http://{host}:{port}"
 
     return {
@@ -163,6 +165,7 @@ def _secret_value(value_from: str, endpoint_url: str) -> str:
 
 
 def _container_name(task_id: str, container: str) -> str:
+    """Return the Docker container name for a task's container."""
     return f"oblako-ecs-{task_id[:12]}-{container}"
 
 
@@ -290,6 +293,7 @@ class EcsService(BotoService):
     def _awsvpc_attachment(self, network_configuration: dict | None) -> list[dict]:
         # Try the configured subnet, then a real default-VPC subnet (the template's
         # subnet may be a placeholder param that isn't a real moto subnet).
+        """Create an ENI for an awsvpc task and return its attachment, or none."""
         ec2 = client("ec2", self.endpoint_url)
         for subnet in (
             self._subnet_from(network_configuration),
@@ -619,6 +623,7 @@ class EcsService(BotoService):
         return None
 
     def _task_containers(self) -> list:
+        """Return every ECS task container (running or stopped)."""
         return _docker().containers.list(
             all=True, filters={"label": f"{SERVICE_LABEL}=ecs"}
         )

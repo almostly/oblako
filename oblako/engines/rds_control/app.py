@@ -52,10 +52,12 @@ _REPLICAS = re.compile(
 
 
 def _moto_url() -> str:
+    """Return the moto endpoint URL (OBLAKO_MOTO_ENDPOINT, else the local port)."""
     return os.environ.get("OBLAKO_MOTO_ENDPOINT") or f"http://localhost:{ports.MOTO}"
 
 
 def _tag(xml: str, name: str) -> str | None:
+    """Return the text of the first ``<name>`` element in ``xml``, or None."""
     m = re.search(rf"<{name}>([^<]*)</{name}>", xml)
     return m.group(1) if m else None
 
@@ -80,6 +82,7 @@ def error_response(code: str, message: str, status: int = 400) -> Response:
 # Response rewriting
 # ---------------------------------------------------------------------------
 def _rewrite_instance(block: str, records: dict[str, dict]) -> str:
+    """Rewrite one DBInstance block with the endpoint, status and version oblako runs."""
     instance_id = _tag(block, "DBInstanceIdentifier")
     record = records.get(instance_id or "")
     if record is not None:
@@ -102,6 +105,7 @@ def _rewrite_instance(block: str, records: dict[str, dict]) -> str:
 
     # moto keeps a promoted replica in its source's list; RDS drops it
     def prune(m: re.Match) -> str:
+        """Return the replica list without the replicas that were promoted."""
         kept = [
             r.group(0)
             for r in _REPLICA.finditer(m.group(1))
@@ -134,6 +138,7 @@ class RdsControlProxy:
         self.backend = (backend_url or _moto_url()).rstrip("/")
 
     async def _forward(self, request: Request, body: bytes) -> httpx.Response:
+        """Send the request to moto unchanged (minus host and length); return its response."""
         headers = {
             k: v
             for k, v in request.headers.items()
@@ -149,6 +154,7 @@ class RdsControlProxy:
             )
 
     def _boto(self, region: str):
+        """Return a boto3 RDS client for moto in ``region``."""
         import boto3
 
         return boto3.client(
@@ -174,12 +180,14 @@ class RdsControlProxy:
         return False
 
     def _backup_retention(self, region: str, instance_id: str) -> int:
+        """Return the instance's BackupRetentionPeriod from moto."""
         found = self._boto(region).describe_db_instances(
             DBInstanceIdentifier=instance_id
         )
         return found["DBInstances"][0].get("BackupRetentionPeriod", 0)
 
     def _parameter_group(self, region: str, instance_id: str) -> str | None:
+        """Return the instance's first DB parameter group name, or None."""
         rds = self._boto(region)
         found = rds.describe_db_instances(DBInstanceIdentifier=instance_id)
         groups = found["DBInstances"][0].get("DBParameterGroups", [])

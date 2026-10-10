@@ -41,6 +41,7 @@ _lock = threading.Lock()
 
 
 def _path(task_id: str) -> Path:
+    """Return the metadata file for a task."""
     # task ids are hex (uuid4), but never let a request path escape the folder
     return STATE / f"{Path(task_id).name}.json"
 
@@ -60,6 +61,7 @@ def deregister(task_id: str) -> None:
 
 
 def _entry(task_id: str) -> dict | None:
+    """Return a task's stored metadata entry, or None if missing."""
     try:
         return json.loads(_path(task_id).read_text())
     except (FileNotFoundError, json.JSONDecodeError):
@@ -67,6 +69,7 @@ def _entry(task_id: str) -> dict | None:
 
 
 def _container(task_id: str, container: str):
+    """Return a container's metadata, or None if missing."""
     entry = _entry(task_id)
     return (
         dict(entry["containers"][container])
@@ -76,6 +79,7 @@ def _container(task_id: str, container: str):
 
 
 def _task(task_id: str):
+    """Return a task's metadata, or None if missing."""
     entry = _entry(task_id)
     return dict(entry["task"]) if entry else None
 
@@ -97,6 +101,7 @@ async def _get_task(request: Request) -> JSONResponse:
 
 
 async def _empty_stats(_request: Request) -> JSONResponse:
+    """GET .../stats: return empty stats."""
     return JSONResponse({})
 
 

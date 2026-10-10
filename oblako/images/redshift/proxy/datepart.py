@@ -43,6 +43,7 @@ _CALL = re.compile(r"(?i)\b(dateadd|datediff|date_part)(\s*\(\s*)([a-z_]+)(\s*,)
 
 
 def _quote(m: re.Match) -> str:
+    """Quote a bare datepart keyword; leave anything else as written."""
     part = m.group(3)
     if part.lower() not in DATEPARTS:
         return m.group(0)

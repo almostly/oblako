@@ -22,6 +22,7 @@ TEMPLATES: dict[str, dict] = {}
 
 
 def _retry() -> list:
+    """Return the retry policy for Lambda task states."""
     return [
         {
             "ErrorEquals": [
@@ -37,6 +38,7 @@ def _retry() -> list:
 
 
 def _processing(next_state: str) -> dict:
+    """Return a SageMaker processing job state."""
     return {
         "Type": "Task",
         "Resource": "arn:aws:states:::sagemaker:createProcessingJob.sync",
@@ -87,6 +89,7 @@ def _processing(next_state: str) -> dict:
 
 
 def _training(*, end: bool = False, next_state: str | None = None) -> dict:
+    """Return a SageMaker training job state."""
     state = {
         "Type": "Task",
         "Resource": "arn:aws:states:::sagemaker:createTrainingJob.sync",
@@ -132,6 +135,7 @@ def _training(*, end: bool = False, next_state: str | None = None) -> dict:
 
 
 def _save_model(next_state: str) -> dict:
+    """Return a SageMaker create-model state."""
     return {
         "Type": "Task",
         "Resource": "arn:aws:states:::sagemaker:createModel",
@@ -148,6 +152,7 @@ def _save_model(next_state: str) -> dict:
 
 
 def _batch_transform() -> dict:
+    """Return a SageMaker batch transform state that ends the workflow."""
     return {
         "Type": "Task",
         "Resource": "arn:aws:states:::sagemaker:createTransformJob.sync",
@@ -172,6 +177,7 @@ def _batch_transform() -> dict:
 
 
 def _generate(next_state: str) -> dict:
+    """Return a Lambda state that generates the dataset."""
     return {
         "Type": "Task",
         "Resource": "arn:aws:states:::lambda:invoke",

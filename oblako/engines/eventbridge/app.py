@@ -38,6 +38,7 @@ _SCHEDULER_STARTED = False
 
 
 def _moto_url() -> str:
+    """Return the moto endpoint URL (OBLAKO_MOTO_ENDPOINT, else the local port)."""
     import os
 
     return os.environ.get("OBLAKO_MOTO_ENDPOINT") or f"http://localhost:{ports.MOTO}"
@@ -136,6 +137,7 @@ class EventBridgeProxy:
         return Response(raw, status_code=status, media_type=_JSON)
 
     async def _forward(self, op: str, body: bytes, auth: dict) -> tuple[int, bytes]:
+        """POST the op to moto with the caller's auth headers; return status and body."""
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 self.backend,
@@ -164,6 +166,7 @@ class EventBridgeProxy:
 
     @staticmethod
     def _rules_with_targets(events) -> list[tuple[dict, list[dict]]]:
+        """Return (event pattern, targets) for every enabled rule with a pattern."""
         out = []
         for rule in events.list_rules().get("Rules", []):
             if rule.get("State") != "ENABLED" or not rule.get("EventPattern"):
@@ -178,6 +181,7 @@ class EventBridgeProxy:
 
 
 def _creds() -> dict:
+    """Return boto3 client kwargs: region and credentials from the environment."""
     import os
 
     return {

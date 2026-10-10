@@ -38,6 +38,7 @@ _REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 
 
 def _now() -> datetime.datetime:
+    """Return the current UTC time."""
     return datetime.datetime.now(datetime.timezone.utc)
 
 
@@ -66,6 +67,7 @@ def _s3_client():
 
 
 def _split_uri(uri: str) -> tuple[str, str]:
+    """Split an ``s3://bucket/key`` URI into (bucket, key)."""
     rest = uri[len("s3://") :]
     bucket, _, key = rest.partition("/")
     return bucket, key
@@ -289,7 +291,10 @@ def _athena_type(trino_type: str) -> str:
 
 
 def _json_response(payload: dict, status: int = 200) -> Response:
+    """Return a JSON response, with datetimes as epoch seconds."""
+
     def default(obj):
+        """Serialize datetimes as epoch seconds for json.dumps."""
         if isinstance(obj, datetime.datetime):
             return obj.timestamp()
         raise TypeError
@@ -300,6 +305,7 @@ def _json_response(payload: dict, status: int = 200) -> Response:
 
 
 def _error(code: str, message: str, status: int = 400) -> Response:
+    """Return an Athena JSON error response with its X-Amzn-Errortype."""
     return Response(
         json.dumps({"__type": code, "message": message}),
         status_code=status,

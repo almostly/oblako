@@ -97,6 +97,7 @@ class Store:
             )
 
     def _q(self, sql: str, args: tuple = ()) -> list[tuple]:
+        """Run one SQL statement, commit, and return its rows."""
         with self._lock:
             rows = self._db.execute(sql, args).fetchall()
             self._db.commit()
@@ -213,16 +214,19 @@ class Store:
 # XML and tag helpers
 # -----------------------------------------------------------------------------
 def _local(tag: str) -> str:
+    """Return an XML tag without its ``{namespace}`` prefix."""
     return tag.rsplit("}", 1)[-1]
 
 
 def _strip_ns(elem: ET.Element) -> ET.Element:
+    """Strip XML namespaces from ``elem`` and its descendants."""
     for node in elem.iter():
         node.tag = _local(node.tag)
     return elem
 
 
 def _error(status: int, code: str, message: str, resource: str = "") -> Response:
+    """Return an S3 XML error response."""
     body = (
         '<?xml version="1.0" encoding="UTF-8"?>'
         f"<Error><Code>{code}</Code><Message>{_esc(message)}</Message>"
@@ -232,6 +236,7 @@ def _error(status: int, code: str, message: str, resource: str = "") -> Response
 
 
 def _esc(text: str) -> str:
+    """Escape text for XML."""
     return (
         text.replace("&", "&amp;")
         .replace("<", "&lt;")
@@ -241,6 +246,7 @@ def _esc(text: str) -> str:
 
 
 def _xml(body: str, status: int = 200) -> Response:
+    """Return an XML response with the XML declaration."""
     return Response(
         '<?xml version="1.0" encoding="UTF-8"?>' + body,
         status_code=status,
@@ -336,6 +342,7 @@ def is_public(policy: str) -> bool:
 
 
 def _as_list(value) -> list:
+    """Wrap a single value in a list; leave lists as they are."""
     return value if isinstance(value, list) else [value]
 
 
@@ -346,6 +353,7 @@ def create_app(store: Store | None = None) -> Starlette:
     store = store or Store()
 
     async def head(client: httpx.AsyncClient, path: str) -> httpx.Response:
+        """HEAD ``path`` on the backend S3Proxy."""
         return await client.head(backend_url() + urllib.parse.quote(path))
 
     async def current(client, bucket: str, key: str):
@@ -373,6 +381,7 @@ def create_app(store: Store | None = None) -> Starlette:
         return []
 
     async def forward(client, request: Request, drop: set[str]) -> httpx.Response:
+        """Forward the request to the backend, dropping hop-by-hop and ``drop`` headers."""
         headers = {
             k: v
             for k, v in request.headers.items()
@@ -385,6 +394,7 @@ def create_app(store: Store | None = None) -> Starlette:
         return await client.request(request.method, url, headers=headers, content=body)
 
     def relay(resp: httpx.Response) -> Response:
+        """Return the backend's response to the client, minus hop-by-hop headers."""
         headers = {k: v for k, v in resp.headers.items() if k.lower() not in _HOP}
         return Response(resp.content, status_code=resp.status_code, headers=headers)
 
@@ -406,6 +416,7 @@ def create_app(store: Store | None = None) -> Starlette:
         return relay(resp)
 
     async def object_tagging(request, client, bucket, key):
+        """Handle Get/Put/DeleteObjectTagging against the live object version."""
         resource = f"/{bucket}/{key}"
         if request.method == "GET":
             tags = await live_tags(client, bucket, key)
@@ -438,6 +449,7 @@ def create_app(store: Store | None = None) -> Starlette:
         return _error(405, "MethodNotAllowed", "The specified method is not allowed.")
 
     async def bucket_tagging(request, client, bucket):
+        """Handle Get/Put/DeleteBucketTagging."""
         if (await head(client, f"/{bucket}")).status_code != 200:
             return _error(
                 404, "NoSuchBucket", "The specified bucket does not exist", bucket
@@ -466,6 +478,7 @@ def create_app(store: Store | None = None) -> Starlette:
         return _error(405, "MethodNotAllowed", "The specified method is not allowed.")
 
     async def bucket_inventory(request, client, bucket):
+        """Handle List/Get/Put/DeleteBucketInventoryConfiguration(s)."""
         if (await head(client, f"/{bucket}")).status_code != 200:
             return _error(
                 404, "NoSuchBucket", "The specified bucket does not exist", bucket
@@ -514,6 +527,7 @@ def create_app(store: Store | None = None) -> Starlette:
         return _error(405, "MethodNotAllowed", "The specified method is not allowed.")
 
     async def bucket_policy(request, client, bucket, status_only: bool):
+        """Handle Get/Put/DeleteBucketPolicy and GetBucketPolicyStatus."""
         if (await head(client, f"/{bucket}")).status_code != 200:
             return _error(
                 404, "NoSuchBucket", "The specified bucket does not exist", bucket
@@ -550,6 +564,7 @@ def create_app(store: Store | None = None) -> Starlette:
         return _error(405, "MethodNotAllowed", "The specified method is not allowed.")
 
     async def bucket_notification(request, client, bucket):
+        """Handle Get/PutBucketNotificationConfiguration."""
         if (await head(client, f"/{bucket}")).status_code != 200:
             return _error(
                 404, "NoSuchBucket", "The specified bucket does not exist", bucket
@@ -643,6 +658,7 @@ def create_app(store: Store | None = None) -> Starlette:
         return Response(status_code=204)
 
     async def handle(request: Request) -> Response:
+        """Route an S3 request to its extension handler, or relay it to the backend."""
         bucket, key = _split(request.url.path)
         q = request.query_params
         async with httpx.AsyncClient(timeout=None) as client:

@@ -60,6 +60,7 @@ class Config:
 
 
 def _strip_ns(elem: ET.Element) -> ET.Element:
+    """Strip XML namespaces from ``elem`` and its descendants."""
     for node in elem.iter():
         node.tag = node.tag.rsplit("}", 1)[-1]
     return elem
@@ -92,6 +93,7 @@ def normalize(body: bytes) -> Config:
 
 
 def _s3():
+    """Return a path-style S3 client for the backend S3Proxy."""
     import boto3
     from botocore.config import Config as BotoConfig
 
@@ -208,6 +210,7 @@ def start_scheduler(store) -> None:
     interval = float(os.environ.get("OBLAKO_S3_INVENTORY_INTERVAL", 24 * 3600))
 
     def loop():
+        """Regenerate every enabled report once per interval, forever."""
         while True:
             time.sleep(interval)
             for bucket, _, xml in store.all_inventory():

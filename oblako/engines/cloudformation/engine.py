@@ -24,12 +24,14 @@ STATE = Path.home() / ".oblako" / "cloudformation" / "stacks.json"
 
 
 def _encode(value):
+    """Encode datetimes as ``{"__time__": iso}`` for json.dumps."""
     if isinstance(value, datetime.datetime):
         return {"__time__": value.isoformat()}
     raise TypeError(f"cannot store {type(value).__name__}")
 
 
 def _revive(obj: dict):
+    """Turn a ``{"__time__": iso}`` object back into a datetime."""
     if set(obj) == {"__time__"}:
         return datetime.datetime.fromisoformat(obj["__time__"])
     return obj
@@ -62,10 +64,13 @@ class StackNotFound(Exception):
 
 # CloudFormation-flavored YAML (handles !Ref, !GetAtt, !Sub, … short tags)
 class _CfnLoader(yaml.SafeLoader):
+    """YAML loader that understands CloudFormation's short-form ``!`` tags."""
+
     pass
 
 
 def _multi(loader, tag_suffix, node):
+    """Construct a ``!Tag`` node as its long-form intrinsic, e.g. ``{"Fn::Sub": ...}``."""
     tag = tag_suffix  # e.g. "Ref", "GetAtt", "Sub", "Join"
     if isinstance(node, yaml.ScalarNode):
         value = loader.construct_scalar(node)
@@ -95,6 +100,7 @@ def parse_template(body: str) -> dict:
 
 # Intrinsic resolution
 def _resolve(node, ctx):
+    """Resolve Ref, GetAtt, Sub and Join intrinsics throughout ``node``."""
     if isinstance(node, dict):
         if len(node) == 1:
             ((k, v),) = node.items()
@@ -123,6 +129,7 @@ def _resolve(node, ctx):
 
 
 def _ref(name, ctx):
+    """Resolve a Ref to a pseudo parameter, parameter or physical id."""
     pseudo = {
         "AWS::Region": config.region(),
         "AWS::AccountId": config.account_id(),
@@ -141,9 +148,11 @@ def _ref(name, ctx):
 
 
 def _sub(template, ctx):
+    """Substitute ``${Name}`` and ``${Logical.Attr}`` references in a Fn::Sub string."""
     import re
 
     def repl(m):
+        """Return the resolved value for one ``${...}`` reference."""
         name = m.group(1).strip()
         if "." in name:  # ${Logical.Attr} is a GetAtt inside Fn::Sub
             logical, _, attr = name.partition(".")
@@ -165,6 +174,7 @@ def _resource_deps(resource):
     )
 
     def walk(node):
+        """Collect Ref and GetAtt targets found under ``node`` into ``deps``."""
         if isinstance(node, dict):
             for k, v in node.items():
                 if k == "Ref" and isinstance(v, str):
@@ -188,6 +198,7 @@ def _ordered(resources):
     ordered, seen = [], set()
 
     def visit(rid, stack):
+        """Append ``rid`` after its dependencies, skipping cycles."""
         if rid in seen or rid in stack:
             return
         stack.add(rid)
@@ -261,6 +272,7 @@ class StackStore:
         ]
 
     def _new_stack(self, name, template, params):
+        """Return a new, empty stack record in REVIEW_IN_PROGRESS."""
         return {
             "StackId": f"arn:aws:cloudformation:{config.region()}:{config.account_id()}:stack/{name}/{uuid.uuid4()}",
             "StackName": name,
@@ -584,6 +596,7 @@ class StackStore:
 
 
 def _event(stack, logical, rtype, physical, status, reason=None):
+    """Return a stack event record for one resource status change."""
     if rtype == "AWS::CloudFormation::Stack":
         # as on AWS: a stack's own events carry its ARN, which clients such as
         # sam deploy use to tell them from its resources' events

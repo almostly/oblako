@@ -121,6 +121,7 @@ class RdsDataExecutor:
     # Connections / metadata
     # -------------------------------------------------------------------------------
     def _connect(self, database=None, autocommit=True):
+        """Open a PostgreSQL (psycopg2) or MySQL (pymysql) connection to ``database``."""
         db = database or self.database
         if self.engine == "mysql":
             try:
@@ -161,6 +162,7 @@ class RdsDataExecutor:
         return self._connect(database), True
 
     def _pg_types(self, conn) -> dict[int, str]:
+        """Return PostgreSQL type names by OID, read once from pg_type."""
         if self._pg_type_cache is None:
             with conn.cursor() as cur:
                 cur.execute("SELECT oid, typname FROM pg_type")
@@ -168,6 +170,7 @@ class RdsDataExecutor:
         return self._pg_type_cache
 
     def _mysql_types(self) -> dict[int, str]:
+        """Return MySQL type names by pymysql FIELD_TYPE code."""
         if self._mysql_type_cache is None:
             FIELD_TYPE = importlib.import_module("pymysql.constants").FIELD_TYPE
 
@@ -179,11 +182,13 @@ class RdsDataExecutor:
         return self._mysql_type_cache
 
     def _typename(self, type_code, conn) -> str:
+        """Return the engine's type name for a cursor type code."""
         if self.engine == "mysql":
             return self._mysql_types().get(type_code, "unknown")
         return self._pg_types(conn).get(type_code, "unknown")
 
     def _column_metadata(self, conn, description) -> list[dict]:
+        """Return the Data API columnMetadata for a cursor description."""
         # psycopg2 Column namedtuples and pymysql tuples both index positionally:
         # (name, type_code, display_size, internal_size, precision, scale, null_ok)
         cols = []
@@ -205,6 +210,7 @@ class RdsDataExecutor:
     # -------------------------------------------------------------------------------
     @staticmethod
     def _param_scalar(field: dict):
+        """Return the Python value of a Data API Field (None, bytes, JSON or scalar)."""
         if not field or field.get("isNull"):
             return None
         if "blobValue" in field:
@@ -214,6 +220,7 @@ class RdsDataExecutor:
         return next(iter(field.values()))
 
     def _bind(self, sql: str, parameters):
+        """Return the SQL with ``:name`` turned into ``%(name)s`` and the named values."""
         if not parameters:
             return sql, None
         named = {p["name"]: self._param_scalar(p.get("value", {})) for p in parameters}
@@ -296,6 +303,7 @@ class RdsDataExecutor:
         return tid
 
     def _pop(self, transaction_id):
+        """Remove and return a transaction's connection, else raise ValueError."""
         with self._lock:
             conn = self._txns.pop(transaction_id, None)
         if conn is None:

@@ -46,12 +46,14 @@ class BedrockService(Service):
     # it is: oblako starts no container of its own, and `oblako down` leaves it alone.
     # -------------------------------------------------------------------------------
     def _ollama_answers(self) -> bool:
+        """Return True if Ollama answers on its API port."""
         try:
             return httpx.get(f"{self.url}/api/tags", timeout=2.0).status_code == 200
         except httpx.HTTPError:
             return False
 
     def _own_container_running(self) -> bool:
+        """Return True if oblako's own Ollama container is running."""
         try:
             return self.backend.status(self.container_name) == RUNNING
         except Exception:
@@ -71,6 +73,7 @@ class BedrockService(Service):
         return super().status()
 
     def _health_check(self) -> bool:
+        """Return True if Ollama answers."""
         return self._ollama_answers()
 
     # -------------------------------------------------------------------------------
@@ -106,6 +109,7 @@ class BedrockService(Service):
         return start_in_thread(port=self.runtime_port, ollama_url=self.url)
 
     def _boto_client(self, service: str, autostart: bool):
+        """Return a boto3 client on the Bedrock runtime engine, starting it if asked."""
         from oblako.engines import bedrock_runtime
         from . import boto
 
@@ -126,6 +130,7 @@ class BedrockService(Service):
         return self._boto_client("bedrock", autostart)
 
     def _health_check(self) -> bool:
+        """Return True if Ollama lists its models."""
         try:
             resp = httpx.get(f"{self.url}/api/tags", timeout=3.0)
             return resp.status_code == 200

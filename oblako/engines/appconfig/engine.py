@@ -30,6 +30,7 @@ class AppConfigError(Exception):
 
 
 def _now() -> str:
+    """Return the current UTC time as an ISO 8601 string."""
     return datetime.datetime.now(datetime.timezone.utc).isoformat()
 
 
@@ -89,6 +90,7 @@ class AppConfigStore:
 
     # Resolution helpers — AppConfig accepts an Id or a Name as an identifier.
     def _resolve_app(self, identifier: str) -> dict:
+        """Return the application with this Id or Name, else raise."""
         with self._lock:
             for app in self.applications.values():
                 if identifier in (app["Id"], app["Name"]):
@@ -96,6 +98,7 @@ class AppConfigStore:
         raise AppConfigError(f"Application '{identifier}' not found")
 
     def _resolve_env(self, app_id: str, identifier: str) -> dict:
+        """Return the application's environment with this Id or Name, else raise."""
         for env in self.environments.values():
             if env["ApplicationId"] == app_id and identifier in (
                 env["Id"],
@@ -105,6 +108,7 @@ class AppConfigStore:
         raise AppConfigError(f"Environment '{identifier}' not found")
 
     def _resolve_profile(self, app_id: str, identifier: str) -> dict:
+        """Return the application's configuration profile with this Id or Name, else raise."""
         for p in self.profiles.values():
             if p["ApplicationId"] == app_id and identifier in (p["Id"], p["Name"]):
                 return p

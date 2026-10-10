@@ -44,6 +44,7 @@ def vanity_routes() -> dict[str, str]:
 
 
 def _caddyfile(routes: dict[str, str]) -> str:
+    """Return a Caddyfile that reverse-proxies each host to its upstream."""
     lines = ["{", "    auto_https off", "    admin off", "}", ""]
     for host, upstream in routes.items():
         # Rewrite the upstream Host header to localhost so MLflow 3's DNS-rebinding
@@ -92,6 +93,7 @@ class CaddyService(Service):
         return "127.0.0.1 " + " ".join(self.routes.keys())
 
     def _health_check(self) -> bool:
+        """Return True if Caddy answers on its port."""
         try:
             # Caddy without a default site returns 404 on /, but the port is open.
             resp = httpx.get(f"http://localhost:{self.host_port}/", timeout=3.0)

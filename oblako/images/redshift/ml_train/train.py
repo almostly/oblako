@@ -22,6 +22,7 @@ CONFIG = "/opt/ml/input/config/hyperparameters.json"
 
 
 def _load():
+    """Read the training CSVs: features, then the target, per row."""
     X, y = [], []
     for path in sorted(glob.glob(os.path.join(INPUT, "*.csv"))):
         with open(path) as fh:
@@ -99,6 +100,7 @@ def train_mlp(X, y, classify, multiclass):
 
 
 def _flatten_tree(node, out):
+    """Flatten an XGBoost JSON tree into node id -> split or leaf."""
     nid = str(node["nodeid"])
     if "leaf" in node:
         out[nid] = {"leaf": node["leaf"]}
@@ -216,7 +218,10 @@ def _fit_scorer(model_type, X, y, classify, multiclass, hp):
         ).fit(X, [classes.index(v) for v in y])
 
         class _Wrapped:
+            """A classifier that predicts the original class labels."""
+
             def predict(self, Xt):
+                """Return the predicted class labels for the rows."""
                 return [classes[int(i)] for i in clf.predict(Xt)]
 
         return _Wrapped()

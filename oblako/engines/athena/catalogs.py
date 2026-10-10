@@ -37,6 +37,7 @@ def rewrite(sql: str) -> str:
     """Point fully qualified S3 Tables names in ``sql`` at Trino's iceberg catalog."""
 
     def to_iceberg(match: re.Match) -> str:
+        """Return the iceberg-catalog name for one matched S3 Tables reference."""
         bucket = match.group(1).lower()
         namespace = (match.group(2) or match.group(3)).lower()
         return f'iceberg."{bucket}.{namespace}"'

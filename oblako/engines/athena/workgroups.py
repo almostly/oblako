@@ -23,6 +23,7 @@ _ENGINE = {
 
 
 def _default_path() -> Path:
+    """Return the workgroups state file, from OBLAKO_ATHENA_WORKGROUPS or ~/.oblako."""
     return Path(
         os.environ.get(
             "OBLAKO_ATHENA_WORKGROUPS",
@@ -32,6 +33,7 @@ def _default_path() -> Path:
 
 
 def _now() -> float:
+    """Return the current UTC time as epoch seconds."""
     return datetime.datetime.now(datetime.timezone.utc).timestamp()
 
 
@@ -68,6 +70,7 @@ class WorkGroups:
         )
 
     def _save(self) -> None:
+        """Write the workgroups to the state file."""
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._path.write_text(json.dumps(self._groups, indent=1))
 

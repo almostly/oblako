@@ -21,6 +21,7 @@ from oblako import ports
 
 
 def _local(port: int) -> str:
+    """Return the localhost URL for a port."""
     return f"http://localhost:{port}"
 
 
@@ -123,6 +124,7 @@ def make_env(workdir: Path) -> dict[str, str]:
 
 
 def _code(*lines: str) -> dict:
+    """Return a notebook code cell with the given source lines."""
     return {
         "cell_type": "code",
         "metadata": {},
@@ -133,6 +135,7 @@ def _code(*lines: str) -> dict:
 
 
 def _md(*lines: str) -> dict:
+    """Return a notebook markdown cell with the given source lines."""
     return {"cell_type": "markdown", "metadata": {}, "source": "\n".join(lines)}
 
 

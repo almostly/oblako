@@ -147,6 +147,7 @@ class TrinoService(Service):
         return {"columns": columns or [], "types": types, "rows": rows}
 
     def _health_check(self) -> bool:
+        """Return True if Trino is up and done starting."""
         try:
             resp = httpx.get(f"{self.endpoint_url}/v1/info", timeout=3.0)
             return resp.status_code == 200 and not resp.json().get("starting", True)

@@ -33,6 +33,7 @@ def use_local_stubs() -> None:
     import contextlib
 
     def _keep_role(provided_role=None, **_):
+        """Return the provided role without validating it."""
         return provided_role
 
     # 1. keep the provided role as-is instead of validating it through STS/IAM.
@@ -53,6 +54,7 @@ def use_local_stubs() -> None:
         from sagemaker.core.helper.session_helper import Session
 
         def _local_bucket(self):
+            """Return the explicit default bucket, or ``local``."""
             return getattr(self, "_default_bucket_name_override", None) or "local"
 
         Session.default_bucket = _local_bucket
@@ -62,6 +64,7 @@ def use_local_stubs() -> None:
         from sagemaker.serve.mode import local_container_mode
 
         def _use_local_image(self, image):
+            """Connect to Docker without pulling the image."""
             self.client = local_container_mode._get_docker_client()
             self.client.ping()
 
@@ -84,6 +87,7 @@ def use_local_stubs() -> None:
 
         @functools.wraps(original)
         def _download_folder(bucket_name, prefix, target, sagemaker_session):
+            """Download an S3 folder, treating NoSuchKey on the prefix as a folder."""
             from botocore.exceptions import ClientError
 
             try:

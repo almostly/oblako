@@ -47,6 +47,7 @@ def _split_top_level(text: str) -> list[str]:
 
 
 def _closing_paren(text: str, open_at: int) -> int:
+    """Return the index of the paren closing the one at ``open_at``, skipping quotes."""
     depth, quote = 0, False
     for i in range(open_at, len(text)):
         ch = text[i]
@@ -62,6 +63,7 @@ def _closing_paren(text: str, open_at: int) -> int:
 
 
 def _unquote(value: str) -> str:
+    """Strip surrounding single quotes from a property value, if present."""
     value = value.strip()
     return value[1:-1] if value[:1] == "'" and value[-1:] == "'" else value
 

@@ -54,6 +54,7 @@ def load() -> dict[str, dict]:
 
 
 def _save(state: dict[str, dict]) -> None:
+    """Write the namespaces and workgroups to the state file atomically."""
     STATE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=1))
@@ -66,10 +67,12 @@ def get_workgroup_record(name: str) -> dict | None:
 
 
 def _now() -> str:
+    """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def _arn(kind: str, resource_id: str) -> str:
+    """Return the Redshift Serverless ARN of a namespace or workgroup id."""
     return (
         f"arn:aws:redshift-serverless:{config.region()}:{config.account_id()}"
         f":{kind}/{resource_id}"
@@ -77,6 +80,7 @@ def _arn(kind: str, resource_id: str) -> str:
 
 
 def _check_name(kind: str, name: str | None) -> str:
+    """Return ``name`` if it is a valid resource name, else raise ValidationException."""
     if not name or not _NAME.match(name):
         raise ServerlessError(
             "ValidationException",
@@ -89,6 +93,7 @@ def _check_name(kind: str, name: str | None) -> str:
 # The engine: a namespace's admin user and database
 # ---------------------------------------------------------------------------
 def _engine():
+    """Open an autocommit connection to the shared Redshift engine as its own user."""
     import psycopg
 
     from oblako.services import RedshiftService
@@ -155,10 +160,12 @@ def _drop_from_engine(record: dict) -> None:
 # Namespaces
 # ---------------------------------------------------------------------------
 def _namespace_view(record: dict) -> dict:
+    """Return the namespace as the API shows it (no oblako fields or tags)."""
     return {k: v for k, v in record.items() if k not in ("created", "tags")}
 
 
 def _workgroup_view(record: dict) -> dict:
+    """Return the workgroup as the API shows it (no tags)."""
     return {k: v for k, v in record.items() if k != "tags"}
 
 
@@ -203,6 +210,7 @@ def create_namespace(req: dict) -> dict:
 
 
 def _namespace(state: dict, name: str | None) -> dict:
+    """Return the namespace's record, else raise ResourceNotFoundException."""
     record = state["namespaces"].get(name or "")
     if record is None:
         raise ServerlessError(
@@ -282,6 +290,7 @@ def create_workgroup(req: dict) -> dict:
 
 
 def _workgroup(state: dict, name: str | None) -> dict:
+    """Return the workgroup's record, else raise ResourceNotFoundException."""
     record = state["workgroups"].get(name or "")
     if record is None:
         raise ServerlessError(
@@ -315,6 +324,7 @@ def delete_workgroup(req: dict) -> dict:
 # Tags (on namespaces and workgroups, by ARN)
 # ---------------------------------------------------------------------------
 def _by_arn(state: dict, arn: str) -> dict:
+    """Return the namespace or workgroup with this ARN, else raise ResourceNotFoundException."""
     for kind in ("namespaces", "workgroups"):
         for record in state[kind].values():
             if arn in (record.get("namespaceArn"), record.get("workgroupArn")):

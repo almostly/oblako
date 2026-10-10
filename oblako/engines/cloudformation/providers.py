@@ -16,23 +16,27 @@ from oblako.services import boto
 
 
 def _s3_client():
+    """Return an S3 client for the local S3Proxy."""
     from oblako.services import S3ProxyService
 
     return S3ProxyService().get_client()
 
 
 def _dynamodb_client():
+    """Return a DynamoDB client for the local DynamoDB."""
     from oblako.services import DynamoDBService
 
     return boto.client("dynamodb", DynamoDBService(host_port=8001).endpoint_url)
 
 
 def _moto_client(service):
+    """Return a boto3 client for ``service`` on moto."""
     return boto.client(service, "http://localhost:5500", region="us-east-1")
 
 
 # AWS::S3::Bucket
 def _s3_create(logical_id, props, ctx):
+    """AWS::S3::Bucket: create the bucket; return its name."""
     name = (
         props.get("BucketName")
         or f"{ctx['stack']}-{logical_id}-{uuid.uuid4().hex[:8]}".lower()
@@ -42,6 +46,7 @@ def _s3_create(logical_id, props, ctx):
 
 
 def _s3_delete(physical_id, props):
+    """AWS::S3::Bucket: empty and delete the bucket, ignoring errors."""
     s3 = _s3_client()
     try:
         objs = s3.list_objects_v2(Bucket=physical_id).get("Contents", [])
@@ -54,6 +59,7 @@ def _s3_delete(physical_id, props):
 
 # AWS::DynamoDB::Table
 def _ddb_create(logical_id, props, ctx):
+    """AWS::DynamoDB::Table: create the table (on-demand by default); return its name."""
     name = props.get("TableName") or f"{ctx['stack']}-{logical_id}"
     kwargs = {
         "TableName": name,
@@ -71,6 +77,7 @@ def _ddb_create(logical_id, props, ctx):
 
 
 def _ddb_delete(physical_id, props):
+    """AWS::DynamoDB::Table: delete the table, ignoring errors."""
     try:
         _dynamodb_client().delete_table(TableName=physical_id)
     except Exception:
@@ -79,6 +86,7 @@ def _ddb_delete(physical_id, props):
 
 # AWS::Redshift::Cluster (control plane via moto)
 def _redshift_create(logical_id, props, ctx):
+    """AWS::Redshift::Cluster: create the cluster on moto; return its identifier."""
     cid = props.get("ClusterIdentifier") or f"{ctx['stack']}-{logical_id}".lower()
     rs = _moto_client("redshift")
     kwargs = {
@@ -97,6 +105,7 @@ def _redshift_create(logical_id, props, ctx):
 
 
 def _redshift_delete(physical_id, props):
+    """AWS::Redshift::Cluster: delete the cluster without a final snapshot."""
     try:
         _moto_client("redshift").delete_cluster(
             ClusterIdentifier=physical_id, SkipFinalClusterSnapshot=True
@@ -120,6 +129,7 @@ def _serverless_attrs(prefix: str, record: dict) -> dict:
 
 
 def _namespace_create(logical_id, props, ctx):
+    """AWS::RedshiftServerless::Namespace: create the namespace."""
     from oblako.engines.redshift_control import serverless
 
     name = props.get("NamespaceName") or f"{ctx['stack']}-{logical_id}".lower()
@@ -136,6 +146,7 @@ def _namespace_create(logical_id, props, ctx):
 
 
 def _namespace_delete(physical_id, props):
+    """AWS::RedshiftServerless::Namespace: delete the namespace if it exists."""
     from oblako.engines.redshift_control import serverless
 
     try:
@@ -145,6 +156,7 @@ def _namespace_delete(physical_id, props):
 
 
 def _workgroup_create(logical_id, props, ctx):
+    """AWS::RedshiftServerless::Workgroup: create the workgroup."""
     from oblako.engines.redshift_control import serverless
 
     name = props.get("WorkgroupName") or f"{ctx['stack']}-{logical_id}".lower()
@@ -163,6 +175,7 @@ def _workgroup_create(logical_id, props, ctx):
 
 
 def _workgroup_delete(physical_id, props):
+    """AWS::RedshiftServerless::Workgroup: delete the workgroup if it exists."""
     from oblako.engines.redshift_control import serverless
 
     try:
@@ -173,6 +186,7 @@ def _workgroup_delete(physical_id, props):
 
 # AWS::RDS::DBInstance (control plane via moto)
 def _rds_create(logical_id, props, ctx):
+    """AWS::RDS::DBInstance: create the instance on moto; return its identifier."""
     iid = props.get("DBInstanceIdentifier") or f"{ctx['stack']}-{logical_id}".lower()
     kwargs = {
         "DBInstanceIdentifier": iid,
@@ -189,6 +203,7 @@ def _rds_create(logical_id, props, ctx):
 
 
 def _rds_delete(physical_id, props):
+    """AWS::RDS::DBInstance: delete the instance without a final snapshot."""
     try:
         _moto_client("rds").delete_db_instance(
             DBInstanceIdentifier=physical_id, SkipFinalSnapshot=True
@@ -200,6 +215,7 @@ def _rds_delete(physical_id, props):
 # AWS::IAM::Role (control plane via moto), e.g. the implicit role SAM creates:
 # the role with its inline Policies and ManagedPolicyArns, as CloudFormation does
 def _iam_create(logical_id, props, ctx):
+    """AWS::IAM::Role: create the role with its inline and managed policies."""
     name = props.get("RoleName") or f"{ctx['stack']}-{logical_id}"
     trust = props.get("AssumeRolePolicyDocument", {})
     iam = _moto_client("iam")
@@ -222,6 +238,7 @@ def _iam_create(logical_id, props, ctx):
 
 
 def _iam_delete(physical_id, props):
+    """AWS::IAM::Role: remove the role's policies, then the role."""
     # IAM refuses to delete a role with policies: remove them first, as
     # CloudFormation does
     name = physical_id.rsplit("/", 1)[-1]
@@ -241,6 +258,7 @@ def _iam_delete(physical_id, props):
 # AWS::EC2::Instance — moto metadata + a real container-backed instance
 # (instance == container, EBS == Docker volume), same as Ec2Service.run_instance.
 def _ec2_create(logical_id, props, ctx):
+    """AWS::EC2::Instance: run the instance on moto, backed by a container."""
     from oblako.services.ec2 import start_instance_container
 
     ec2 = _moto_client("ec2")
@@ -266,6 +284,7 @@ def _ec2_create(logical_id, props, ctx):
 
 
 def _ec2_delete(physical_id, props):
+    """AWS::EC2::Instance: terminate the instance and its container."""
     from oblako.services.ec2 import terminate_instance_container
 
     try:
@@ -279,6 +298,7 @@ def _ec2_delete(physical_id, props):
 # real execution stays in `sam local`; this stores a describable record (a
 # placeholder zip; the original CodeUri is kept in the description).
 def _lambda_create(logical_id, props, ctx):
+    """AWS::Lambda::Function: register the function on moto with placeholder code."""
     name = props.get("FunctionName") or f"{ctx['stack']}-{logical_id}"
     kwargs = {
         "FunctionName": name,
@@ -300,6 +320,7 @@ def _lambda_create(logical_id, props, ctx):
 
 
 def _lambda_delete(physical_id, props):
+    """AWS::Lambda::Function: delete the function, ignoring errors."""
     try:
         _moto_client("lambda").delete_function(FunctionName=physical_id)
     except Exception:
@@ -308,11 +329,13 @@ def _lambda_delete(physical_id, props):
 
 # AWS::ApiGateway::RestApi (control plane via moto)
 def _apigw_create(logical_id, props, ctx):
+    """AWS::ApiGateway::RestApi: create the REST API; return its id."""
     name = props.get("Name") or f"{ctx['stack']}-{logical_id}"
     return _moto_client("apigateway").create_rest_api(name=name)["id"]
 
 
 def _apigw_delete(physical_id, props):
+    """AWS::ApiGateway::RestApi: delete the REST API, ignoring errors."""
     try:
         _moto_client("apigateway").delete_rest_api(restApiId=physical_id)
     except Exception:
@@ -321,6 +344,7 @@ def _apigw_delete(physical_id, props):
 
 # AWS::StepFunctions::StateMachine -> Step Functions Local (real engine)
 def _sfn_create(logical_id, props, ctx):
+    """AWS::StepFunctions::StateMachine: create the state machine; return its ARN."""
     from oblako.services import StepFunctionsService
 
     name = props.get("StateMachineName") or f"{ctx['stack']}-{logical_id}"
@@ -341,6 +365,7 @@ def _sfn_create(logical_id, props, ctx):
 
 
 def _sfn_delete(physical_id, props):
+    """AWS::StepFunctions::StateMachine: delete the state machine."""
     from oblako.services import StepFunctionsService
 
     try:
@@ -355,6 +380,7 @@ def _sfn_delete(physical_id, props):
 # topology, real engine). We verify it's reachable and hand back its endpoint;
 # we don't spin up — or, on delete, tear down — the shared cluster.
 def _opensearch_create(logical_id, props, ctx):
+    """AWS::OpenSearchService::Domain: hand out the shared local OpenSearch."""
     import httpx
 
     from oblako.services import OpenSearchService
@@ -373,6 +399,7 @@ def _opensearch_create(logical_id, props, ctx):
 
 
 def _opensearch_delete(physical_id, props):
+    """AWS::OpenSearchService::Domain: nothing to delete on the shared engine."""
     pass  # shared engine — the domain is just a handle
 
 
@@ -384,6 +411,7 @@ _ELBV2 = None
 
 
 def _ecs_elbv2():
+    """Return the shared (EcsService, Elbv2Service) pair, creating it on first use."""
     global _ECS, _ELBV2
     if _ECS is None:
         from oblako.services import EcsService, Elbv2Service, MotoService
@@ -396,12 +424,14 @@ def _ecs_elbv2():
 
 # AWS::ECS::Cluster (control plane via moto)
 def _ecs_cluster_create(logical_id, props, ctx):
+    """AWS::ECS::Cluster: create the cluster; return its name."""
     name = props.get("ClusterName") or f"{ctx['stack']}-{logical_id}"
     _moto_client("ecs").create_cluster(clusterName=name)
     return name
 
 
 def _ecs_cluster_delete(physical_id, props):
+    """AWS::ECS::Cluster: delete the cluster, ignoring errors."""
     try:
         _moto_client("ecs").delete_cluster(cluster=physical_id)
     except Exception:
@@ -409,6 +439,7 @@ def _ecs_cluster_delete(physical_id, props):
 
 
 def _lower_first(key):
+    """Return ``key`` with its first letter lowercased."""
     return key[:1].lower() + key[1:]
 
 
@@ -454,11 +485,13 @@ def _cfn_taskdef_to_boto(props):
 
 # AWS::ECS::TaskDefinition (moto metadata; the spec oblako runs from)
 def _ecs_taskdef_create(logical_id, props, ctx):
+    """AWS::ECS::TaskDefinition: register the task definition; return its ARN."""
     ecs, _ = _ecs_elbv2()
     return ecs.register_task_definition(**_cfn_taskdef_to_boto(props))  # Ref -> arn
 
 
 def _ecs_taskdef_delete(physical_id, props):
+    """AWS::ECS::TaskDefinition: deregister the task definition."""
     try:
         _moto_client("ecs").deregister_task_definition(taskDefinition=physical_id)
     except Exception:
@@ -467,6 +500,7 @@ def _ecs_taskdef_delete(physical_id, props):
 
 # AWS::ECS::Service -> run desiredCount real tasks, register them as ALB targets
 def _ecs_service_create(logical_id, props, ctx):
+    """AWS::ECS::Service: create the service and run its tasks."""
     ecs, _ = _ecs_elbv2()
     name = props.get("ServiceName") or f"{ctx['stack']}-{logical_id}"
     cluster = props.get("Cluster", "default")
@@ -499,6 +533,7 @@ def _ecs_service_create(logical_id, props, ctx):
 
 
 def _ecs_service_delete(physical_id, props):
+    """AWS::ECS::Service: delete the service."""
     ecs, _ = _ecs_elbv2()
     name = physical_id.rsplit("/", 1)[-1]  # physical id may be the service ARN
     ecs.delete_service(name, cluster=props.get("Cluster", "default"))
@@ -506,6 +541,7 @@ def _ecs_service_delete(physical_id, props):
 
 # AWS::ElasticLoadBalancingV2::LoadBalancer -> a real Caddy reverse proxy
 def _elb_lb_create(logical_id, props, ctx):
+    """AWS::ElasticLoadBalancingV2::LoadBalancer: create the load balancer."""
     _, elbv2 = _ecs_elbv2()
     name = props.get("Name") or f"{ctx['stack']}-{logical_id}"[:32]
     # Subnets/SecurityGroups from the template are ignored: the local proxy binds
@@ -530,12 +566,14 @@ def _elb_lb_create(logical_id, props, ctx):
 
 
 def _elb_lb_delete(physical_id, props):
+    """AWS::ElasticLoadBalancingV2::LoadBalancer: delete the load balancer."""
     _, elbv2 = _ecs_elbv2()
     elbv2.delete_load_balancer(physical_id)
 
 
 # AWS::ElasticLoadBalancingV2::TargetGroup
 def _elb_tg_create(logical_id, props, ctx):
+    """AWS::ElasticLoadBalancingV2::TargetGroup: create the target group."""
     _, elbv2 = _ecs_elbv2()
     name = props.get("Name") or f"{ctx['stack']}-{logical_id}"[:32]
     kwargs = {
@@ -558,6 +596,7 @@ def _elb_tg_create(logical_id, props, ctx):
 
 
 def _elb_tg_delete(physical_id, props):
+    """AWS::ElasticLoadBalancingV2::TargetGroup: delete the target group."""
     try:
         _moto_client("elbv2").delete_target_group(TargetGroupArn=physical_id)
     except Exception:
@@ -566,6 +605,7 @@ def _elb_tg_delete(physical_id, props):
 
 # AWS::ElasticLoadBalancingV2::Listener -> wire the LB's proxy to the target group
 def _elb_listener_create(logical_id, props, ctx):
+    """AWS::ElasticLoadBalancingV2::Listener: create the listener; return its ARN."""
     _, elbv2 = _ecs_elbv2()
     listener = elbv2.create_listener(
         LoadBalancerArn=props["LoadBalancerArn"],
@@ -577,11 +617,13 @@ def _elb_listener_create(logical_id, props, ctx):
 
 
 def _elb_listener_delete(physical_id, props):
+    """AWS::ElasticLoadBalancingV2::Listener: nothing to do; it goes with its LB."""
     pass  # the proxy is torn down with its load balancer
 
 
 # AWS::Logs::LogGroup (control plane via moto; local containers log to the backend)
 def _logs_create(logical_id, props, ctx):
+    """AWS::Logs::LogGroup: create the log group; return its name."""
     name = props.get("LogGroupName") or f"/oblako/{ctx['stack']}/{logical_id}"
     try:
         _moto_client("logs").create_log_group(logGroupName=name)
@@ -591,6 +633,7 @@ def _logs_create(logical_id, props, ctx):
 
 
 def _logs_delete(physical_id, props):
+    """AWS::Logs::LogGroup: delete the log group, ignoring errors."""
     try:
         _moto_client("logs").delete_log_group(logGroupName=physical_id)
     except Exception:
@@ -599,6 +642,7 @@ def _logs_delete(physical_id, props):
 
 # AWS::EC2::SecurityGroup (moto metadata; not enforced for local routing)
 def _sg_create(logical_id, props, ctx):
+    """AWS::EC2::SecurityGroup: create the group in the default VPC."""
     ec2 = _moto_client("ec2")
     vpc = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])["Vpcs"]
     vpc_id = vpc[0]["VpcId"] if vpc else ec2.describe_vpcs()["Vpcs"][0]["VpcId"]
@@ -611,6 +655,7 @@ def _sg_create(logical_id, props, ctx):
 
 
 def _sg_delete(physical_id, props):
+    """AWS::EC2::SecurityGroup: delete the group, ignoring errors."""
     try:
         _moto_client("ec2").delete_security_group(GroupId=physical_id)
     except Exception:

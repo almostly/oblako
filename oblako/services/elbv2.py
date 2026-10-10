@@ -30,12 +30,14 @@ PROXY_PORT = 8080  # the listen port inside each ALB proxy container
 
 
 def _docker():
+    """Return a Docker client for the configured container backend."""
     from .backends import docker_client
 
     return docker_client()
 
 
 def _free_port() -> int:
+    """Return a free TCP port on the host."""
     s = socket.socket()
     try:
         s.bind(("", 0))
@@ -45,6 +47,7 @@ def _free_port() -> int:
 
 
 def _proxy_name(lb_id: str) -> str:
+    """Return the proxy container name for a load balancer."""
     return f"oblako-elb-{lb_id[:12]}"
 
 
@@ -202,6 +205,7 @@ class Elbv2Service(BotoService):
 
     # Internals
     def _lbs_for_tg(self, tg_arn: str) -> list[str]:
+        """Return the ARNs of the load balancers that forward to a target group."""
         return [
             ln["lb_arn"] for ln in self._listeners.values() if ln["tg_arn"] == tg_arn
         ]

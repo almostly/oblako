@@ -63,9 +63,11 @@ class Service:
         return f"oblako-{self.name}"
 
     def _port_bindings(self) -> dict:
+        """Return the container-port to host-port bindings."""
         return {f"{p.container_port}/{p.protocol}": p.host_port for p in self.ports}
 
     def _exposed_ports(self) -> list:
+        """Return the container ports to expose."""
         return [f"{p.container_port}/{p.protocol}" for p in self.ports]
 
     # Lifecycle

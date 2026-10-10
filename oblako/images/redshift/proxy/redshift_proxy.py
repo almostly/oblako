@@ -458,6 +458,7 @@ def _external_schemas() -> set[str]:
         import psycopg
 
         def conninfo(db: str) -> str:
+            """Return the connection string for a database on the engine's socket."""
             return (
                 f"host={os.path.dirname(PG_SOCKET)} port={PG_PORT} user={PG_USER} "
                 f"dbname={db} connect_timeout=2"
@@ -939,6 +940,7 @@ async def _pipe_typed(
 
 
 async def _handle(client_reader, client_writer) -> None:
+    """Relay one client connection to the engine, rewriting its SQL."""
     # Terminate SSL and read the StartupMessage before opening the backend, so no
     # relay task touches the client stream during the TLS handshake.
     try:

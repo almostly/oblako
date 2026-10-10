@@ -110,6 +110,7 @@ def rewrite_super_paths(sql: str) -> str:
     pat = re.compile(r"(" + root + r")(" + step + r"+)", re.IGNORECASE)
 
     def repl(m: re.Match) -> str:
+        """Rewrite one SUPER dot navigation into a jsonb path."""
         chain = m.group(2)
         # Pure bracket navigation (data['a'][0]) already works via native jsonb
         # subscripting; only dot navigation needs rewriting. (Quoted keys are also

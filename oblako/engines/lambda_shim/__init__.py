@@ -65,6 +65,7 @@ FUNCTIONS = {"bedrock-invoke": bedrock_invoke}
 
 
 async def _invocations(request: Request) -> JSONResponse:
+    """POST /2015-03-31/functions/{name}/invocations: run the registered handler."""
     name = request.path_params["name"]
     handler = FUNCTIONS.get(name)
     if handler is None:
@@ -90,6 +91,7 @@ def create_app() -> Starlette:
     """Build the Starlette ASGI app exposing the Lambda Invoke route."""
 
     async def health(_request: Request) -> JSONResponse:
+        """Report that the server is up and list the registered functions."""
         return JSONResponse({"status": "ok", "functions": list(FUNCTIONS)})
 
     return Starlette(

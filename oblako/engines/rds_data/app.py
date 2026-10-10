@@ -129,6 +129,7 @@ def create_app(executor: RdsDataExecutor | None = None) -> Starlette:
     h = RdsDataApp(executor)
 
     async def health(_request: Request) -> Response:
+        """Return a liveness check."""
         return JSONResponse({"status": "ok"})
 
     return Starlette(

@@ -24,6 +24,7 @@ NOTEBOOK_PORT = 8889  # host port the in-instance JupyterLab is published on
 
 
 def _domain_stack(name: str) -> str:
+    """Return the CloudFormation stack name for a domain."""
     return f"oblako-sagemaker-{name}"
 
 
@@ -145,7 +146,9 @@ class SageMakerService:
         timeout: int = ...,
         return_logs: Literal[False] = ...,
         on_container=...,
-    ) -> dict[str, bytes]: ...
+    ) -> dict[str, bytes]:
+        """Run a training container and return its model artifacts."""
+        ...
 
     @overload
     def run_training(
@@ -159,7 +162,9 @@ class SageMakerService:
         *,
         return_logs: Literal[True],
         on_container=...,
-    ) -> tuple[dict[str, bytes], str]: ...
+    ) -> tuple[dict[str, bytes], str]:
+        """Run a training container and return its model artifacts and logs."""
+        ...
 
     def run_training(
         self,
@@ -314,12 +319,14 @@ class SageMakerService:
     # EBS volume. launch_notebook then runs JupyterLab *inside* that instance,
     # EBS-as-home, pre-wired to oblako's services.
     def _cfn(self):
+        """Return a CloudFormation client."""
         from .cloudformation import CloudFormationService
 
         return CloudFormationService().get_client()
 
     def _ec2(self):
         # EC2's control plane is moto (what Ec2Service.get_client() returns too).
+        """Return an EC2 client on moto."""
         from .boto import client
         from .moto import MotoService
 

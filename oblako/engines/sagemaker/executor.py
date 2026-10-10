@@ -34,6 +34,7 @@ _REGION = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
 
 
 def _now() -> datetime.datetime:
+    """Return the current UTC time."""
     return datetime.datetime.now(datetime.timezone.utc)
 
 
@@ -62,6 +63,7 @@ def _s3_client():
 
 
 def _split_uri(uri: str) -> tuple[str, str]:
+    """Split an S3 URI into (bucket, key)."""
     rest = uri[len("s3://") :]
     bucket, _, key = rest.partition("/")
     return bucket, key

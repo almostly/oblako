@@ -53,10 +53,12 @@ _ATTR_TYPES = {"S": "S", "N": "N", "B": "B"}
 
 
 def _json(data: dict, status: int = 200) -> Response:
+    """Return a DynamoDB JSON response."""
     return Response(json.dumps(data), status_code=status, media_type=_JSON)
 
 
 def _err(code: str, message: str, status: int = 400) -> Response:
+    """Return a DynamoDB-style error response."""
     full = f"com.amazonaws.dynamodb.v20120810#{code}"
     return Response(
         json.dumps({"__type": full, "message": message}),
@@ -70,6 +72,7 @@ class _Invalid(Exception):
     """A request DynamoDB would reject; carries the error code."""
 
     def __init__(self, message: str, code: str = "ValidationException"):
+        """Carry the message and the DynamoDB error code."""
         super().__init__(message)
         self.code = code
 
@@ -85,11 +88,15 @@ def _table_name(name_or_arn: str) -> str:
 # Persistent state: vector indexes, extra attribute definitions, tags
 # ---------------------------------------------------------------------------
 class _State:
+    """Per-table vector indexes, extra attribute definitions and tags."""
+
     def __init__(self, path: Path):
+        """Bind to the JSON state file."""
         self.path = path
         self._lock = threading.RLock()
 
     def load(self) -> dict:
+        """Return the whole state, or {} if the file is missing or corrupt."""
         if self.path.exists():
             try:
                 return json.loads(self.path.read_text())
@@ -98,21 +105,25 @@ class _State:
         return {}
 
     def save(self, data: dict) -> None:
+        """Write the state atomically."""
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=1))
         tmp.replace(self.path)
 
     def table(self, name: str) -> dict:
+        """Return the stored metadata for a table."""
         return self.load().get(name, {})
 
     def update(self, name: str, **fields) -> None:
+        """Merge fields into a table's stored metadata."""
         with self._lock:
             data = self.load()
             data[name] = {**data.get(name, {}), **fields}
             self.save(data)
 
     def drop(self, name: str) -> None:
+        """Remove a table's stored metadata."""
         with self._lock:
             data = self.load()
             data.pop(name, None)
@@ -159,6 +170,7 @@ class VectorProxy:
             return _err(e.code, str(e))
 
     def _headers(self, op: str, auth: dict) -> dict:
+        """Return request headers for a DynamoDB Local call."""
         return {"X-Amz-Target": _TARGET_PREFIX + op, "Content-Type": _JSON, **auth}
 
     async def _forward(self, op: str, body: bytes, auth: dict) -> Response:
@@ -331,6 +343,7 @@ class VectorProxy:
     # Tags
     # -------------------------------------------------------------------------
     async def _require_table(self, arn: str, auth: dict) -> str:
+        """Return the table name for an ARN; raise ResourceNotFound if it's missing."""
         table = _table_name(arn)
         status, _ = await self._ddb("DescribeTable", {"TableName": table}, auth)
         if status != 200:
@@ -367,6 +380,7 @@ class VectorProxy:
     # Write validation
     # -------------------------------------------------------------------------
     def _validate_item(self, table: str, item: dict) -> None:
+        """Check an item's vectors and partition keys against the vector indexes."""
         meta = self.state.table(table)
         definitions = {
             a["AttributeName"]: a["AttributeType"]
@@ -474,6 +488,7 @@ class VectorProxy:
         return _json({"SearchResults": results})
 
     async def _scan(self, table: str, auth: dict):
+        """Yield every item in a table, following Scan pagination."""
         start_key = None
         while True:
             request: dict = {"TableName": table}
@@ -524,6 +539,7 @@ def _check_index(index: dict, definitions: list[dict]) -> None:
 
 
 def _index_spec(index: dict) -> dict:
+    """Return the stored spec for a vector index definition."""
     schema = index.get("SearchSchema", []) or []
     return {
         "attribute": index["VectorAttribute"]["AttributeName"],
@@ -543,6 +559,7 @@ def _index_spec(index: dict) -> dict:
 
 
 def _describe_index(name: str, spec: dict, table_arn: str) -> dict:
+    """Return the DescribeTable entry for a vector index."""
     description = {
         "IndexName": name,
         "VectorAttribute": {"AttributeName": spec["attribute"]},
@@ -600,6 +617,7 @@ def _parse_condition(
 
 
 def _parse_projection(expression: str | None, names: dict) -> list[str] | None:
+    """Return the attribute names in a projection expression, or None for all."""
     if not expression:
         return None
     out = []

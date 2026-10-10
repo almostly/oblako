@@ -100,6 +100,7 @@ def get(name: str) -> dict | None:
 
 
 def _save(records: dict[str, dict]) -> None:
+    """Write all environment records to the state file atomically."""
     STATE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE.with_suffix(".tmp")
     tmp.write_text(json.dumps(records, indent=1, default=str))
@@ -124,6 +125,7 @@ def set_tags(name: str, tags: dict[str, str]) -> None:
 
 
 def _drop(name: str) -> None:
+    """Remove an environment's record."""
     with _lock:
         records = load()
         records.pop(name, None)
@@ -131,6 +133,7 @@ def _drop(name: str) -> None:
 
 
 def _now() -> str:
+    """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
 
 
@@ -148,6 +151,7 @@ def files_dir(name: str) -> Path:
 # Docker plumbing
 # ---------------------------------------------------------------------------
 def _docker():
+    """Return a Docker client."""
     from oblako.services.backends import docker_client
 
     return docker_client()
@@ -159,6 +163,7 @@ def container_name(name: str, role: str) -> str:
 
 
 def _network_name(name: str) -> str:
+    """Return the name of an environment's Docker network."""
     return f"oblako-mwaa-{name}"
 
 
@@ -168,6 +173,7 @@ def image(version: str) -> str:
 
 
 def _free_port() -> int:
+    """Return a free TCP port on the host."""
     with socket.socket() as s:
         s.bind(("", 0))
         return s.getsockname()[1]
@@ -272,6 +278,7 @@ def _airflow_env(name: str, record: dict) -> dict[str, str]:
 
 
 def _volumes(name: str) -> dict[str, dict]:
+    """Return the bind mounts of an environment's synced folders into Airflow."""
     root = files_dir(name)
     return {
         str(root / folder): {"bind": f"{AIRFLOW_HOME}/{folder}", "mode": "rw"}
@@ -280,6 +287,7 @@ def _volumes(name: str) -> dict[str, dict]:
 
 
 def _remove_container(client, container: str) -> None:
+    """Force-remove a container, if it exists."""
     from docker.errors import NotFound
 
     with contextlib.suppress(NotFound):
@@ -378,6 +386,7 @@ def _wait_for_webserver(record: dict, timeout: float = 900) -> None:
 
 
 def _stop(client, name: str) -> None:
+    """Force-remove every container labelled with the environment."""
     for container in client.containers.list(
         all=True, filters={"label": f"oblako.mwaa={name}"}
     ):
@@ -388,12 +397,14 @@ def _stop(client, name: str) -> None:
 # Files from S3
 # ---------------------------------------------------------------------------
 def _s3():
+    """Return an S3 client for oblako's S3."""
     from oblako.services import boto
 
     return boto.client("s3", f"http://localhost:{ports.S3}")
 
 
 def _bucket(record: dict) -> str:
+    """Return the bucket name from the record's SourceBucketArn."""
     return record["SourceBucketArn"].split(":::", 1)[-1]
 
 
@@ -434,6 +445,7 @@ def _fetch_files(name: str, record: dict) -> None:
         (root / folder).mkdir(parents=True, exist_ok=True)
 
     def read(key: str, version: str | None) -> bytes:
+        """Return an S3 object's bytes (at ``version`` if given), else raise MwaaError."""
         kwargs = {"VersionId": version} if version else {}
         try:
             return s3.get_object(Bucket=_bucket(record), Key=key, **kwargs)[
@@ -530,7 +542,10 @@ def _without_nulls(value):
 
 
 def _in_background(name: str, work, done_status: str = "AVAILABLE") -> None:
+    """Run ``work`` in a thread, then set the status (or the failure) on the record."""
+
     def run():
+        """Run the work and record success, or the failure unless being deleted."""
         try:
             work()
             done = {
@@ -578,6 +593,7 @@ def create(name: str, req: dict) -> dict:
         record = _update(name, fields, create=True)
 
     def work():
+        """Build the image and network, fetch files, and start the containers."""
         client = _docker()
         ensure_image(version)
         from docker.errors import NotFound
@@ -619,6 +635,7 @@ def update(name: str, req: dict) -> dict:
     record = _update(name, changes)
 
     def work():
+        """Fetch the files and restart Airflow with the new settings."""
         client = _docker()
         _fetch_files(name, record)
         _start_airflow(client, name, record)

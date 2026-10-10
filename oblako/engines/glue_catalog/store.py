@@ -49,6 +49,7 @@ class GlueStore:
             )
 
     def _q(self, sql: str, args: tuple = ()) -> list[tuple]:
+        """Run one SQL statement, commit, and return its rows."""
         with self._lock:
             rows = self._db.execute(sql, args).fetchall()
             self._db.commit()
@@ -186,6 +187,7 @@ class GlueStore:
     # -------------------------------------------------------------------------
     @staticmethod
     def _key(values: list[str]) -> str:
+        """Return the partition values as the JSON key they are stored under."""
         return json.dumps(list(values))
 
     def partition(self, db: str, tbl: str, values: list[str]) -> dict | None:

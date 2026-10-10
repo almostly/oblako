@@ -63,11 +63,15 @@ class GlueError(Exception):
 
 
 def _not_found(message: str) -> GlueError:
+    """Return an EntityNotFoundException with the message."""
     return GlueError("EntityNotFoundException", message)
 
 
 def _action(name: str):
+    """Register the decorated function as the handler of a Glue action."""
+
     def deco(fn):
+        """Add the handler to the action table and return it unchanged."""
         _ACTIONS[name] = fn
         return fn
 
@@ -75,6 +79,7 @@ def _action(name: str):
 
 
 def _store() -> GlueStore:
+    """Return the shared SQLite store, opening it on first use."""
     if not _stores:
         with _lock:
             if not _stores:
@@ -83,6 +88,7 @@ def _store() -> GlueStore:
 
 
 def _iceberg_url() -> str:
+    """Return the Iceberg REST catalog's URL (``OBLAKO_ICEBERG_URL`` or the default)."""
     return os.environ.get("OBLAKO_ICEBERG_URL") or DEFAULT_ICEBERG_URL
 
 
@@ -100,6 +106,7 @@ def _rest(method: str, path: str, **kwargs) -> httpx.Response | None:
 
 
 def _rest_namespaces() -> list[str]:
+    """Return the REST catalog's namespace names, or [] if it isn't running."""
     resp = _rest("GET", "/namespaces")
     if resp is None or resp.status_code != 200:
         return []
@@ -107,11 +114,13 @@ def _rest_namespaces() -> list[str]:
 
 
 def _rest_namespace(name: str) -> dict | None:
+    """Return one REST catalog namespace, or None."""
     resp = _rest("GET", f"/namespaces/{name}")
     return resp.json() if resp is not None and resp.status_code == 200 else None
 
 
 def _rest_tables(db: str) -> list[str]:
+    """Return the table names in a REST catalog namespace."""
     resp = _rest("GET", f"/namespaces/{db}/tables")
     if resp is None or resp.status_code != 200:
         return []
@@ -210,6 +219,7 @@ def _table_to_glue(
 
 
 def _is_iceberg(table: dict) -> bool:
+    """Return True if the table's parameters say ``table_type=ICEBERG``."""
     params = table.get("Parameters") or {}
     return str(params.get("table_type", "")).upper() == "ICEBERG"
 
@@ -226,6 +236,7 @@ def _page(items: list, body: dict, default_size: int) -> tuple[list, dict]:
 # Databases
 # ---------------------------------------------------------------------------
 def _database(name: str) -> dict | None:
+    """Return a database as Glue describes it, from the store and the REST catalog, or None."""
     stored = _store().database(name)
     namespace = _rest_namespace(name)
     if stored is None and namespace is None:
@@ -240,6 +251,7 @@ def _database(name: str) -> dict | None:
 
 
 def _require_database(name: str) -> dict:
+    """Return a database, raising EntityNotFoundException if there is none."""
     db = _database(name)
     if db is None:
         raise _not_found(f"Database {name} not found.")
@@ -248,6 +260,7 @@ def _require_database(name: str) -> dict:
 
 @_action("AWSGlue.GetDatabases")
 def _get_databases(body):
+    """GetDatabases: return one page of databases from both stores."""
     names = sorted(set(_store().databases()) | set(_rest_namespaces()))
     page, more = _page(names, body, 100)
     return {"DatabaseList": [d for d in map(_database, page) if d], **more}
@@ -255,11 +268,13 @@ def _get_databases(body):
 
 @_action("AWSGlue.GetDatabase")
 def _get_database(body):
+    """GetDatabase: return one database by name."""
     return {"Database": _require_database(body["Name"].lower())}
 
 
 @_action("AWSGlue.CreateDatabase")
 def _create_database(body):
+    """CreateDatabase: add a REST namespace and its Glue metadata."""
     db_input = dict(body["DatabaseInput"])
     name = db_input["Name"] = db_input["Name"].lower()
     if _database(name) is not None:
@@ -274,6 +289,7 @@ def _create_database(body):
 
 @_action("AWSGlue.UpdateDatabase")
 def _update_database(body):
+    """UpdateDatabase: replace a database's DatabaseInput."""
     name = body["Name"].lower()
     _require_database(name)
     _store().put_database(name, {**body["DatabaseInput"], "Name": name})
@@ -282,6 +298,7 @@ def _update_database(body):
 
 @_action("AWSGlue.DeleteDatabase")
 def _delete_database(body):
+    """DeleteDatabase: drop a database, its Iceberg registrations and its tables."""
     name = body["Name"].lower()
     _require_database(name)
     for table in _rest_tables(name):
@@ -296,6 +313,7 @@ def _delete_database(body):
 # reads to reach a database, e.g. a JDBC URL with a user and password
 # ---------------------------------------------------------------------------
 def _connection(name: str, hide_password: bool) -> dict:
+    """Return a stored connection, without its password if ``hide_password``."""
     conn = _store().connection(name)
     if conn is None:
         raise _not_found(f"Connection {name} not found.")
@@ -308,6 +326,7 @@ def _connection(name: str, hide_password: bool) -> dict:
 
 @_action("AWSGlue.CreateConnection")
 def _create_connection(body):
+    """CreateConnection: store a new connection."""
     conn_input = dict(body["ConnectionInput"])
     name = conn_input["Name"]
     if _store().connection(name) is not None:
@@ -318,11 +337,13 @@ def _create_connection(body):
 
 @_action("AWSGlue.GetConnection")
 def _get_connection(body):
+    """GetConnection: return one connection by name."""
     return {"Connection": _connection(body["Name"], body.get("HidePassword", False))}
 
 
 @_action("AWSGlue.GetConnections")
 def _get_connections(body):
+    """GetConnections: return one page of connections matching the filter."""
     flt = body.get("Filter") or {}
     hide = body.get("HidePassword", False)
     conns = [_connection(n, hide) for n in _store().connections()]
@@ -337,6 +358,7 @@ def _get_connections(body):
 
 @_action("AWSGlue.UpdateConnection")
 def _update_connection(body):
+    """UpdateConnection: replace a connection's ConnectionInput."""
     name = body["Name"]
     _connection(name, False)
     _store().put_connection(name, {**body["ConnectionInput"], "Name": name})
@@ -345,6 +367,7 @@ def _update_connection(body):
 
 @_action("AWSGlue.DeleteConnection")
 def _delete_connection(body):
+    """DeleteConnection: remove one connection."""
     name = body["ConnectionName"]
     _connection(name, False)
     _store().delete_connection(name)
@@ -353,6 +376,7 @@ def _delete_connection(body):
 
 @_action("AWSGlue.BatchDeleteConnection")
 def _batch_delete_connection(body):
+    """BatchDeleteConnection: remove connections, reporting the ones not found."""
     gone, errors = [], {}
     for name in body.get("ConnectionNameList") or []:
         if _store().connection(name) is None:
@@ -391,6 +415,7 @@ def _table(db: str, name: str) -> dict | None:
 
 
 def _require_table(db: str, name: str) -> dict:
+    """Return a table, raising EntityNotFoundException if there is none."""
     table = _table(db, name)
     if table is None:
         raise _not_found(f"Table {name} not found.")
@@ -408,6 +433,7 @@ def _name_matches(pattern: str, name: str) -> bool:
 
 @_action("AWSGlue.GetTables")
 def _get_tables(body):
+    """GetTables: return one page of a database's tables, filtered by Expression."""
     db = body["DatabaseName"].lower()
     _require_database(db)
     names = sorted({t["Name"] for t in _store().tables(db)} | set(_rest_tables(db)))
@@ -419,11 +445,13 @@ def _get_tables(body):
 
 @_action("AWSGlue.GetTable")
 def _get_table(body):
+    """GetTable: return one table by name."""
     return {"Table": _require_table(body["DatabaseName"].lower(), body["Name"])}
 
 
 @_action("AWSGlue.CreateTable")
 def _create_table(body):
+    """CreateTable: store a table, registering an Iceberg one in the REST catalog."""
     db = body["DatabaseName"].lower()
     table_input = dict(body["TableInput"])
     name = table_input["Name"] = table_input["Name"].lower()
@@ -452,6 +480,7 @@ def _create_table(body):
 
 @_action("AWSGlue.UpdateTable")
 def _update_table(body):
+    """UpdateTable: replace a table's input, moving an Iceberg table to its new metadata."""
     db = body["DatabaseName"].lower()
     table_input = dict(body["TableInput"])
     name = table_input["Name"] = table_input["Name"].lower()
@@ -483,6 +512,7 @@ def _update_table(body):
 
 
 def _delete_one(db: str, name: str) -> None:
+    """Delete one table, dropping its Iceberg registration if it has one."""
     table = _require_table(db, name)
     if _is_iceberg(table):
         _drop_registration(db, table["Name"])
@@ -491,12 +521,14 @@ def _delete_one(db: str, name: str) -> None:
 
 @_action("AWSGlue.DeleteTable")
 def _delete_table(body):
+    """DeleteTable: remove one table."""
     _delete_one(body["DatabaseName"].lower(), body["Name"])
     return {}
 
 
 @_action("AWSGlue.BatchDeleteTable")
 def _batch_delete_table(body):
+    """BatchDeleteTable: remove tables, reporting the ones that failed."""
     errors = []
     for name in body["TablesToDelete"]:
         try:
@@ -515,6 +547,7 @@ def _batch_delete_table(body):
 # Partitions (Hive-style tables)
 # ---------------------------------------------------------------------------
 def _partition_error(values: list[str], err: GlueError) -> dict:
+    """Return a PartitionError entry for the values and the error."""
     return {
         "PartitionValues": values,
         "ErrorDetail": {"ErrorCode": err.code, "ErrorMessage": str(err)},
@@ -522,6 +555,7 @@ def _partition_error(values: list[str], err: GlueError) -> dict:
 
 
 def _create_partition(db: str, table: str, part_input: dict) -> None:
+    """Store a partition, raising AlreadyExistsException if it exists."""
     if not _store().put_partition(db, table, part_input):
         raise GlueError(
             "AlreadyExistsException",
@@ -531,6 +565,7 @@ def _create_partition(db: str, table: str, part_input: dict) -> None:
 
 @_action("AWSGlue.CreatePartition")
 def _create_partition_action(body):
+    """CreatePartition: add one partition to a table."""
     db = body["DatabaseName"].lower()
     table = _require_table(db, body["TableName"])["Name"]
     _create_partition(db, table, body["PartitionInput"])
@@ -539,6 +574,7 @@ def _create_partition_action(body):
 
 @_action("AWSGlue.BatchCreatePartition")
 def _batch_create_partition(body):
+    """BatchCreatePartition: add partitions, reporting the ones that failed."""
     db = body["DatabaseName"].lower()
     table = _require_table(db, body["TableName"])["Name"]
     errors = []
@@ -551,6 +587,7 @@ def _batch_create_partition(body):
 
 
 def _require_partition(db: str, table: str, values: list[str]) -> dict:
+    """Return a partition, raising EntityNotFoundException if there is none."""
     partition = _store().partition(db, table, values)
     if partition is None:
         raise _not_found(f"Partition {values} not found.")
@@ -559,6 +596,7 @@ def _require_partition(db: str, table: str, values: list[str]) -> dict:
 
 @_action("AWSGlue.GetPartition")
 def _get_partition(body):
+    """GetPartition: return one partition by its values."""
     db = body["DatabaseName"].lower()
     table = _require_table(db, body["TableName"])["Name"]
     return {"Partition": _require_partition(db, table, body["PartitionValues"])}
@@ -566,6 +604,7 @@ def _get_partition(body):
 
 @_action("AWSGlue.GetPartitions")
 def _get_partitions(body):
+    """GetPartitions: return one page of a table's partitions, filtered and segmented."""
     db = body["DatabaseName"].lower()
     table = _require_table(db, body["TableName"])
     partitions = _store().partitions(db, table["Name"])
@@ -581,6 +620,7 @@ def _get_partitions(body):
             ) from err
 
         def matches(partition: dict) -> bool:
+            """Return True if the partition's values satisfy the expression."""
             row = {k["Name"].lower(): v for k, v in zip(keys, partition["Values"])}
             try:
                 return wanted(row)
@@ -598,6 +638,7 @@ def _get_partitions(body):
 
 @_action("AWSGlue.BatchGetPartition")
 def _batch_get_partition(body):
+    """BatchGetPartition: return the partitions that exist among the keys."""
     db = body["DatabaseName"].lower()
     table = _require_table(db, body["TableName"])["Name"]
     found = (
@@ -607,6 +648,7 @@ def _batch_get_partition(body):
 
 
 def _update_partition(db: str, table: str, values: list[str], part_input: dict) -> None:
+    """Replace a partition's input, moving it if its values change."""
     _require_partition(db, table, values)
     if list(part_input.get("Values") or values) != list(values):
         _store().delete_partition(db, table, values)
@@ -617,6 +659,7 @@ def _update_partition(db: str, table: str, values: list[str], part_input: dict) 
 
 @_action("AWSGlue.UpdatePartition")
 def _update_partition_action(body):
+    """UpdatePartition: replace one partition."""
     db = body["DatabaseName"].lower()
     table = _require_table(db, body["TableName"])["Name"]
     _update_partition(db, table, body["PartitionValueList"], body["PartitionInput"])
@@ -625,6 +668,7 @@ def _update_partition_action(body):
 
 @_action("AWSGlue.BatchUpdatePartition")
 def _batch_update_partition(body):
+    """BatchUpdatePartition: replace partitions, reporting the ones that failed."""
     db = body["DatabaseName"].lower()
     table = _require_table(db, body["TableName"])["Name"]
     errors = []
@@ -640,6 +684,7 @@ def _batch_update_partition(body):
 
 @_action("AWSGlue.DeletePartition")
 def _delete_partition(body):
+    """DeletePartition: remove one partition."""
     db = body["DatabaseName"].lower()
     table = _require_table(db, body["TableName"])["Name"]
     if not _store().delete_partition(db, table, body["PartitionValues"]):
@@ -649,6 +694,7 @@ def _delete_partition(body):
 
 @_action("AWSGlue.BatchDeletePartition")
 def _batch_delete_partition(body):
+    """BatchDeletePartition: remove partitions, reporting the ones not found."""
     db = body["DatabaseName"].lower()
     table = _require_table(db, body["TableName"])["Name"]
     errors = []
@@ -663,6 +709,7 @@ def _batch_delete_partition(body):
 # Column statistics (what Trino's Hive connector records after a write)
 # ---------------------------------------------------------------------------
 def _stats_target(body: dict) -> tuple[str, str, list[str] | None]:
+    """Return the database, table and partition values a statistics request names."""
     db = body["DatabaseName"].lower()
     table = _require_table(db, body["TableName"])["Name"]
     values = body.get("PartitionValues")
@@ -674,6 +721,7 @@ def _stats_target(body: dict) -> tuple[str, str, list[str] | None]:
 @_action("AWSGlue.GetColumnStatisticsForTable")
 @_action("AWSGlue.GetColumnStatisticsForPartition")
 def _get_column_statistics(body):
+    """GetColumnStatisticsFor{Table,Partition}: return the stored statistics for the columns."""
     db, table, values = _stats_target(body)
     found = _store().column_stats(db, table, values, body["ColumnNames"])
     return {"ColumnStatisticsList": found, "Errors": []}
@@ -682,6 +730,7 @@ def _get_column_statistics(body):
 @_action("AWSGlue.UpdateColumnStatisticsForTable")
 @_action("AWSGlue.UpdateColumnStatisticsForPartition")
 def _update_column_statistics(body):
+    """UpdateColumnStatisticsFor{Table,Partition}: store column statistics."""
     db, table, values = _stats_target(body)
     for stats in body["ColumnStatisticsList"]:
         _store().put_column_stats(db, table, values, stats)
@@ -691,12 +740,14 @@ def _update_column_statistics(body):
 @_action("AWSGlue.DeleteColumnStatisticsForTable")
 @_action("AWSGlue.DeleteColumnStatisticsForPartition")
 def _delete_column_statistics(body):
+    """DeleteColumnStatisticsFor{Table,Partition}: remove one column's statistics."""
     db, table, values = _stats_target(body)
     _store().delete_column_stats(db, table, values, body["ColumnName"])
     return {}
 
 
 async def _glue_dispatch(request: Request) -> JSONResponse:
+    """Route a json-1.1 request to its action handler by ``X-Amz-Target``."""
     target = request.headers.get("X-Amz-Target", "")
     handler = _ACTIONS.get(target)
     if handler is None:
@@ -731,6 +782,7 @@ async def _glue_dispatch(request: Request) -> JSONResponse:
 
 
 async def _health(_request: Request) -> JSONResponse:
+    """Report the server is up and the actions it supports."""
     return JSONResponse({"status": "ok", "actions": sorted(_ACTIONS)})
 
 

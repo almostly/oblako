@@ -28,6 +28,7 @@ _PRIVATE = {"port", "fernet_key", "dag_etags", "error"}
 
 
 def _error(code: str, message: str, status: int = 400) -> JSONResponse:
+    """Return an AWS-style JSON error response."""
     return JSONResponse(
         {"message": message},
         status_code=status,
@@ -50,11 +51,13 @@ def _view(record: dict) -> dict:
 
 
 async def _body(request: Request) -> dict:
+    """Return the request body parsed as JSON ({} when empty)."""
     raw = await request.body()
     return json.loads(raw) if raw else {}
 
 
 async def _call(fn, *args):
+    """Run ``fn`` in a thread; turn an MwaaError into an error response."""
     try:
         return await run_in_threadpool(fn, *args)
     except envs.MwaaError as e:
@@ -150,6 +153,7 @@ def create_app() -> Starlette:
 
     @asynccontextmanager
     async def lifespan(app):
+        """Run the DAG sync loop in a thread while the app serves."""
         thread = threading.Thread(target=envs.sync_loop, args=(stop,), daemon=True)
         thread.start()
         yield

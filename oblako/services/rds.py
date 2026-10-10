@@ -35,6 +35,8 @@ POSTGRES_IMAGE = (
 
 
 class _EngineSpec(TypedDict):
+    """Container settings for one RDS database engine."""
+
     image: str
     container_port: int
     default_host_port: int
@@ -232,6 +234,7 @@ class RdsService(Service):
         )
 
     def _health_check(self) -> bool:
+        """Return True if the database accepts a connection."""
         try:
             conn = self.connect()
             conn.close()

@@ -60,14 +60,17 @@ def reset() -> None:
 # ARNs
 # ---------------------------------------------------------------------------
 def _bucket_arn(name: str) -> str:
+    """Return the ARN of a vector bucket."""
     return f"arn:aws:s3vectors:{config.region()}:{config.account_id()}:bucket/{name}"
 
 
 def _index_arn(bucket: str, index: str) -> str:
+    """Return the ARN of a vector index."""
     return f"arn:aws:s3vectors:{config.region()}:{config.account_id()}:bucket/{bucket}/index/{index}"
 
 
 def _parse_index_arn(arn: str) -> tuple[str, str] | None:
+    """Return (bucket, index) from an index ARN, or None if it isn't one."""
     tail = arn.split(":bucket/", 1)[-1]
     if "/index/" not in tail:
         return None
@@ -138,10 +141,12 @@ def _matches(meta: dict, flt: dict) -> bool:
 # Responses
 # ---------------------------------------------------------------------------
 def _ok(data: dict | None = None) -> Response:
+    """Return a JSON success response."""
     return JSONResponse(data or {})
 
 
 def _err(code: str, message: str, status: int = 400) -> Response:
+    """Return an S3 Vectors JSON error response."""
     return JSONResponse(
         {"__type": code, "message": message},
         status_code=status,
@@ -388,6 +393,7 @@ _HANDLERS = {name[3:]: fn for name, fn in globals().items() if name.startswith("
 # ASGI app
 # ---------------------------------------------------------------------------
 async def _dispatch(request: Request) -> Response:
+    """Dispatch an S3 Vectors request by its path to the operation handler."""
     op = request.url.path.lstrip("/")
     if op in _NOOP:
         return _ok()

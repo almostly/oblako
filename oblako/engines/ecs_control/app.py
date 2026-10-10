@@ -33,6 +33,7 @@ HANDLED = {"RunTask", "DescribeTasks", "ListTasks", "StopTask"}
 
 
 def _moto_url() -> str:
+    """Return the moto endpoint URL."""
     return os.environ.get("OBLAKO_MOTO_ENDPOINT") or f"http://localhost:{ports.MOTO}"
 
 
@@ -42,12 +43,14 @@ def _cluster_name(value: str | None) -> str:
 
 
 def _ecs():
+    """Return an ECS client for oblako."""
     from oblako.services import Oblako
 
     return Oblako().ecs
 
 
 def _error(code: str, message: str, status: int = 400) -> JSONResponse:
+    """Return an ECS-style error response."""
     return JSONResponse(
         {"__type": code, "message": message},
         status_code=status,

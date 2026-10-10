@@ -40,6 +40,7 @@ def _ident(raw: str) -> str:
 
 
 def _literal(value: str) -> str:
+    """Return ``value`` as a SQL string literal."""
     return "'" + value.replace("'", "''") + "'"
 
 
@@ -86,16 +87,19 @@ def _split(text: str) -> list[str]:
 
 
 def _skip(text: str, pos: int) -> int:
+    """Return the first position at or after ``pos`` that isn't whitespace."""
     while pos < len(text) and text[pos].isspace():
         pos += 1
     return pos
 
 
 def _array(names: list[str]) -> str:
+    """Return a text[] literal of ``names``."""
     return "ARRAY[" + ", ".join(_literal(n) for n in names) + "]::text[]"
 
 
 def _call(lead: str, function: str, args: list[str], tail: str) -> str:
+    """Return a DO statement that calls one pg_oblako masking function."""
     return (
         f"{lead}DO $oblako_ddm$ BEGIN PERFORM pg_oblako.{function}("
         + ", ".join(args)
@@ -119,6 +123,7 @@ def rewrite_masking(stmt: str) -> str:
 
 
 def _rewrite(verb: str, lead: str, body: str, semi: str) -> str | None:
+    """Rewrite one masking statement into its pg_oblako call, or return None."""
     if_not_exists = False
     if verb == "create" and (m := re.match(r"(?is)^if\s+not\s+exists\s+", body)):
         if_not_exists, body = True, body[m.end() :]

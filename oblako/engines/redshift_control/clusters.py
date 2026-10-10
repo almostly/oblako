@@ -40,6 +40,7 @@ _lock = threading.RLock()
 
 
 def _docker():
+    """Return a Docker client."""
     from oblako.services.backends import docker_client
 
     return docker_client()
@@ -57,6 +58,7 @@ def node_name(cluster_id: str, node: int | None) -> str:
 
 
 def _compute_alias(cluster_id: str, node: int) -> str:
+    """Return the network alias of a compute node."""
     return f"{cluster_id}-compute-{node}"
 
 
@@ -76,6 +78,7 @@ def get(cluster_id: str) -> dict | None:
 
 
 def _save(records: dict[str, dict]) -> None:
+    """Write all cluster records to the state file atomically."""
     STATE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE.with_suffix(".tmp")
     tmp.write_text(json.dumps(records, indent=1))
@@ -99,6 +102,7 @@ def _update(cluster_id: str, create: bool = False, **fields) -> dict:
 
 
 def _drop(cluster_id: str) -> None:
+    """Remove a cluster's record."""
     with _lock:
         records = load()
         records.pop(cluster_id, None)
@@ -109,6 +113,7 @@ def _in_background(cluster_id: str, work) -> None:
     """Run ``work`` in a thread; mark the cluster available, or failed with the error."""
 
     def run():
+        """Run the work, then mark the cluster available, failed, or clean up if deleted."""
         try:
             work(cluster_id)
             if get(cluster_id) is not None:
@@ -126,12 +131,14 @@ def _in_background(cluster_id: str, work) -> None:
 # Docker plumbing
 # ---------------------------------------------------------------------------
 def _free_port() -> int:
+    """Return a free TCP port on the host."""
     with socket.socket() as s:
         s.bind(("", 0))
         return s.getsockname()[1]
 
 
 def _network(client):
+    """Return the cluster Docker network, creating it if missing."""
     from docker.errors import NotFound
 
     try:
@@ -168,6 +175,7 @@ def _ensure_image(client) -> None:
 
 
 def _remove_container(client, name: str) -> None:
+    """Force-remove a container and its anonymous volumes, if it exists."""
     from docker.errors import NotFound
 
     try:
@@ -271,6 +279,7 @@ def _wait_ready(cluster_id: str, record: dict, timeout: float = 300.0) -> None:
 
 
 def _start(cluster_id: str) -> None:
+    """Start the compute nodes and the leader, wait for it, and record node IPs."""
     record = get(cluster_id)
     if record is None:
         return
@@ -291,6 +300,7 @@ def _start(cluster_id: str) -> None:
 
 
 def _remove(cluster_id: str) -> None:
+    """Remove every node container and data volume of the cluster."""
     client = _docker()
     for container in client.containers.list(
         all=True, filters={"label": f"oblako.redshift.cluster={cluster_id}"}
@@ -339,6 +349,7 @@ def reboot(cluster_id: str) -> None:
     _update(cluster_id, status="rebooting")
 
     def work(cid: str) -> None:
+        """Restart every node, compute nodes first, and wait for the cluster."""
         record = get(cid)
         if record is None:
             return

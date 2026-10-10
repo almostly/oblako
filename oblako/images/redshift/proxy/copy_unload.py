@@ -188,6 +188,7 @@ class CopyCommand(BaseModel):
     @field_validator("fmt")
     @classmethod
     def _upper(cls, v: str) -> str:
+        """Upper-case the format name."""
         return v.upper()
 
     def options(self) -> dict:
@@ -235,6 +236,7 @@ class UnloadCommand(BaseModel):
     @field_validator("fmt")
     @classmethod
     def _upper(cls, v: str) -> str:
+        """Upper-case the format name."""
         return v.upper()
 
     def options(self) -> dict:
@@ -496,6 +498,7 @@ def _render(fmt: str, options: dict, names, rows, oids) -> bytes:
         # NOTE: Redshift's docs say booleans are unloaded "as t or f"; JSON
         # true/false here until checked on Redshift
         def cell(value, oid):
+            """Return a cell's value as JSON can hold it."""
             value = _from_pg(value, oid)
             if isinstance(value, _dt.date | _dt.time):
                 return (

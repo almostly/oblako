@@ -47,10 +47,12 @@ MAX_NODES = 8  # compute nodes oblako starts for one cluster
 
 
 def _moto_url() -> str:
+    """Return the moto endpoint URL (OBLAKO_MOTO_ENDPOINT, else the local port)."""
     return os.environ.get("OBLAKO_MOTO_ENDPOINT") or f"http://localhost:{ports.MOTO}"
 
 
 def _tag(xml: str, name: str) -> str | None:
+    """Return the text of the first ``<name>`` element in ``xml``, or None."""
     m = re.search(rf"<{name}>([^<]*)</{name}>", xml)
     return m.group(1) if m else None
 
@@ -75,10 +77,12 @@ def error_response(code: str, message: str, status: int = 400) -> Response:
 # Response rewriting
 # ---------------------------------------------------------------------------
 def _endpoint(address: str, port: int) -> str:
+    """Return an Endpoint element for ``address`` and ``port``."""
     return f"<Endpoint><Address>{address}</Address><Port>{port}</Port></Endpoint>"
 
 
 def _cluster_nodes(ips: dict[str, str]) -> str:
+    """Return a ClusterNodes element listing each node role and private IP."""
     members = "".join(
         f"<member><NodeRole>{role}</NodeRole>"
         f"<PrivateIPAddress>{ip}</PrivateIPAddress>"
@@ -89,12 +93,14 @@ def _cluster_nodes(ips: dict[str, str]) -> str:
 
 
 def _set(block: str, pattern: re.Pattern, value: str) -> str:
+    """Replace the first match of ``pattern`` in ``block`` with ``value``, else append it."""
     if pattern.search(block):
         return pattern.sub(value, block, count=1)
     return block + value
 
 
 def _rewrite_cluster(block: str, records: dict[str, dict]) -> str:
+    """Rewrite one Cluster block with the endpoint, status and nodes that serve it."""
     cluster_id = _tag(block, "ClusterIdentifier") or ""
     record = records.get(cluster_id)
     if record is None:
@@ -131,6 +137,7 @@ class RedshiftControlProxy:
         self.backend = (backend_url or _moto_url()).rstrip("/")
 
     async def _forward(self, request: Request, body: bytes) -> httpx.Response:
+        """Send the request to moto unchanged (minus host and length); return its response."""
         headers = {
             k: v
             for k, v in request.headers.items()
@@ -147,6 +154,7 @@ class RedshiftControlProxy:
 
     @staticmethod
     def _multi_node(form: dict[str, str]) -> bool:
+        """Return True if the request asks for a multi-node cluster of more than one node."""
         return (
             form.get("ClusterType", "multi-node") == "multi-node"
             and int(form.get("NumberOfNodes", "1")) > 1
@@ -251,6 +259,7 @@ def _caller(request: Request) -> str:
 
 
 def _cluster_exists(cluster_id: str) -> bool:
+    """Return True if oblako runs the cluster or moto knows it."""
     if clusters.get(cluster_id) is not None:
         return True
     import boto3
@@ -340,6 +349,7 @@ async def serverless_credentials_response(request: Request, body: bytes) -> Resp
 
 
 def _json_response(result: dict, status: int) -> Response:
+    """Return ``result`` as a JSON 1.1 protocol response."""
     return Response(
         json.dumps(result), status_code=status, media_type="application/x-amz-json-1.1"
     )
@@ -363,6 +373,7 @@ async def serverless_response(operation: str, body: bytes) -> Response:
 
 
 def _json_error(code: str, message: str) -> dict:
+    """Return a JSON protocol error body."""
     return {"__type": code, "message": message}
 
 

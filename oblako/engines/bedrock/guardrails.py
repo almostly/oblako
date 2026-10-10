@@ -20,6 +20,7 @@ _PROFANITY = {"damn", "hell", "crap"}
 
 
 def _now() -> datetime.datetime:
+    """Return the current UTC time."""
     return datetime.datetime.now(datetime.timezone.utc)
 
 

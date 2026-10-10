@@ -18,7 +18,9 @@ repos:
     rev: 6.3.0
     hooks:
       - id: pydocstyle
-        # scope to the package; tests/examples/dashboard aren't docstring-checked
+        # scope to the package; tests/examples/dashboard aren't docstring-checked.
+        # pydocstyle asks for docstrings on public names only; tests/test_docstrings.py
+        # asks for one on every def and class here, private and nested ones too
         files: ^oblako/.*\.py$
         exclude: ^oblako/dashboard/
 

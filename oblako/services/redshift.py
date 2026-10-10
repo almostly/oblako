@@ -226,6 +226,7 @@ def remove_trust_keeper(site: Path) -> None:
 
 
 def _fingerprint(cert: str) -> str:
+    """Return the SHA-256 fingerprint of a PEM certificate."""
     import hashlib
     import ssl
 
@@ -256,6 +257,7 @@ def oblako_certs_in_bundle(bundle_path: str) -> set[str]:
 
 
 def _sha256(cert: str) -> str:
+    """Return the SHA-256 fingerprint of a PEM certificate, ignoring surrounding whitespace."""
     import hashlib
     import ssl
 
@@ -495,6 +497,7 @@ class RedshiftService(Service):
         )
 
     def _health_check(self) -> bool:
+        """Return True if Redshift accepts a connection."""
         try:
             self.connect().close()
             return True

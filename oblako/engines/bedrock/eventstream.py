@@ -17,6 +17,7 @@ _HEADER_TYPE_STRING = 7
 
 
 def _string_header(name: str, value: str) -> bytes:
+    """Encode one string-typed event-stream header."""
     name_bytes = name.encode("utf-8")
     value_bytes = value.encode("utf-8")
     return (

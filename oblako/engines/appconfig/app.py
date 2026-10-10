@@ -27,6 +27,7 @@ _store = AppConfigStore()
 
 
 def _err(exc: AppConfigError) -> JSONResponse:
+    """Return an AppConfigError as an AWS error response (400 or 404)."""
     status = 400 if exc.code == "BadRequestException" else 404
     return JSONResponse(
         {"Message": str(exc)},
@@ -36,6 +37,7 @@ def _err(exc: AppConfigError) -> JSONResponse:
 
 
 async def _json_body(request: Request) -> dict:
+    """Return the request body parsed as JSON ({} when empty)."""
     raw = await request.body()
     return json.loads(raw) if raw else {}
 
@@ -108,6 +110,7 @@ async def configuration_profile(request: Request):
 
 
 def _version_headers(v: dict) -> dict:
+    """Return the response headers that describe a hosted configuration version."""
     return {
         "Application-Id": v["ApplicationId"],
         "Configuration-Profile-Id": v["ConfigurationProfileId"],

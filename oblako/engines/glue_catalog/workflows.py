@@ -47,6 +47,7 @@ _TRIGGER_FIELDS = (
 
 
 def _load() -> dict:
+    """Return the triggers and workflows state from disk, with every section present."""
     state = json.loads(STATE.read_text()) if STATE.exists() else {}
     for key in ("workflows", "triggers", "runs", "seen"):
         state.setdefault(key, {})
@@ -54,6 +55,7 @@ def _load() -> dict:
 
 
 def _save(state: dict) -> None:
+    """Write the triggers and workflows state to disk atomically."""
     STATE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE.with_suffix(".tmp")
     tmp.write_text(json.dumps(state, indent=1, default=str))
@@ -61,6 +63,7 @@ def _save(state: dict) -> None:
 
 
 def _require(state: dict, kind: str, name: str) -> dict:
+    """Return a workflow or trigger, raising EntityNotFoundException if there is none."""
     item = state[kind].get(name)
     if item is None:
         label = {"workflows": "Workflow", "triggers": "Trigger"}[kind]
@@ -73,6 +76,7 @@ def _require(state: dict, kind: str, name: str) -> dict:
 # ---------------------------------------------------------------------------
 @_action("AWSGlue.CreateTrigger")
 def _create_trigger(body):
+    """CreateTrigger: store a new trigger after checking its type, schedule and predicate."""
     name = body["Name"]
     if body.get("Type") not in ("ON_DEMAND", "SCHEDULED", "CONDITIONAL", "EVENT"):
         raise GlueError(
@@ -106,11 +110,13 @@ def _create_trigger(body):
 
 @_action("AWSGlue.GetTrigger")
 def _get_trigger(body):
+    """GetTrigger: return one trigger by name."""
     return {"Trigger": _require(_load(), "triggers", body["Name"])}
 
 
 @_action("AWSGlue.GetTriggers")
 def _get_triggers(body):
+    """GetTriggers: return the triggers, optionally those that start a job."""
     triggers = list(_load()["triggers"].values())
     if job := body.get("DependentJobName"):
         triggers = [
@@ -121,6 +127,7 @@ def _get_triggers(body):
 
 @_action("AWSGlue.ListTriggers")
 def _list_triggers(body):
+    """ListTriggers: return the trigger names, optionally those that start a job."""
     triggers = _load()["triggers"].values()
     if job := body.get("DependentJobName"):
         triggers = [
@@ -131,6 +138,7 @@ def _list_triggers(body):
 
 @_action("AWSGlue.BatchGetTriggers")
 def _batch_get_triggers(body):
+    """BatchGetTriggers: return the named triggers and the ones not found."""
     triggers = _load()["triggers"]
     names = body.get("TriggerNames") or []
     return {
@@ -141,6 +149,7 @@ def _batch_get_triggers(body):
 
 @_action("AWSGlue.UpdateTrigger")
 def _update_trigger(body):
+    """UpdateTrigger: change a trigger's definition."""
     with _lock:
         state = _load()
         trigger = _require(state, "triggers", body["Name"])
@@ -152,6 +161,7 @@ def _update_trigger(body):
 
 @_action("AWSGlue.DeleteTrigger")
 def _delete_trigger(body):
+    """DeleteTrigger: remove one trigger."""
     with _lock:
         state = _load()
         _require(state, "triggers", body["Name"])
@@ -162,6 +172,7 @@ def _delete_trigger(body):
 
 @_action("AWSGlue.StartTrigger")
 def _start_trigger(body):
+    """StartTrigger: fire an on-demand trigger now, or activate any other."""
     name = body["Name"]
     with _lock:
         state = _load()
@@ -181,6 +192,7 @@ def _start_trigger(body):
 
 @_action("AWSGlue.StopTrigger")
 def _stop_trigger(body):
+    """StopTrigger: deactivate a trigger."""
     with _lock:
         state = _load()
         trigger = _require(state, "triggers", body["Name"])
@@ -254,6 +266,7 @@ def _holds(predicate: dict, done: dict[tuple[str, str], str]) -> bool:
 # ---------------------------------------------------------------------------
 @_action("AWSGlue.CreateWorkflow")
 def _create_workflow(body):
+    """CreateWorkflow: store a new workflow."""
     name = body["Name"]
     with _lock:
         state = _load()
@@ -274,6 +287,7 @@ def _create_workflow(body):
 
 @_action("AWSGlue.UpdateWorkflow")
 def _update_workflow(body):
+    """UpdateWorkflow: change a workflow's description, run properties or concurrency."""
     with _lock:
         state = _load()
         wf = _require(state, "workflows", body["Name"])
@@ -287,6 +301,7 @@ def _update_workflow(body):
 
 @_action("AWSGlue.DeleteWorkflow")
 def _delete_workflow(body):
+    """DeleteWorkflow: remove a workflow and its runs."""
     with _lock:
         state = _load()
         _require(state, "workflows", body["Name"])
@@ -298,6 +313,7 @@ def _delete_workflow(body):
 
 @_action("AWSGlue.ListWorkflows")
 def _list_workflows(_body):
+    """ListWorkflows: return the workflow names."""
     return {"Workflows": sorted(_load()["workflows"])}
 
 
@@ -307,6 +323,7 @@ def _graph(state: dict, workflow: str, run: dict | None) -> dict:
     edges = []
 
     def node(kind: str, name: str) -> str:
+        """Add a graph node once and return its unique id."""
         uid = f"{kind.lower()}_{name}"
         if uid not in nodes:
             entry: dict = {"Type": kind, "Name": name, "UniqueId": uid}
@@ -348,6 +365,7 @@ def _graph(state: dict, workflow: str, run: dict | None) -> dict:
 
 
 def _public_run(state: dict, workflow: str, run: dict, graph: bool) -> dict:
+    """Return a workflow run as Glue does, without its internal fields."""
     out = {k: v for k, v in run.items() if k not in ("nodes", "fired")}
     if graph:
         out["Graph"] = _graph(state, workflow, run)
@@ -356,6 +374,7 @@ def _public_run(state: dict, workflow: str, run: dict, graph: bool) -> dict:
 
 @_action("AWSGlue.GetWorkflow")
 def _get_workflow(body):
+    """GetWorkflow: return one workflow, its last run and optionally its graph."""
     state = _load()
     wf = dict(_require(state, "workflows", body["Name"]))
     runs = state["runs"].get(body["Name"]) or []
@@ -368,6 +387,7 @@ def _get_workflow(body):
 
 @_action("AWSGlue.BatchGetWorkflows")
 def _batch_get_workflows(body):
+    """BatchGetWorkflows: return the named workflows and the ones missing."""
     names = body.get("Names") or []
     state = _load()
     found = [n for n in names if n in state["workflows"]]
@@ -384,6 +404,7 @@ def _batch_get_workflows(body):
 
 @_action("AWSGlue.StartWorkflowRun")
 def _start_workflow_run(body):
+    """StartWorkflowRun: record a run and drive it from its start triggers."""
     name = body["Name"]
     with _lock:
         state = _load()
@@ -418,6 +439,7 @@ def _start_workflow_run(body):
 
 
 def _find_workflow_run(state: dict, name: str, run_id: str) -> dict:
+    """Return one run of a workflow, raising EntityNotFoundException if there is none."""
     _require(state, "workflows", name)
     for run in state["runs"].get(name) or []:
         if run["WorkflowRunId"] == run_id:
@@ -427,6 +449,7 @@ def _find_workflow_run(state: dict, name: str, run_id: str) -> dict:
 
 @_action("AWSGlue.GetWorkflowRun")
 def _get_workflow_run(body):
+    """GetWorkflowRun: return one workflow run, optionally with its graph."""
     state = _load()
     run = _find_workflow_run(state, body["Name"], body["RunId"])
     return {
@@ -436,6 +459,7 @@ def _get_workflow_run(body):
 
 @_action("AWSGlue.GetWorkflowRuns")
 def _get_workflow_runs(body):
+    """GetWorkflowRuns: return a workflow's runs, newest first."""
     state = _load()
     _require(state, "workflows", body["Name"])
     runs = state["runs"].get(body["Name"]) or []
@@ -449,12 +473,14 @@ def _get_workflow_runs(body):
 
 @_action("AWSGlue.GetWorkflowRunProperties")
 def _get_workflow_run_properties(body):
+    """GetWorkflowRunProperties: return a run's properties."""
     run = _find_workflow_run(_load(), body["Name"], body["RunId"])
     return {"RunProperties": run.get("WorkflowRunProperties") or {}}
 
 
 @_action("AWSGlue.PutWorkflowRunProperties")
 def _put_workflow_run_properties(body):
+    """PutWorkflowRunProperties: merge properties into a run's."""
     with _lock:
         state = _load()
         run = _find_workflow_run(state, body["Name"], body["RunId"])
@@ -468,6 +494,7 @@ def _put_workflow_run_properties(body):
 
 @_action("AWSGlue.StopWorkflowRun")
 def _stop_workflow_run(body):
+    """StopWorkflowRun: mark a running workflow run as STOPPING."""
     with _lock:
         state = _load()
         run = _find_workflow_run(state, body["Name"], body["RunId"])
@@ -481,6 +508,7 @@ def _stop_workflow_run(body):
 
 
 def _update_run(name: str, run_id: str, **fields) -> dict:
+    """Set fields on a workflow run and return it."""
     with _lock:
         state = _load()
         run = _find_workflow_run(state, name, run_id)
@@ -490,6 +518,7 @@ def _update_run(name: str, run_id: str, **fields) -> dict:
 
 
 def _statistics(nodes: list[dict], states: dict[str, str | None]) -> dict:
+    """Return a run's Statistics from its nodes' states."""
     counts = {"SUCCEEDED": 0, "FAILED": 0, "STOPPED": 0, "TIMEOUT": 0, "ERROR": 0}
     running = 0
     for n in nodes:
@@ -619,6 +648,7 @@ def _finished_since(seen: dict) -> dict[tuple[str, str], str]:
 
 
 def _watch_loop() -> None:
+    """Fire scheduled and standalone conditional triggers, every few seconds."""
     fired: dict[str, float] = {}
     seen: dict = {}
     _finished_since(seen)  # what finished before the engine started doesn't count

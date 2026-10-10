@@ -47,6 +47,7 @@ def _agentcore_app_class():
 
 
 def __getattr__(name: str):
+    """Lazily re-export ``BedrockAgentCoreApp`` (imported only on use)."""
     # Lazy re-export so `from oblako.engines.agentcore import BedrockAgentCoreApp` works
     # without importing the optional dependency until it's actually used.
     if name == "BedrockAgentCoreApp":
