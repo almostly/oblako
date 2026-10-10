@@ -22,7 +22,7 @@ RS_PORT = int(os.environ.get("OBLAKO_TEST_RS_PORT", "5439"))
 RS = dict(
     host="localhost", port=RS_PORT, user="oblako", password="oblako", dbname="oblako"
 )
-POLICIES = ("ddm_full", "ddm_partial")
+POLICIES = ("ddm_full", "ddm_partial", "ddm_bobs")
 
 
 def _engine_up() -> bool:
@@ -228,7 +228,8 @@ def test_a_sys_secadmin_member_manages_and_sees_policies(conn):
             )
             bob.execute("ATTACH MASKING POLICY ddm_bobs ON ddm.users(email) TO PUBLIC")
             assert bob.execute(
-                "SELECT count(*) FROM svv_attached_masking_policy"
+                "SELECT count(*) FROM svv_attached_masking_policy "
+                "WHERE policy_name = 'ddm_bobs'"
             ).fetchone() == (1,)
             bob.execute(
                 "DETACH MASKING POLICY ddm_bobs ON ddm.users(email) FROM PUBLIC"

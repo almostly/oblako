@@ -45,6 +45,9 @@ fi
   until pg_isready -h 127.0.0.1 -p "$OBLAKO_PG_PORT" -q 2>/dev/null; do
     sleep 0.5
   done
+  # a data directory moved from 63-byte names gets its dumps back first
+  /usr/local/bin/oblako-migrate-names.sh restore ||
+    echo "oblako: could not restore the data directory's dumps"
   for db in $(psql -U "${POSTGRES_USER:-postgres}" -p "$OBLAKO_PG_PORT" -d postgres -Atq \
       -c "SELECT datname FROM pg_database WHERE datallowconn" 2>/dev/null); do
     # system objects to pg_catalog and internal schemas renamed first, so 11 finds
@@ -79,6 +82,11 @@ if [ -S /var/run/docker.sock ]; then
     exec python3 /usr/local/bin/redshift_ml.py agent
   ) &
 fi
+
+# A data directory made with PostgreSQL's 63-byte names is dumped and moved aside
+# here, so the stock entrypoint initializes one with Redshift's 127-byte names;
+# the background step above restores it (see migrate_names.sh).
+/usr/local/bin/oblako-migrate-names.sh dump
 
 # A data directory initialized before loopback TCP followed POSTGRES_HOST_AUTH_METHOD
 # (initdb.d/12_password_auth.sh) gets the same change here, on every start.

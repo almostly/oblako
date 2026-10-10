@@ -201,6 +201,15 @@ keeps the case for the rest of the session, until `RESET`. A quoted user name
 keeps its case either way (`"IAM:alice"`), and redshift-local keeps role and group
 names as written too.
 
+Names run to 127 bytes, as on Redshift, not PostgreSQL's 63: the engine is
+PostgreSQL built with a longer `NAMEDATALEN`. A data directory made by an earlier
+image, with 63-byte names, is moved over on the first start: the image dumps it with
+the stock PostgreSQL it keeps for that purpose, initializes a new one and restores
+the roles, databases, grants, masking policies and `ALTER`/`DROP` grants into it,
+keeping the dumps in the data directory under `oblako-names64-backup/`. The
+multi-node (Citus) variant isn't moved, because its tables are sharded: recreate
+its volumes.
+
 **Users, groups and roles.** Redshift keeps three kinds of identity apart, and so
 does redshift-local: `CREATE USER`, `CREATE GROUP` with `ALTER GROUP ... ADD USER`,
 and Redshift's role-based access control: `CREATE ROLE`, `GRANT ROLE r TO user`,

@@ -8,11 +8,12 @@
 
 ARG BASE_IMAGE=public.ecr.aws/oblako/redshift-local:16
 
-# --- build stage: compile Citus against PostgreSQL 16
-FROM postgres:16 AS citus
+# --- build stage: compile Citus against the single-node image's PostgreSQL (built
+# with 127-byte names, so extensions must be compiled against its headers)
+FROM ${BASE_IMAGE} AS citus
 ARG CITUS_VERSION=13.2.2
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        postgresql-server-dev-16 gcc make autoconf ca-certificates curl \
+        gcc make autoconf ca-certificates curl \
         libcurl4-openssl-dev liblz4-dev libzstd-dev libssl-dev libkrb5-dev \
         libicu-dev pkg-config \
     && rm -rf /var/lib/apt/lists/*

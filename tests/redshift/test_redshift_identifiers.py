@@ -57,3 +57,19 @@ def test_enable_case_sensitive_identifier_keeps_the_case(cursor):
     cursor.execute('CREATE SCHEMA "Idf_Kept"')
     cursor.execute("SELECT nspname FROM pg_namespace WHERE nspname ILIKE 'idf_kept'")
     assert cursor.fetchall() == [("Idf_Kept",)]
+
+
+def test_names_run_to_127_bytes(cursor):
+    """As on Redshift: names up to 127 bytes, not PostgreSQL's 63."""
+    name = "idf_" + "n" * 123
+    cursor.execute("SHOW max_identifier_length")
+    assert cursor.fetchone() == ("127",)
+    cursor.execute(f"DROP USER IF EXISTS {name}")
+    cursor.execute(f"CREATE USER {name} PASSWORD 'Abcdef12'")
+    try:
+        cursor.execute(
+            "SELECT length(usename) FROM pg_user WHERE usename LIKE 'idf_nnn%'"
+        )
+        assert cursor.fetchone() == (127,)
+    finally:
+        cursor.execute(f"DROP USER {name}")
