@@ -386,7 +386,7 @@ def _wait_for_webserver(record: dict, timeout: float = 900) -> None:
 
 
 def _stop(client, name: str) -> None:
-    """Force-remove every container labelled with the environment."""
+    """Force-remove every container labeled with the environment."""
     for container in client.containers.list(
         all=True, filters={"label": f"oblako.mwaa={name}"}
     ):

@@ -80,7 +80,7 @@ if [ -S /var/run/docker.sock ]; then
   ) &
 fi
 
-# A data directory initialised before loopback TCP followed POSTGRES_HOST_AUTH_METHOD
+# A data directory initialized before loopback TCP followed POSTGRES_HOST_AUTH_METHOD
 # (initdb.d/12_password_auth.sh) gets the same change here, on every start.
 if [ -f "${PGDATA:-/var/lib/postgresql/data}/pg_hba.conf" ]; then
   PGDATA="${PGDATA:-/var/lib/postgresql/data}" \

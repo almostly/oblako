@@ -258,7 +258,7 @@ class AthenaExecutor:
         }
 
     def stop_query_execution(self, query_id: str) -> None:
-        """Mark a query cancelled (best-effort; Trino runs to completion)."""
+        """Mark a query canceled (best-effort; Trino runs to completion)."""
         with self._lock:
             record = self._queries.get(query_id)
             if record and record["State"] in ("QUEUED", "RUNNING"):

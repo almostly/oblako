@@ -14,7 +14,7 @@ from .boto import BotoService, client
 # Pinned by digest: the image's entrypoint changed on 2026-09-28 (it now passes
 # --port/--path/--shardLimit itself, read from env vars), and an argument override
 # written for the old one crashed kinesalite. A pin keeps the next rebuild from
-# changing behaviour under us.
+# changing behavior under us.
 KINESIS_IMAGE = (
     "saidsef/aws-kinesis-local"
     "@sha256:a1f2be9d4356a024113bf199a0d1a352fa0d10420f35ab2f52a5d08f5920b8c9"

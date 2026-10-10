@@ -83,7 +83,7 @@ CREATE OR REPLACE FUNCTION pg_catalog.redshift_acl(acl aclitem[], sep text)
 $$;
 
 -- Redshift's system-defined roles, as Redshift roles (marked, can't log in), with
--- no owner. Their members are recognised where redshift-local checks for them:
+-- no owner. Their members are recognized where redshift-local checks for them:
 -- the four that can read system tables see every row of the grant views below;
 -- sys:dba and sys:superuser may drop schemas and tables (the oblako_redshift
 -- extension enforces it, as for a DROP grant); sys:secadmin manages masking

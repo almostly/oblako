@@ -23,7 +23,7 @@ import subprocess
 
 from oblako import ports as port_registry
 
-# container status normalised across backends
+# container status normalized across backends
 RUNNING = "running"
 STOPPED = "stopped"
 ABSENT = "absent"

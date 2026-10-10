@@ -19,7 +19,7 @@ record's ``status`` says where they are (``creating``, ``rebooting``,
 ``available``, ``failed``), which DescribeDBInstances reports, as on RDS.
 
 State (port, master user, role, status) lives in ``~/.oblako/rds/instances.json``;
-the containers are labelled ``oblako.rds.instance`` too.
+the containers are labeled ``oblako.rds.instance`` too.
 """
 
 from __future__ import annotations

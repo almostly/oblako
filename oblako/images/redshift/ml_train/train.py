@@ -134,7 +134,7 @@ _XGB_FLOAT = {
 
 
 def _xgb_kwargs(hp):
-    """n_estimators/max_depth plus every recognised tuning hyperparameter."""
+    """n_estimators/max_depth plus every recognized tuning hyperparameter."""
     kw = dict(
         n_estimators=int(hp.get("num_round", 100)),
         max_depth=int(hp.get("max_depth", 6)),

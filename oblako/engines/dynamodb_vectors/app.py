@@ -23,7 +23,7 @@ Every DynamoDB operation is forwarded to DynamoDB Local, except what it lacks:
 Index definitions and tags persist in ``~/.oblako/dynamodb/proxy.json``, so they
 survive a restart along with DynamoDB Local's data.
 
-That is oblako's "real behavior, simulated topology": genuine nearest-neighbour
+That is oblako's "real behavior, simulated topology": genuine nearest-neighbor
 results over really-stored vectors, brute force instead of AWS's ANN index.
 """
 

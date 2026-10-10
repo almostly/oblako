@@ -149,7 +149,7 @@ _COMPRESSION = re.compile(r"(?i)\b(gzip|bzip2|zstd)\b")
 def _detect_format(opts: str) -> str:
     """PARQUET / CSV / TEXT / JSON from a COPY/UNLOAD options tail.
 
-    A recognised-but-unsupported binary format (AVRO/ORC) is returned as-is so the
+    A recognized-but-unsupported binary format (AVRO/ORC) is returned as-is so the
     engine function raises a clear error rather than mis-reading it as text.
     """
     if "PARQUET" in opts.upper():

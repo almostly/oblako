@@ -1,6 +1,6 @@
 """Local IAM + STS over moto's control plane, with oblako's policy evaluator.
 
-moto stores users, roles, and policies (real boto3 ``iam``/``sts`` behaviour);
+moto stores users, roles, and policies (real boto3 ``iam``/``sts`` behavior);
 oblako adds what moto does not evaluate: role trust-policy checks on AssumeRole
 and identity-policy authorization simulation, both cross-account aware. The
 account is identity metadata (single backend) — cross-account is expressed in the

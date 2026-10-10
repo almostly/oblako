@@ -3,7 +3,7 @@
 S3 Vectors is AWS's dedicated, cheap-at-rest vector store: a **vector bucket**
 holds **indexes** (each with a fixed dimension + distance metric), and you
 ``PutVectors`` (key + float32 vector + JSON metadata) then ``QueryVectors`` for
-the nearest neighbours, optionally filtering on metadata. oblako serves the real
+the nearest neighbors, optionally filtering on metadata. oblako serves the real
 `s3vectors` wire protocol (rest-json) in-process, so unmodified boto3 works:
 
     import boto3

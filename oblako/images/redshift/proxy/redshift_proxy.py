@@ -646,7 +646,7 @@ def _masked_tables(db: str, user: str) -> dict[tuple[str, str], str]:
 def _mask_reads(sql: str, sent: str) -> str:
     """Rewrite reads of masked tables (see ``masking.rewrite_reads``).
 
-    ``sent`` is the statement as the client sent it: DDL is recognised there, as
+    ``sent`` is the statement as the client sent it: DDL is recognized there, as
     the rewrites before this one turn ATTACH MASKING POLICY into a DO block.
     """
     db = CLIENT_DATABASE.get() or PG_DATABASE

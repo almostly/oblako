@@ -18,7 +18,7 @@
 --   * dropping a table (or its schema) drops its attachments.
 -- svv_masking_policy and svv_attached_masking_policy answer with Redshift's
 -- columns and its JSON text formats, to superusers only (others see no rows).
--- An expression is stored as written: Redshift keeps its own normalised form,
+-- An expression is stored as written: Redshift keeps its own normalized form,
 -- which access tools compare by round trip, not by text.
 --
 -- It also adds svv_column_privileges (column-level grants). Idempotent; the
