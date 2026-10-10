@@ -162,6 +162,17 @@ def test_attach_to_roles_users_and_public_by_priority(conn):
     assert [r[0] for r in _attached(conn)] == ["ddm_full", "ddm_full"]
 
 
+def test_a_role_at_publics_priority_replaces_public(conn):
+    """As on Redshift Serverless: PUBLIC's attachment of the policy goes, the role's stays."""
+    conn.execute(
+        "ATTACH MASKING POLICY ddm_full ON ddm.users(email) TO PUBLIC PRIORITY 10"
+    )
+    conn.execute(
+        "ATTACH MASKING POLICY ddm_full ON ddm.users(email) TO ROLE ddm_analyst PRIORITY 10"
+    )
+    assert [(r[4], r[6]) for r in _attached(conn)] == [("ddm_analyst", 10)]
+
+
 def test_forms_redshift_refuses(conn):
     with pytest.raises(psycopg.errors.SyntaxError):
         conn.execute("ATTACH MASKING POLICY ddm_full ON ddm.users(email) TO GROUP g")

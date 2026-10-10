@@ -226,9 +226,10 @@ attachments, read back from `svv_masking_policy` and `svv_attached_masking_polic
 with Redshift's columns and JSON formats. The rules are the ones Redshift
 Serverless enforces (checked 2026-10-07): a different policy can't share a
 priority on a column, one policy can go to several grantees at one priority and to
-one grantee at several, one `DETACH` removes all of a grantee's, `DROP` is refused
-while the policy is attached, `ALTER` keeps the output type exactly
-(`varchar(64)` and `varchar(10)` clash), an expression of ambiguous type (a bare
+one grantee at several, a role attached at the priority PUBLIC holds the same
+policy at replaces PUBLIC's attachment (checked 2026-10-10), one `DETACH` removes
+all of a grantee's, `DROP` is refused while the policy is attached, `ALTER` keeps
+the output type exactly (`varchar(64)` and `varchar(10)` clash), an expression of ambiguous type (a bare
 `'***'`) is refused until cast (`'***'::varchar(256)`), `TO GROUP` is a syntax
 error, dropping a table drops its attachments, and only a superuser manages or sees
 policies. `svv_column_privileges` lists column-level grants.

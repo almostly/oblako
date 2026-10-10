@@ -12,6 +12,8 @@
 --   * on one column two different policies can't share a priority, one policy
 --     can be attached to several grantees at one priority, and to one grantee at
 --     several priorities; DETACH removes all of a grantee's attachments of it;
+--   * a role attached to a policy at the priority PUBLIC holds it at replaces
+--     PUBLIC's attachment (checked 2026-10-10);
 --   * input types are not checked against the column on attach;
 --   * dropping a table (or its schema) drops its attachments.
 -- svv_masking_policy and svv_attached_masking_policy answer with Redshift's
@@ -210,6 +212,12 @@ BEGIN
                   AND a.grantee_type = ddm_attach.grantee_type) THEN
         RAISE EXCEPTION 'DDM policy "%" is already attached on relation "%" for given column, grantee and priority',
             policy, (SELECT relname FROM pg_catalog.pg_class WHERE oid = rel);
+    END IF;
+    -- a role attaching the policy at PUBLIC's priority takes PUBLIC's place
+    IF grantee_type = 'role' THEN
+        DELETE FROM pg_oblako.ddm_attachments a
+         WHERE a.relid = rel AND a.output_columns = outputs AND a.priority = ddm_attach.priority
+           AND a.policy = ddm_attach.policy AND a.grantee_type = 'public';
     END IF;
     INSERT INTO pg_oblako.ddm_attachments
     SELECT policy, rel, n.nspname, c.relname,
