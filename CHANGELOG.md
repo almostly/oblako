@@ -11,6 +11,11 @@ versioned entries below.
 
 ## Unreleased
 
+## v0.4.1 (2026-10-11)
+
+One more Redshift gap from pgsesame's Serverless parity run, and the Data API's
+batch ids and errors as AWS reports them.
+
 ### Changed
 
 - **Redshift**: ALTER DEFAULT PRIVILEGES FOR USER x IN SCHEMA s, GRANT or REVOKE, is refused with "permission denied for schema s" unless x can create in s (directly, through a group, role or PUBLIC, as owner or superuser), whoever runs it, as on Redshift Serverless
