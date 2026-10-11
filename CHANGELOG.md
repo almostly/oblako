@@ -11,6 +11,11 @@ versioned entries below.
 
 ## Unreleased
 
+### Changed
+
+- **Redshift**: ALTER DEFAULT PRIVILEGES FOR USER x IN SCHEMA s, GRANT or REVOKE, is refused with "permission denied for schema s" unless x can create in s (directly, through a group, role or PUBLIC, as owner or superuser), whoever runs it, as on Redshift Serverless
+- **Redshift Data**: BatchExecuteStatement has its own id, its statements' ids are `<id>:1`, `<id>:2`, ..., and a failed batch's Error reads `Query #n failed with ERROR: ...`; statement errors start with `ERROR:` as on AWS
+
 ## v0.4.0 (2026-10-10)
 
 Two more Redshift gaps from pgsesame's Serverless parity run: the ACCESS SYSTEM TABLE

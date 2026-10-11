@@ -181,31 +181,14 @@ class RedshiftDataApp:
                 "failed to satisfy constraint: Member must have length less than or "
                 f"equal to {MAX_BATCH_SQLS}",
             )
-        ids = self.executor.execute_batch(
+        batch_id = self.executor.execute_batch(
             sqls,
             database=req.get("Database"),
             cluster_identifier=req.get("ClusterIdentifier"),
             workgroup_name=req.get("WorkgroupName"),
             session_id=self._session(req),
         )
-        last = self._stored(ids[-1])
-        # link the sub-statements so DescribeStatement can report them; the batch
-        # has failed if any of them did
-        subs = [self._stored(sid) for sid in ids]
-        last["SubStatements"] = [
-            {
-                "Id": sub["Id"],
-                "QueryString": sub["QueryString"],
-                "Status": sub["Status"],
-                "HasResultSet": sub["HasResultSet"],
-                "ResultRows": sub["ResultRows"],
-                **({"Error": sub["Error"]} if sub.get("Error") else {}),
-            }
-            for sub in subs
-        ]
-        if failed := next((sub for sub in subs if sub["Status"] == "FAILED"), None):
-            last["Status"], last["Error"] = "FAILED", failed["Error"]
-        return self._response(req, last)
+        return self._response(req, self._stored(batch_id))
 
     def op_DescribeStatement(self, req: dict) -> Response:
         """Return metadata for a previously submitted statement."""

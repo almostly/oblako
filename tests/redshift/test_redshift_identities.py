@@ -377,6 +377,76 @@ def test_drop_role_restrict_and_force(conn):
     assert _rows(conn, "SELECT 1 FROM svv_roles WHERE role_name LIKE 'idt%'") == []
 
 
+def test_default_privileges_in_a_schema_need_create_there(conn):
+    """As on Redshift: FOR USER x IN SCHEMA s needs x to be able to CREATE in s,
+    whoever runs it; without IN SCHEMA nothing is checked."""
+    conn.execute("CREATE USER idt_bob PASSWORD 'Abcdef12'")
+    conn.execute("CREATE ROLE idt_creator")
+
+    def adp(action: str = "GRANT SELECT ON TABLES TO ROLE idt_reader") -> None:
+        conn.execute(
+            f"ALTER DEFAULT PRIVILEGES FOR USER idt_bob IN SCHEMA idt {action}"
+        )
+
+    def refused(action: str = "GRANT SELECT ON TABLES TO ROLE idt_reader") -> None:
+        with pytest.raises(
+            psycopg.errors.InsufficientPrivilege,
+            match="permission denied for schema idt",
+        ):
+            adp(action)
+
+    try:
+        refused()
+        conn.execute("GRANT USAGE ON SCHEMA idt TO idt_bob")
+        refused()
+        refused("REVOKE SELECT ON TABLES FROM ROLE idt_reader")
+        conn.execute(
+            "ALTER DEFAULT PRIVILEGES FOR USER idt_bob "
+            "GRANT SELECT ON TABLES TO ROLE idt_reader"
+        )
+        conn.execute(
+            "ALTER DEFAULT PRIVILEGES FOR USER idt_bob "
+            "REVOKE SELECT ON TABLES FROM ROLE idt_reader"
+        )
+        for grant, revoke in [
+            ("GRANT CREATE ON SCHEMA idt TO idt_bob", None),
+            (
+                "GRANT CREATE ON SCHEMA idt TO GROUP idt_analysts",
+                "ALTER GROUP idt_analysts ADD USER idt_bob",
+            ),
+            (
+                "GRANT CREATE ON SCHEMA idt TO ROLE idt_creator",
+                "GRANT ROLE idt_creator TO idt_bob",
+            ),
+            (
+                "GRANT CREATE ON SCHEMA idt TO ROLE idt_creator",
+                "GRANT ROLE idt_creator TO ROLE idt_reader; GRANT ROLE idt_reader TO idt_bob",
+            ),
+            ("GRANT CREATE ON SCHEMA idt TO PUBLIC", None),
+            ("ALTER SCHEMA idt OWNER TO idt_bob", None),
+            ("ALTER USER idt_bob CREATEUSER", None),
+        ]:
+            for stmt in [grant, *(revoke.split("; ") if revoke else [])]:
+                conn.execute(stmt)
+            adp()
+            adp("REVOKE SELECT ON TABLES FROM ROLE idt_reader")
+            for stmt in [
+                "ALTER USER idt_bob NOCREATEUSER",
+                "ALTER SCHEMA idt OWNER TO oblako",
+                "REVOKE CREATE ON SCHEMA idt FROM PUBLIC",
+                "REVOKE CREATE ON SCHEMA idt FROM idt_bob",
+                "REVOKE CREATE ON SCHEMA idt FROM GROUP idt_analysts",
+                "REVOKE CREATE ON SCHEMA idt FROM ROLE idt_creator",
+                "REVOKE ROLE idt_creator FROM ROLE idt_reader",
+                "REVOKE ROLE idt_creator FROM idt_bob",
+                "REVOKE ROLE idt_reader FROM idt_bob",
+            ]:
+                conn.execute(stmt)
+            refused()
+    finally:
+        conn.execute("DROP ROLE IF EXISTS idt_creator FORCE")
+
+
 def test_access_system_table_through_a_role_sees_everything(conn):
     """As on Redshift Serverless: ACCESS SYSTEM TABLE, held through roles, shows every
     row of the SVV views and answers membership for other users, without data access."""

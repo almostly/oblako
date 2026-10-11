@@ -11,7 +11,9 @@
  *      driver parses it cleanly and takes its genuine Redshift code path;
  *   3. enforces Redshift's ALTER and DROP privileges on tables, views and schemas
  *      (kept in pg_oblako.object_privileges): an ALTER or DROP by a user that
- *      holds the privilege but doesn't own the object runs as the object's owner.
+ *      holds the privilege but doesn't own the object runs as the object's owner;
+ *   4. refuses ALTER DEFAULT PRIVILEGES FOR USER x IN SCHEMA s unless x can
+ *      CREATE in s, as Redshift does (whoever runs it, superusers included).
  */
 #include "postgres.h"
 #include "fmgr.h"
@@ -214,6 +216,46 @@ statement_targets(Node *stmt, const char **privilege)
 	return targets;
 }
 
+/*
+ * Redshift refuses ALTER DEFAULT PRIVILEGES FOR USER x IN SCHEMA s, GRANT or
+ * REVOKE, unless x can CREATE in s: directly, through a group, role or PUBLIC,
+ * by owning s or as a superuser. Without IN SCHEMA it checks nothing.
+ */
+static void
+check_default_privileges(AlterDefaultPrivilegesStmt *stmt)
+{
+	List	   *roles = NIL;
+	List	   *schemas = NIL;
+	ListCell   *lc;
+	ListCell   *rc;
+
+	foreach(lc, stmt->options)
+	{
+		DefElem    *opt = (DefElem *) lfirst(lc);
+
+		if (strcmp(opt->defname, "roles") == 0)
+			roles = (List *) opt->arg;
+		else if (strcmp(opt->defname, "schemas") == 0)
+			schemas = (List *) opt->arg;
+	}
+	foreach(lc, schemas)
+	{
+		const char *name = strVal(lfirst(lc));
+		Oid			nsp = get_namespace_oid(name, true);
+
+		if (!OidIsValid(nsp))
+			continue;
+		foreach(rc, roles)
+		{
+			Oid			role = get_rolespec_oid(lfirst(rc), true);
+
+			if (OidIsValid(role)
+				&& object_aclcheck(NamespaceRelationId, nsp, role, ACL_CREATE) != ACLCHECK_OK)
+				aclcheck_error(ACLCHECK_NO_PRIV, OBJECT_SCHEMA, name);
+		}
+	}
+}
+
 static void
 oblako_ProcessUtility(PlannedStmt *pstmt, const char *queryString, bool readOnlyTree,
 					  ProcessUtilityContext context, ParamListInfo params,
@@ -223,6 +265,8 @@ oblako_ProcessUtility(PlannedStmt *pstmt, const char *queryString, bool readOnly
 	Oid			owner = InvalidOid;
 	List	   *targets = NIL;
 
+	if (IsA(pstmt->utilityStmt, AlterDefaultPrivilegesStmt))
+		check_default_privileges((AlterDefaultPrivilegesStmt *) pstmt->utilityStmt);
 	if (IsTransactionState())
 		targets = statement_targets(pstmt->utilityStmt, &privilege);
 	if (targets != NIL)

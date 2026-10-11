@@ -209,6 +209,11 @@ def test_a_batch_is_one_transaction(data_client, no_rsd_tables):
         "FAILED",
         "ABORTED",
     ]
+    assert [s["Id"] for s in desc["SubStatements"]] == [
+        f"{out['Id']}:{n}" for n in (1, 2, 3)
+    ]
+    assert desc["Error"] == "Query #2 failed with ERROR: division by zero"
+    assert data_client.describe_statement(Id=f"{out['Id']}:2")["Status"] == "FAILED"
     assert (
         _count(data_client, "SELECT count(*) FROM pg_tables WHERE tablename ~ '^rsd_s'")
         == 0

@@ -190,7 +190,12 @@ class RedshiftDataExecutor:
             statement["Status"] = "FINISHED"
         except Exception as err:  # SQL errors, parameter binding
             statement["Status"] = "FAILED"
-            statement["Error"] = str(err).strip()
+            # the engine's errors read as AWS reports them: "ERROR: ..."
+            statement["Error"] = (
+                f"ERROR: {str(err).strip()}"
+                if isinstance(err, psycopg2.Error) and err.pgcode
+                else str(err).strip()
+            )
         statement["UpdatedAt"] = datetime.datetime.now(datetime.timezone.utc)
         statement["Duration"] = int(
             (datetime.datetime.now() - start).total_seconds() * 1e9
@@ -248,13 +253,16 @@ class RedshiftDataExecutor:
         cluster_identifier: str | None = None,
         workgroup_name: str | None = None,
         session_id: str | None = None,
-    ) -> list[str]:
-        """Run the statements in order as one transaction; return their ids.
+    ) -> str:
+        """Run the statements in order as one transaction; return the batch's id.
 
         As on AWS: a statement that fails rolls the batch back, and the ones after
         it are ABORTED, never run. In a session that already has a transaction
-        open, the batch runs inside it and leaves the outcome to the session.
+        open, the batch runs inside it and leaves the outcome to the session. The
+        statements' ids are the batch's with their position (``<id>:1``, ...), and
+        the batch reports them as SubStatements.
         """
+        batch_id = str(uuid.uuid4())
         session = self.session(session_id) if session_id else None
         if session is not None:
             database, cluster_identifier = session["database"], session["cluster"]
@@ -263,6 +271,8 @@ class RedshiftDataExecutor:
             self._record(sql, database, cluster_identifier, workgroup_name, session_id)
             for sql in sqls
         ]
+        for n, statement in enumerate(statements, 1):
+            statement["Id"] = f"{batch_id}:{n}"
         conn = (
             session["conn"]
             if session is not None
@@ -288,7 +298,31 @@ class RedshiftDataExecutor:
         finally:
             if session is None:
                 conn.close()
-        return [self._store(statement) for statement in statements]
+        for statement in statements:
+            self._store(statement)
+        batch = {
+            **statements[-1],
+            "Id": batch_id,
+            "SubStatements": [
+                {
+                    "Id": statement["Id"],
+                    "QueryString": statement["QueryString"],
+                    "Status": statement["Status"],
+                    "HasResultSet": statement["HasResultSet"],
+                    "ResultRows": statement["ResultRows"],
+                    **({"Error": statement["Error"]} if statement.get("Error") else {}),
+                }
+                for statement in statements
+            ],
+        }
+        if failed := next(
+            (n for n, st in enumerate(statements, 1) if st["Status"] == "FAILED"), None
+        ):
+            batch["Status"] = "FAILED"
+            batch["Error"] = (
+                f"Query #{failed} failed with {statements[failed - 1]['Error']}"
+            )
+        return self._store(batch)
 
     # -------------------------------------------------------------------------------
     # Sessions
