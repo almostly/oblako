@@ -444,3 +444,24 @@ def test_access_system_table_goes_to_pg_oblako():
     assert "system_privilege(False, 'ACCESS SYSTEM TABLE', 'R')" in rewrite_sql(
         'revoke access system table from role "R"'
     )
+
+
+def test_other_system_permissions_go_to_pg_oblako():
+    """CREATE USER, ALTER USER, DROP USER and CREATE ROLE, alone or listed together."""
+    assert rewrite_sql("GRANT CREATE USER TO ROLE r") == (
+        "DO $oblako_role$ BEGIN PERFORM pg_oblako.system_privilege(True, "
+        "'CREATE USER', 'r'); END $oblako_role$"
+    )
+    out = rewrite_sql("revoke alter  user, drop user, create role from role r;")
+    for privilege in ("ALTER USER", "DROP USER", "CREATE ROLE"):
+        assert f"system_privilege(False, '{privilege}', 'r');" in out
+
+
+def test_a_superuser_without_a_password_is_refused():
+    """As on Redshift: CREATEUSER and PASSWORD DISABLE together are a syntax error."""
+    out = rewrite_sql("CREATE USER u CREATEUSER PASSWORD DISABLE;")
+    assert "'CREATE' || 'USER and PASSWORD' || ' DISABLE are incompatible'" in out
+    assert "syntax_error" in out
+    assert (
+        rewrite_sql("CREATE USER u PASSWORD DISABLE") == "CREATE USER u PASSWORD NULL"
+    )

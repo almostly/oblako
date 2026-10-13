@@ -241,13 +241,25 @@ def _pg_group(m: re.Match) -> str:
     return _PG_GROUP_SUB.format(alias=m.group(1) or "pg_group")
 
 
-# Redshift's system permission ACCESS SYSTEM TABLE, granted to a role, lets its
-# holders read every row of the SVV views as a superuser does. PostgreSQL has no
-# such permission; the grant goes to pg_oblako.system_privilege
+# Redshift's system permissions, granted to roles: ACCESS SYSTEM TABLE lets its
+# holders read every row of the SVV views as a superuser does; CREATE USER, ALTER
+# USER, DROP USER and CREATE ROLE are recorded and listed in svv_system_privileges.
+# PostgreSQL has no such permissions; the grant goes to pg_oblako.system_privilege
 # (initdb.d/14_redshift_identities.sql).
+_SYSTEM_PRIVILEGE_NAME = (
+    r"(?:access\s+system\s+table|(?:create|alter|drop)\s+user|create\s+role)"
+)
 _SYSTEM_PRIVILEGE = re.compile(
-    r"(?i)^(\s*)(grant|revoke)\s+access\s+system\s+table\s+(?:to|from)\s+role\s+"
+    rf"(?i)^(\s*)(grant|revoke)\s+({_SYSTEM_PRIVILEGE_NAME}"
+    rf"(?:\s*,\s*{_SYSTEM_PRIVILEGE_NAME})*)\s+(?:to|from)\s+role\s+"
     r'("(?:[^"]|"")+"|[a-z_][\w$]*)\s*(;?)(\s*)$'
+)
+
+# Redshift refuses a superuser without a password: CREATE USER ... CREATEUSER
+# PASSWORD DISABLE is a syntax error there. The statement becomes a DO block
+# raising Redshift's error.
+_SUPERUSER_WITHOUT_PASSWORD = re.compile(
+    r"(?is)^\s*create\s+user\b(?=.*\bcreateuser\b)(?=.*\bpassword\s+disable\b)"
 )
 
 
@@ -281,6 +293,19 @@ def _refuse_connect(stmt: str) -> str:
     return (
         f"DO $oblako_connect$ BEGIN RAISE EXCEPTION '{message}' "
         f"USING ERRCODE = 'syntax_error'; END $oblako_connect${semi}"
+    )
+
+
+def _refuse_superuser_without_password(stmt: str) -> str:
+    """Return a statement raising Redshift's error for a superuser without a password."""
+    if not _SUPERUSER_WITHOUT_PASSWORD.match(stmt):
+        return stmt
+    semi = ";" if stmt.rstrip().endswith(";") else ""
+    # the message split, so the CREATEUSER and PASSWORD DISABLE rewrites pass it by
+    return (
+        "DO $oblako_user$ BEGIN RAISE EXCEPTION '%', 'CREATE' || 'USER and PASSWORD' || "
+        "' DISABLE are incompatible' USING ERRCODE = 'syntax_error'; "
+        f"END $oblako_user${semi}"
     )
 
 
@@ -336,13 +361,14 @@ def _rewrite_roles(stmt: str) -> str:
             f"'oblako:redshift-role owner=' || current_user); END $oblako_role${semi}{tail}"
         )
     if m := _SYSTEM_PRIVILEGE.match(stmt):
-        lead, verb, ident, semi, tail = m.groups()
+        lead, verb, privileges, ident, semi, tail = m.groups()
         name = _role_name(ident).replace("'", "''")
-        return (
-            f"{lead}DO $oblako_role$ BEGIN PERFORM pg_oblako.system_privilege("
-            f"{verb.lower() == 'grant'}, 'ACCESS SYSTEM TABLE', '{name}'); "
-            f"END $oblako_role${semi}{tail}"
+        calls = " ".join(
+            f"PERFORM pg_oblako.system_privilege({verb.lower() == 'grant'}, "
+            f"'{' '.join(p.split()).upper()}', '{name}');"
+            for p in privileges.split(",")
         )
+        return f"{lead}DO $oblako_role$ BEGIN {calls} END $oblako_role${semi}{tail}"
     if m := _DROP_ROLE.match(stmt):
         lead, if_exists, ident, option, semi, tail = m.groups()
         name = _role_name(ident).replace("'", "''")
@@ -603,6 +629,8 @@ def rewrite_sql(sql: str) -> str:
     if integer_avg is not None:
         s = integer_avg.rewrite_avg(s)  # avg( -> pg_oblako.avg( (BIGINT for ints)
     s = _VARCHAR_MAX.sub("varchar(65535)", s)
+    if _PASSWORD_DISABLE.search(s):
+        s = "".join(_refuse_superuser_without_password(st) for st in _segments(s))
     s = _CREATEUSER.sub(lambda m: "NOSUPERUSER" if m.group(1) else "SUPERUSER", s)
     s = _PASSWORD_DISABLE.sub("PASSWORD NULL", s)
     if re.search(r"(?i)\bschema\s+binding\b", s):

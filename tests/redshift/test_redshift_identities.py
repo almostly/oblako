@@ -494,3 +494,30 @@ def test_access_system_table_through_a_role_sees_everything(conn):
         conn.execute("DROP USER IF EXISTS idt_bob")
         conn.execute("DROP ROLE IF EXISTS idt_ast_outer FORCE")
         conn.execute("DROP ROLE IF EXISTS idt_ast FORCE")
+
+
+def test_system_permissions_on_users_and_roles(conn):
+    """As on Redshift Serverless: CREATE USER, ALTER USER, DROP USER and CREATE ROLE
+    are granted to and revoked from a role, and listed in svv_system_privileges."""
+    privileges = ["ALTER USER", "CREATE ROLE", "CREATE USER", "DROP USER"]
+    listed = (
+        "SELECT system_privilege FROM svv_system_privileges "
+        "WHERE identity_name = 'idt_reader' AND identity_type = 'role' ORDER BY 1"
+    )
+    for privilege in privileges:
+        conn.execute(f"GRANT {privilege} TO ROLE idt_reader")
+    assert _rows(conn, listed) == [(p,) for p in privileges]
+    conn.execute("REVOKE CREATE USER, DROP USER FROM ROLE idt_reader")
+    assert _rows(conn, listed) == [("ALTER USER",), ("CREATE ROLE",)]
+    conn.execute("REVOKE ALTER USER, CREATE ROLE FROM ROLE idt_reader")
+    assert _rows(conn, listed) == []
+
+
+def test_a_superuser_needs_a_password(conn):
+    """As on Redshift Serverless: CREATEUSER and PASSWORD DISABLE are refused together."""
+    with pytest.raises(
+        psycopg.errors.SyntaxError,
+        match="CREATEUSER and PASSWORD DISABLE are incompatible",
+    ):
+        conn.execute("CREATE USER idt_bob CREATEUSER PASSWORD DISABLE")
+    assert _rows(conn, "SELECT 1 FROM pg_user WHERE usename = 'idt_bob'") == []

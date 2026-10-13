@@ -11,6 +11,14 @@ versioned entries below.
 
 ## Unreleased
 
+### Added
+
+- **Redshift**: the system permissions CREATE USER, ALTER USER, DROP USER and CREATE ROLE, granted to and revoked from roles (one or a list) and listed in svv_system_privileges, as on Redshift Serverless
+
+### Changed
+
+- **Redshift**: CREATE USER ... CREATEUSER PASSWORD DISABLE is refused with "CREATEUSER and PASSWORD DISABLE are incompatible", as on Redshift Serverless
+
 ## v0.4.1 (2026-10-11)
 
 One more Redshift gap from pgsesame's Serverless parity run, and the Data API's
