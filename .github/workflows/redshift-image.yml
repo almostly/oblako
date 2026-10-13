@@ -5,6 +5,11 @@ name: redshift-image
 #   - Docker Hub:  deburky/redshift-local                  (discoverable, human-facing)
 #   - ECR Public:  public.ecr.aws/oblako/redshift-local      (no pull rate limits)
 #
+# Each architecture builds on a native runner (no QEMU: compiling PostgreSQL under
+# arm64 emulation took over half an hour), pushed by digest; the merge job then
+# tags one multi-arch manifest in both registries. Layers, the PostgreSQL compile
+# included, are cached in the GitHub Actions cache per architecture.
+#
 # Needs repo secrets:
 #   DOCKERHUB_USERNAME      = deburky
 #   DOCKERHUB_TOKEN         = a Docker Hub access token (PAT) with Read/Write
@@ -23,15 +28,22 @@ permissions:
   contents: read
 
 env:
-  ECR_PUBLIC_REGISTRY: public.ecr.aws/oblako
+  DOCKERHUB_IMAGE: deburky/redshift-local
+  ECR_PUBLIC_IMAGE: public.ecr.aws/oblako/redshift-local
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-qemu-action@v3 # emulation for the arm64 build leg
       - uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
@@ -51,17 +63,66 @@ jobs:
         with:
           registry-type: public
 
-      - name: Build and push (multi-arch, both registries)
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: oblako/images/redshift
-          platforms: linux/amd64,linux/arm64
-          push: true
+          platforms: linux/${{ matrix.arch }}
           # no SBOM/provenance attestation manifests (the "unknown · 0 MB" rows)
           provenance: false
           sbom: false
-          tags: |
-            deburky/redshift-local:16
-            deburky/redshift-local:latest
-            ${{ env.ECR_PUBLIC_REGISTRY }}/redshift-local:16
-            ${{ env.ECR_PUBLIC_REGISTRY }}/redshift-local:latest
+          outputs: type=image,"name=${{ env.DOCKERHUB_IMAGE }},${{ env.ECR_PUBLIC_IMAGE }}",push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=redshift-${{ matrix.arch }}
+          cache-to: type=gha,scope=redshift-${{ matrix.arch }},mode=max
+
+      - name: Keep the digest for the merge
+        run: |
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  merge:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ECR_PUBLIC_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Log in to ECR Public
+        uses: aws-actions/amazon-ecr-login@v2
+        with:
+          registry-type: public
+
+      - name: Tag the multi-arch manifest in both registries
+        working-directory: /tmp/digests
+        run: |
+          for image in "$DOCKERHUB_IMAGE" "$ECR_PUBLIC_IMAGE"; do
+            docker buildx imagetools create -t "$image:16" -t "$image:latest" \
+              $(printf "$image@sha256:%s " *)
+          done
+          docker buildx imagetools inspect "$ECR_PUBLIC_IMAGE:16"
