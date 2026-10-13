@@ -3925,7 +3925,7 @@ wheels = [
 
 [[package]]
 name = "oblako"
-version = "0.4.1"
+version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },

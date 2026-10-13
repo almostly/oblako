@@ -11,6 +11,12 @@ versioned entries below.
 
 ## Unreleased
 
+## v0.5.0 (2026-10-13)
+
+More Redshift parity from pgsesame's Serverless runs: the system permissions on users
+and roles, and no superuser without a password. The image now builds on native
+amd64 and arm64 runners.
+
 ### Added
 
 - **Redshift**: the system permissions CREATE USER, ALTER USER, DROP USER and CREATE ROLE, granted to and revoked from roles (one or a list) and listed in svv_system_privileges, as on Redshift Serverless
@@ -18,6 +24,7 @@ versioned entries below.
 ### Changed
 
 - **Redshift**: CREATE USER ... CREATEUSER PASSWORD DISABLE is refused with "CREATEUSER and PASSWORD DISABLE are incompatible", as on Redshift Serverless
+- **CI**: the Redshift image builds on native amd64 and arm64 runners with a layer cache, in minutes rather than the 40 the emulated arm64 build took
 
 ## v0.4.1 (2026-10-11)
 
