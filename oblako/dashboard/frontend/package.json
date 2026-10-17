@@ -17,7 +17,7 @@
     "@dagrejs/dagre": "^3.0.0",
     "@duckdb/duckdb-wasm": "^1.33.1-dev45.0",
     "@xyflow/react": "^12.10.2",
-    "katex": "^0.17.0",
+    "katex": "^0.18.2",
     "prismjs": "^1.30.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
