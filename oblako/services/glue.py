@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 
 from oblako import config, ports
+from oblako.notebook import ENDPOINTS
 
 IMAGE_TAG = "amazon/aws-glue-libs:5"
 
@@ -154,9 +155,12 @@ class GlueService:
             "AWS_REQUEST_CHECKSUM_CALCULATION": "when_required",
             "AWS_RESPONSE_CHECKSUM_VALIDATION": "when_required",
             # the AWS SDKs in the container (Glue's Java SDK v2 for from_catalog /
-            # getSink catalog updates, boto3 in the script) reach oblako, not AWS
-            "AWS_ENDPOINT_URL_GLUE": f"http://host.docker.internal:{ports.GLUE_CATALOG}",
-            "AWS_ENDPOINT_URL_S3": f"http://host.docker.internal:{ports.S3}",
+            # getSink catalog updates, boto3 in the script: Secrets Manager, S3,
+            # every service) reach oblako, not AWS
+            **{
+                key: value.replace("localhost", "host.docker.internal")
+                for key, value in ENDPOINTS.items()
+            },
             **(env or {}),
         }
         with tempfile.TemporaryDirectory() as scripts_dir:
@@ -166,12 +170,17 @@ class GlueService:
                 command=[
                     "spark-submit",
                     *[arg for conf in _SPARK_CONFS for arg in ("--conf", conf)],
-                    "/scripts/job.py",
+                    # the script, run under Glue's job bookmarks (run_job.py)
+                    "/oblako/run_job.py",
                     *(args or []),
                 ],
                 detach=True,
                 volumes={
                     scripts_dir: {"bind": "/scripts", "mode": "ro"},
+                    str(Path(__file__).parent / "glue_assets" / "run_job.py"): {
+                        "bind": "/oblako/run_job.py",
+                        "mode": "ro",
+                    },
                     # drop the interceptor into a classpath-glob dir so S3A loads it
                     str(interceptor_jar): {
                         "bind": "/opt/spark/jars/oblako-glue-s3a.jar",

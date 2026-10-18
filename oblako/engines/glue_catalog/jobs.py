@@ -13,7 +13,13 @@ Logs group ``/aws-glue/jobs/output`` and stderr to ``/aws-glue/jobs/error``, one
 stream per run id (in moto, when it is running), and to
 ``~/.oblako/logs/glue-jobs/<run id>.log``.
 
-Definitions and runs are kept in ``~/.oblako/glue/jobs.json``.
+Job bookmarks (``--job-bookmark-option job-bookmark-enable``) work for reads
+that name ``jobBookmarkKeys``: each run reads only the rows past what the last
+committed run reached, as Glue does for JDBC sources (see
+``oblako/services/glue_assets/run_job.py``). ``GetJobBookmark`` and
+``ResetJobBookmark`` read and clear them.
+
+Definitions, runs and bookmarks are kept in ``~/.oblako/glue/jobs.json``.
 """
 
 from __future__ import annotations
@@ -150,8 +156,62 @@ def _delete_job(body):
         state = _load()
         state["jobs"].pop(name, None)
         state["runs"].pop(name, None)
+        state.get("bookmarks", {}).pop(name, None)
         _save(state)
     return {"JobName": name}  # idempotent, as on Glue
+
+
+# ---------------------------------------------------------------------------
+# Job bookmarks: what a job has already processed, per transformation_ctx. The
+# job's container (glue_assets/run_job.py) filters reads by them and saves them
+# on job.commit() through OblakoCommitJobBookmark, an action only it calls.
+# ---------------------------------------------------------------------------
+def _require_bookmark(state: dict, name: str) -> dict:
+    """Return a job's bookmark, raising EntityNotFoundException as Glue does."""
+    entry = state.get("bookmarks", {}).get(name)
+    if entry is None:
+        raise _not_found(f"Continuation for job {name} not found")
+    return entry
+
+
+@_action("AWSGlue.GetJobBookmark")
+def _get_job_bookmark(body):
+    """GetJobBookmark: return a job's bookmark entry."""
+    return {"JobBookmarkEntry": _require_bookmark(_load(), body["JobName"])}
+
+
+@_action("AWSGlue.ResetJobBookmark")
+def _reset_job_bookmark(body):
+    """ResetJobBookmark: forget what a job has processed, so its next run reads all."""
+    name = body["JobName"]
+    with _lock:
+        state = _load()
+        entry = _require_bookmark(state, name)
+        state["bookmarks"].pop(name)
+        _save(state)
+    return {"JobBookmarkEntry": entry}
+
+
+@_action("AWSGlue.OblakoCommitJobBookmark")
+def _commit_job_bookmark(body):
+    """Save the bookmark a run's job.commit() reached (called by the job container)."""
+    name = body["JobName"]
+    with _lock:
+        state = _load()
+        _require_job(state, name)
+        previous = state.setdefault("bookmarks", {}).get(name) or {}
+        run = previous.get("Run", 0) + 1
+        state["bookmarks"][name] = {
+            "JobName": name,
+            "Version": run,
+            "Run": run,
+            "Attempt": 0,
+            "PreviousRunId": previous.get("RunId", ""),
+            "RunId": body["RunId"],
+            "JobBookmark": body["JobBookmark"],
+        }
+        _save(state)
+        return {"JobBookmarkEntry": state["bookmarks"][name]}
 
 
 # ---------------------------------------------------------------------------

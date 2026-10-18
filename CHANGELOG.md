@@ -11,6 +11,14 @@ versioned entries below.
 
 ## Unreleased
 
+### Added
+
+- **Glue**: job bookmarks: with `--job-bookmark-option job-bookmark-enable`, a read that names `jobBookmarkKeys` returns only the rows past the last committed run, `job.commit()` saves the bookmark, and `GetJobBookmark` / `ResetJobBookmark` read and clear it
+
+### Changed
+
+- **Glue**: job containers reach every oblako service through `AWS_ENDPOINT_URL_*`, so a job's `boto3.client("secretsmanager")` reads oblako's secrets with no endpoint in the script
+
 ## v0.5.0 (2026-10-13)
 
 More Redshift parity from pgsesame's Serverless runs: the system permissions on users

@@ -111,3 +111,27 @@ def test_error_message_reads_either_stream():
     logs = "starting\nTraceback (most recent call last):\nKeyError: 'source'\nshutting down"
     assert jobs._error_message(logs, 1) == "KeyError: 'source'"
     assert jobs._error_message("nothing useful", 3) == "exit code 3"
+
+
+def test_job_bookmarks_commit_get_and_reset(glue):
+    _create(glue)
+    status, body = glue("GetJobBookmark", {"JobName": "etl"})
+    assert status == 400 and body["__type"] == "EntityNotFoundException"
+    assert body["Message"] == "Continuation for job etl not found"
+    for run_id, bookmark in (("jr_1", '{"a": 1}'), ("jr_2", '{"a": 2}')):
+        glue(
+            "OblakoCommitJobBookmark",
+            {"JobName": "etl", "RunId": run_id, "JobBookmark": bookmark},
+        )
+    entry = glue("GetJobBookmark", {"JobName": "etl"})[1]["JobBookmarkEntry"]
+    assert entry["Run"] == 2 and entry["RunId"] == "jr_2"
+    assert entry["PreviousRunId"] == "jr_1" and entry["JobBookmark"] == '{"a": 2}'
+    assert glue("ResetJobBookmark", {"JobName": "etl"})[1]["JobBookmarkEntry"] == entry
+    assert glue("GetJobBookmark", {"JobName": "etl"})[0] == 400
+    glue(
+        "OblakoCommitJobBookmark",
+        {"JobName": "etl", "RunId": "jr_3", "JobBookmark": "{}"},
+    )
+    glue("DeleteJob", {"JobName": "etl"})
+    _create(glue)
+    assert glue("GetJobBookmark", {"JobName": "etl"})[0] == 400
