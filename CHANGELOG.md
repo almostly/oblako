@@ -11,6 +11,12 @@ versioned entries below.
 
 ## Unreleased
 
+## v0.6.0 (2026-10-18)
+
+Glue for an incremental sync from RDS PostgreSQL into another Postgres, such as
+Supabase: job bookmarks, JDBC crawls, jobs reading and writing through Glue
+connections, and Secrets Manager inside jobs.
+
 ### Added
 
 - **Glue**: job bookmarks: with `--job-bookmark-option job-bookmark-enable`, a read that names `jobBookmarkKeys` returns only the rows past the last committed run, `job.commit()` saves the bookmark, and `GetJobBookmark` / `ResetJobBookmark` read and clear it

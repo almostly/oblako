@@ -102,7 +102,7 @@ export default function App() {
               items: regions.map(r => ({ id: r, text: r })),
               onItemClick: ({ detail }) => changeRegion(detail.id),
             },
-            { type: 'button', text: 'v0.5.0' },
+            { type: 'button', text: 'v0.6.0' },
           ]}
         />
       </div>

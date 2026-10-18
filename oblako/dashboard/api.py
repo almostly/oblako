@@ -32,7 +32,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="oblako", version="0.5.0", lifespan=lifespan)
+app = FastAPI(title="oblako", version="0.6.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
