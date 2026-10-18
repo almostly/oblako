@@ -249,3 +249,31 @@ def test_scheduled_crawlers_are_due_once_a_minute():
     fired: dict = {}
     assert crawlers.due_crawlers(state, two, fired) == ["nightly"]
     assert crawlers.due_crawlers(state, two, fired) == []
+
+
+def test_jdbc_columns_take_glue_types():
+    from oblako.engines.glue_catalog.crawlers import _JDBC_URL, _jdbc_type
+
+    def column(data_type, precision=None, scale=None):
+        return {
+            "data_type": data_type,
+            "numeric_precision": precision,
+            "numeric_scale": scale,
+        }
+
+    assert _jdbc_type(column("integer")) == "int"
+    assert _jdbc_type(column("numeric", 12, 2)) == "decimal(12,2)"
+    assert _jdbc_type(column("numeric")) == "decimal(38,18)"
+    assert _jdbc_type(column("timestamp with time zone")) == "timestamp"
+    assert _jdbc_type(column("jsonb")) == "string"
+    m = _JDBC_URL.match(
+        "jdbc:postgresql://app-db.us-east-1.rds.localhost:54842/app?ssl=1"
+    )
+    assert m.groups() == (
+        "postgresql",
+        "app-db.us-east-1.rds.localhost",
+        "54842",
+        "app",
+    )
+    assert _JDBC_URL.match("jdbc:redshift://localhost:5439/dev").group(1) == "redshift"
+    assert _JDBC_URL.match("jdbc:mysql://localhost:3306/app") is None

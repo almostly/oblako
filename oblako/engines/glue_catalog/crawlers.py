@@ -18,6 +18,14 @@ Data Catalog, as Glue does:
   (``DELETE_FROM_DATABASE``);
 * ``Schedule`` (``cron(...)``) starts the crawler on its own.
 
+A JDBC target (``JdbcTargets``: a connection name and an include path
+``database/schema/table`` with ``%`` wildcards, plus ``Exclusions``) reads a
+PostgreSQL or Redshift database's tables and views through the Glue connection
+(its URL and user, or its ``SECRET_ID``): one table each, named
+``<database>_<schema>_<table>``, with the columns in Glue's types, and the
+``classification``, ``connectionName`` and ``database.schema.table`` location
+that a job's ``from_catalog`` reads through the connection.
+
 A crawl runs in a background thread: ``StartCrawler`` returns at once, the
 crawler is ``RUNNING`` then ``STOPPING`` then ``READY``, and ``LastCrawl`` and
 ``GetCrawlerMetrics`` report the result. Classifiers (CSV, JSON, Grok, XML) are
@@ -787,10 +795,16 @@ def crawl(crawler: dict) -> dict[str, int]:
     policy = crawler.get("SchemaChangePolicy") or {}
     update = policy.get("UpdateBehavior", "UPDATE_IN_DATABASE")
     delete = policy.get("DeleteBehavior", "DEPRECATE_IN_DATABASE")
-    s3 = _s3()
     counts = {"created": 0, "updated": 0, "deleted": 0}
     seen: set[str] = set()
-    for target in (crawler.get("Targets") or {}).get("S3Targets") or []:
+    targets = crawler.get("Targets") or {}
+    for target in targets.get("JdbcTargets") or []:
+        for table_input in _jdbc_tables(crawler, target):
+            _check_stop(name)
+            seen.add(table_input["Name"])
+            _put_table(database, table_input, update, counts)
+    s3 = _s3() if targets.get("S3Targets") else None
+    for target in targets.get("S3Targets") or []:
         _check_stop(name)
         path = target["Path"].rstrip("/") + "/"
         objects = _list(s3, path, target.get("Exclusions") or [])
@@ -849,26 +863,160 @@ def crawl(crawler: dict) -> dict[str, int]:
                 "TableType": "EXTERNAL_TABLE",
                 "Parameters": params,
             }
-            try:
-                _ACTIONS["AWSGlue.GetTable"](
-                    {"DatabaseName": database, "Name": table_name}
-                )
-                exists = True
-            except GlueError:
-                exists = False
-            if not exists:
-                _ACTIONS["AWSGlue.CreateTable"](
-                    {"DatabaseName": database, "TableInput": table_input}
-                )
-                counts["created"] += 1
-            elif update == "UPDATE_IN_DATABASE":
-                _ACTIONS["AWSGlue.UpdateTable"](
-                    {"DatabaseName": database, "TableInput": table_input}
-                )
-                counts["updated"] += 1
+            _put_table(database, table_input, update, counts)
             _add_partitions(database, table_name, storage, partitions)
     counts["deleted"] = _retire(database, name, seen, delete)
     return counts
+
+
+def _put_table(database: str, table_input: dict, update: str, counts: dict) -> None:
+    """Create the table, or update it under UPDATE_IN_DATABASE; count which."""
+    try:
+        _ACTIONS["AWSGlue.GetTable"](
+            {"DatabaseName": database, "Name": table_input["Name"]}
+        )
+        exists = True
+    except GlueError:
+        exists = False
+    if not exists:
+        _ACTIONS["AWSGlue.CreateTable"](
+            {"DatabaseName": database, "TableInput": table_input}
+        )
+        counts["created"] += 1
+    elif update == "UPDATE_IN_DATABASE":
+        _ACTIONS["AWSGlue.UpdateTable"](
+            {"DatabaseName": database, "TableInput": table_input}
+        )
+        counts["updated"] += 1
+
+
+# ---------------------------------------------------------------------------
+# JDBC targets: a PostgreSQL or Redshift database's tables, through a connection
+# ---------------------------------------------------------------------------
+_JDBC_URL = re.compile(r"^jdbc:(postgresql|redshift)://([^/:?]+)(?::(\d+))?/([^?;]*)")
+# Glue's type for an information_schema data_type (anything else is a string)
+_JDBC_TYPES = {
+    "smallint": "smallint",
+    "integer": "int",
+    "bigint": "bigint",
+    "real": "float",
+    "double precision": "double",
+    "boolean": "boolean",
+    "date": "date",
+    "timestamp without time zone": "timestamp",
+    "timestamp with time zone": "timestamp",
+    "bytea": "binary",
+}
+
+
+def _jdbc_login(connection: dict) -> tuple[str, str]:
+    """Return a JDBC connection's user and password, from its secret if it names one."""
+    props = connection.get("ConnectionProperties") or {}
+    if secret_id := props.get("SECRET_ID"):
+        from oblako.services.boto import client
+
+        secrets = client("secretsmanager", f"http://localhost:{ports.MOTO}")
+        secret = json.loads(
+            secrets.get_secret_value(SecretId=secret_id)["SecretString"]
+        )
+        return secret["username"], secret["password"]
+    return props.get("USERNAME", ""), props.get("PASSWORD", "")
+
+
+def _jdbc_type(column: dict) -> str:
+    """Return the Glue type of an information_schema column."""
+    if column["data_type"] == "numeric" and column["numeric_precision"] is not None:
+        return f"decimal({column['numeric_precision']},{column['numeric_scale'] or 0})"
+    if column["data_type"] == "numeric":
+        return "decimal(38,18)"
+    return _JDBC_TYPES.get(column["data_type"], "string")
+
+
+def _jdbc_tables(crawler: dict, target: dict) -> list[dict]:
+    """Return the TableInputs for a JDBC target's tables and views."""
+    import psycopg
+    from psycopg.rows import dict_row
+
+    name = target["ConnectionName"]
+    connection = _ACTIONS["AWSGlue.GetConnection"]({"Name": name})["Connection"]
+    url = (connection.get("ConnectionProperties") or {}).get("JDBC_CONNECTION_URL", "")
+    if not (m := _JDBC_URL.match(url)):
+        raise RuntimeError(
+            f"Connection {name}: only PostgreSQL and Redshift JDBC URLs are crawled, "
+            f"not {url!r}"
+        )
+    _, host, port, url_database = m.groups()
+    parts = (target.get("Path") or "%").split("/")
+    database = parts[0] if parts[0] and "%" not in parts[0] else url_database
+    schema = parts[1] if len(parts) > 1 else "%"
+    table = parts[2] if len(parts) > 2 else "%"
+    user, password = _jdbc_login(connection)
+    with psycopg.connect(
+        # a job's container reaches the host as host.docker.internal; the crawler is on it
+        host="127.0.0.1" if host == "host.docker.internal" else host,
+        port=int(port or 5432),
+        dbname=database,
+        user=user,
+        password=password,
+        connect_timeout=10,
+        row_factory=dict_row,
+    ) as conn:
+        relations = conn.execute(
+            "SELECT table_schema, table_name, table_type FROM information_schema.tables"
+            " WHERE table_schema LIKE %s AND table_name LIKE %s"
+            " AND table_schema NOT IN ('pg_catalog', 'information_schema')"
+            " AND table_schema NOT LIKE 'pg\\_%%' ORDER BY 1, 2",
+            (schema, table),
+        ).fetchall()
+        columns = conn.execute(
+            "SELECT table_schema, table_name, column_name, data_type,"
+            " numeric_precision, numeric_scale FROM information_schema.columns"
+            " WHERE table_schema LIKE %s AND table_name LIKE %s"
+            " ORDER BY table_schema, table_name, ordinal_position",
+            (schema, table),
+        ).fetchall()
+    exclusions = target.get("Exclusions") or []
+    tables = []
+    for rel in relations:
+        path = f"{database}/{rel['table_schema']}/{rel['table_name']}"
+        if any(fnmatch.fnmatch(path, pattern) for pattern in exclusions):
+            continue
+        params = {
+            "classification": "postgresql"
+            if m.group(1) == "postgresql"
+            else "redshift",
+            "connectionName": name,
+            "typeOfData": "view" if rel["table_type"] == "VIEW" else "table",
+            "compressionType": "none",
+            "CrawlerSchemaDeserializerVersion": "1.0",
+            "CrawlerSchemaSerializerVersion": "1.0",
+            "UPDATED_BY_CRAWLER": crawler["Name"],
+        }
+        tables.append(
+            {
+                "Name": (
+                    (crawler.get("TablePrefix") or "")
+                    + f"{database}_{rel['table_schema']}_{rel['table_name']}"
+                ).lower(),
+                "StorageDescriptor": {
+                    "Columns": [
+                        {"Name": c["column_name"], "Type": _jdbc_type(c)}
+                        for c in columns
+                        if (c["table_schema"], c["table_name"])
+                        == (rel["table_schema"], rel["table_name"])
+                    ],
+                    "Location": f"{database}.{rel['table_schema']}.{rel['table_name']}",
+                    "Compressed": False,
+                    "NumberOfBuckets": -1,
+                    "StoredAsSubDirectories": False,
+                    "Parameters": params,
+                },
+                "PartitionKeys": [],
+                "TableType": "EXTERNAL_TABLE",
+                "Parameters": params,
+            }
+        )
+    return tables
 
 
 def _add_partitions(database: str, table: str, storage: dict, partitions: dict) -> None:

@@ -14,6 +14,8 @@ versioned entries below.
 ### Added
 
 - **Glue**: job bookmarks: with `--job-bookmark-option job-bookmark-enable`, a read that names `jobBookmarkKeys` returns only the rows past the last committed run, `job.commit()` saves the bookmark, and `GetJobBookmark` / `ResetJobBookmark` read and clear it
+- **Glue**: crawlers take JDBC targets: a PostgreSQL or Redshift database's tables and views, through a Glue connection (its user or its Secrets Manager secret), cataloged as `<database>_<schema>_<table>` with Glue's types, so a job's `from_catalog` reads them through the connection
+- **Glue**: jobs reach oblako's RDS instances at their endpoints (`<id>.<region>.rds.localhost`); reading and writing through Glue connections (`connectionName`, `from_jdbc_conf`) is tested end to end
 
 ### Changed
 

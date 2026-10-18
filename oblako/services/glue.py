@@ -163,6 +163,14 @@ class GlueService:
             },
             **(env or {}),
         }
+        # on oblako's RDS network, when there is one, so a job reaches an RDS
+        # instance at its endpoint (<id>.<region>.rds.localhost), as on AWS
+        try:
+            from oblako.engines.rds_control.instances import NETWORK
+
+            network = {"network": self.client.networks.get(NETWORK).name}
+        except Exception:
+            network = {}
         with tempfile.TemporaryDirectory() as scripts_dir:
             (Path(scripts_dir) / "job.py").write_text(script)
             container = self.client.containers.run(
@@ -189,6 +197,7 @@ class GlueService:
                 },
                 environment=full_env,
                 extra_hosts={"host.docker.internal": "host-gateway"},
+                **network,
             )
             try:
                 result = container.wait(timeout=timeout)
