@@ -63,8 +63,8 @@ normal `boto3` client (or native driver):
 | RDS / Aurora | moto + PostgreSQL/MySQL | boto3 `rds` control plane + a real engine |
 | RDS Data API | oblako server | boto3 `rds-data`: synchronous SQL + transactions |
 | CloudFormation | oblako server | boto3 `cloudformation` (+ `aws cloudformation deploy` / `sam deploy`) → **real** oblako resources |
-| Glue | Spark + S3Proxy | Spark jobs read/write oblako's S3 |
-| Glue Data Catalog | oblako server | boto3 `glue` databases, tables, partitions and crawlers; it is Athena's `AwsDataCatalog` |
+| Glue | Spark + S3Proxy | Spark jobs read/write oblako's S3 and JDBC sources through Glue connections, with job bookmarks |
+| Glue Data Catalog | oblako server | boto3 `glue` databases, tables, partitions, connections, S3 and JDBC crawlers, triggers and workflows; it is Athena's `AwsDataCatalog` |
 | MWAA (Airflow) | AWS's MWAA Airflow image | boto3 `mwaa`; each environment runs real Airflow, with DAGs synced from S3 |
 | EventBridge | moto + oblako proxy | boto3 `events`; scheduled rules fire and run their targets |
 | EKS | moto | boto3 `eks` control plane: create, describe and list clusters |
