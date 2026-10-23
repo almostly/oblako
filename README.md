@@ -76,7 +76,7 @@ Full per-service guides, limitations, and the Python API are in the
 
 ## Quick start
 
-oblako needs Python 3.10 or later and a container runtime: Docker (the default),
+oblako needs Python 3.11 or later and a container runtime: Docker (the default),
 or Podman, Colima or Apple's `container` (see below). Most services run as
 containers; a few API engines run in Python without one.
 

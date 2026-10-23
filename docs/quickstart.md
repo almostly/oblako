@@ -5,7 +5,7 @@
 - **A container runtime**: oblako runs services as local containers. Docker is the
   default; Podman, Colima, Kubernetes and Apple's `container` also work (see
   [Container runtimes](runtimes.md)).
-- **Python 3.10+**
+- **Python 3.11+**
 
 ## Install
 

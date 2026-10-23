@@ -50,7 +50,6 @@ import os
 import re
 import ssl
 import struct
-import sys
 import time
 
 # The COPY/UNLOAD <-> S3 bridge. Optional: if its deps (pydantic/boto3/pyarrow)
@@ -964,8 +963,6 @@ async def _negotiate_startup(
             if is_ssl and SSL_CTX is not None:
                 writer.write(b"S")
                 await writer.drain()
-                if sys.version_info < (3, 11):  # StreamWriter.start_tls is 3.11+
-                    raise RuntimeError("TLS termination needs Python 3.11 or later")
                 await writer.start_tls(SSL_CTX)  # client<->proxy now encrypted
             else:
                 writer.write(b"N")  # no TLS (or GSS, which we don't offer)

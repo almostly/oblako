@@ -11,6 +11,20 @@ versioned entries below.
 
 ## Unreleased
 
+## v0.7.0 (2026-10-23)
+
+oblako now needs Python 3.11 or later, and its locked dependencies are past the
+open security advisories.
+
+### Removed
+
+- **oblako**: Python 3.10 support; Python 3.10 reaches end of life this month, and Pillow's fixes for its current advisories ship only in Pillow 13, which needs 3.11
+
+### Changed
+
+- **oblako**: locked dependencies upgraded past their security advisories (GitPython, MLflow, aiohttp, cryptography, Pillow and others); SQLAlchemy stays at 2.0.50, as sqlalchemy-redshift 1.0.0 fails reflection on 2.0.55
+- **Dashboard**: frontend dependencies upgraded past their advisories, with one KaTeX version throughout
+
 ## v0.6.0 (2026-10-18)
 
 Glue for an incremental sync from RDS PostgreSQL into another Postgres, such as
