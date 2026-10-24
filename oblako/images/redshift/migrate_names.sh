@@ -87,19 +87,23 @@ dump() {
            OR nspname = 'pg_oblako'")
     as_postgres "$STOCK/pg_dump" -h "$WORK" -p "$STOCK_PORT" -U "$PG_USER" -d "$db" \
       -Fc "${schemas[@]}" -f "$WORK/db$i.dump"
-    # ALTER and DROP grants hold OIDs; keep them by name
-    stock_psql -d "$db" -Atc "SELECT CASE WHEN to_regclass('pg_oblako.object_privileges') IS NULL THEN ''
-        ELSE (SELECT string_agg(format(
-            'SELECT pg_oblako.object_privilege(true, ARRAY[%L], %L, ARRAY[%L], ARRAY[%L]::text[], %L);',
-            p.privilege, p.objkind,
-            CASE p.objkind
-                WHEN 'relation' THEN (SELECT format('%I.%I', n.nspname, c.relname)
-                                        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-                                       WHERE c.oid = p.objid)
-                ELSE (SELECT quote_ident(nspname) FROM pg_namespace WHERE oid = p.objid) END,
-            CASE p.grantee WHEN 0 THEN NULL ELSE pg_get_userbyid(p.grantee) END,
-            p.admin_option), E'\n')
-          FROM pg_oblako.object_privileges p) END" >"$WORK/db$i.privileges.sql"
+    # ALTER and DROP grants hold OIDs; keep them by name. A volume from before
+    # pg_oblako.object_privileges has none, and a query naming the table would
+    # fail to parse there, so look for it first.
+    : >"$WORK/db$i.privileges.sql"
+    if [ -n "$(stock_psql -d "$db" -Atc "SELECT to_regclass('pg_oblako.object_privileges')")" ]; then
+      stock_psql -d "$db" -Atc "SELECT string_agg(format(
+              'SELECT pg_oblako.object_privilege(true, ARRAY[%L], %L, ARRAY[%L], ARRAY[%L]::text[], %L);',
+              p.privilege, p.objkind,
+              CASE p.objkind
+                  WHEN 'relation' THEN (SELECT format('%I.%I', n.nspname, c.relname)
+                                          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+                                         WHERE c.oid = p.objid)
+                  ELSE (SELECT quote_ident(nspname) FROM pg_namespace WHERE oid = p.objid) END,
+              CASE p.grantee WHEN 0 THEN NULL ELSE pg_get_userbyid(p.grantee) END,
+              p.admin_option), E'\n')
+            FROM pg_oblako.object_privileges p" >"$WORK/db$i.privileges.sql"
+    fi
     stock_psql -d "$db" -Atc "SELECT count(*) FROM pg_class c
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE c.relkind IN ('r', 'p', 'v', 'm')
