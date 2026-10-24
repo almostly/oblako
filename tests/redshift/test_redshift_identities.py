@@ -524,6 +524,32 @@ def test_a_superuser_needs_a_password(conn):
     assert _rows(conn, "SELECT 1 FROM pg_user WHERE usename = 'idt_bob'") == []
 
 
+def test_user_info_views_hide_every_password(conn):
+    """As on Redshift Serverless: '********' for every user, a disabled password included."""
+    conn.execute("CREATE USER idt_ann PASSWORD DISABLE")
+    assert (
+        _rows(
+            conn,
+            "SELECT passwd, usesuper, useconnlimit FROM pg_user_info"
+            " WHERE usename IN ('idt_alice', 'idt_ann') ORDER BY usename",
+        )
+        == [("********", False, "UNLIMITED")] * 2
+    )
+    assert _rows(
+        conn,
+        "SELECT superuser, connection_limit, syslog_access FROM svv_user_info"
+        " WHERE user_name = 'idt_ann'",
+    ) == [(False, "UNLIMITED", "RESTRICTED")]
+    names = [r[0] for r in _rows(conn, "SELECT user_name FROM svv_user_info")]
+    assert "idt_reader" not in names and "idt_analysts" not in names
+    with psycopg.connect(
+        autocommit=True, **{**RS, "user": "idt_alice", "password": "Abcdef12"}
+    ) as alice:
+        for view in ("pg_user_info", "svv_user_info"):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                alice.execute(f"SELECT 1 FROM {view}")
+
+
 def test_alter_user_cannot_leave_a_superuser_without_a_password(conn):
     """As on Redshift Serverless, judged on the user's state after the statement."""
 

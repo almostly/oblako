@@ -228,7 +228,9 @@ Redshift's columns and values (`identity_type` of `user`, `group`, `role` or
 gives the same rows in every one of them. As on Redshift, an ACL string leaves out
 grants to roles, which show only in these views. A user who isn't a superuser sees only its
 own roles in `svv_user_grants`, and in `svv_role_grants` only the roles it has or
-owns, as on Redshift. Redshift's `ACCESS SYSTEM TABLE` system permission, granted to a
+owns, as on Redshift. The user views `pg_user_info` and `svv_user_info` are for
+superusers, with Redshift's columns; as there, `pg_user_info.passwd` is `********` for
+every user, a disabled password included (checked 2026-10-24). Redshift's `ACCESS SYSTEM TABLE` system permission, granted to a
 role (`GRANT ACCESS SYSTEM TABLE TO ROLE r`) and held through roles, shows every row
 again, without making its holder a superuser or giving it any data; it's listed in
 `svv_system_privileges`. So are `CREATE USER`, `ALTER USER`, `DROP USER` and

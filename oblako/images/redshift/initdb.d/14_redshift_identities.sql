@@ -12,7 +12,8 @@
 -- parsing ACL strings, with Redshift's columns and values:
 --   svv_roles, svv_user_grants, svv_role_grants,
 --   svv_relation_privileges, svv_schema_privileges, svv_database_privileges,
---   svv_function_privileges, svv_default_privileges.
+--   svv_function_privileges, svv_default_privileges,
+--   and the user views pg_user_info and svv_user_info.
 -- They report explicit grants, as Redshift's do: what an owner holds on its own
 -- object is implied by ownership and left out, and so are PostgreSQL privileges
 -- Redshift doesn't have (CONNECT, TRIGGER, MAINTAIN). A grant to PUBLIC is
@@ -568,6 +569,41 @@ WHERE d.defaclobjtype IN ('r', 'f')
   AND a.grantee <> d.defaclrole
   AND a.privilege_type IN ('SELECT', 'INSERT', 'UPDATE', 'DELETE', 'REFERENCES',
                            'TRUNCATE', 'EXECUTE');
+
+-- Redshift's user views, for superusers only (no grant to PUBLIC). pg_user_info
+-- shows every password as '********', a disabled one included, so neither view
+-- tells whose password is disabled.
+CREATE OR REPLACE VIEW pg_catalog.pg_user_info AS
+SELECT r.rolname AS usename,
+       r.oid::bigint::integer AS usesysid,
+       r.rolcreatedb AS usecreatedb,
+       r.rolsuper AS usesuper,
+       r.rolsuper AS usecatupd,
+       '********'::text AS passwd,
+       r.rolvaliduntil AS valuntil,
+       r.rolconfig AS useconfig,
+       CASE WHEN r.rolconnlimit < 0 THEN 'UNLIMITED'
+            ELSE r.rolconnlimit::text END AS useconnlimit
+FROM pg_catalog.pg_roles r
+WHERE pg_catalog.oblako_identity_type(r.oid) = 'user';
+
+CREATE OR REPLACE VIEW pg_catalog.svv_user_info AS
+SELECT r.rolname::text AS user_name,
+       r.oid::bigint::integer AS user_id,
+       r.rolcreatedb AS createdb,
+       r.rolsuper AS superuser,
+       r.rolsuper AS catalog_update,
+       CASE WHEN r.rolconnlimit < 0 THEN 'UNLIMITED'
+            ELSE r.rolconnlimit::text END AS connection_limit,
+       CASE WHEN r.rolsuper THEN 'UNRESTRICTED'
+            ELSE 'RESTRICTED' END AS syslog_access,
+       0 AS session_timeout,
+       NULL::timestamp AS last_ddl_timestamp,
+       NULL::text AS external_user_id
+FROM pg_catalog.pg_roles r
+WHERE pg_catalog.oblako_identity_type(r.oid) = 'user';
+
+REVOKE ALL ON pg_catalog.pg_user_info, pg_catalog.svv_user_info FROM PUBLIC;
 
 GRANT SELECT ON pg_catalog.svv_system_privileges TO PUBLIC;
 GRANT SELECT ON pg_catalog.svv_roles, pg_catalog.svv_user_grants,
