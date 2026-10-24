@@ -13,16 +13,19 @@
  *      (kept in pg_oblako.object_privileges): an ALTER or DROP by a user that
  *      holds the privilege but doesn't own the object runs as the object's owner;
  *   4. refuses ALTER DEFAULT PRIVILEGES FOR USER x IN SCHEMA s unless x can
- *      CREATE in s, as Redshift does (whoever runs it, superusers included).
+ *      CREATE in s, as Redshift does (whoever runs it, superusers included);
+ *   5. refuses an ALTER USER that would leave a superuser without a password.
  */
 #include "postgres.h"
 #include "fmgr.h"
 #include "access/htup_details.h"
 #include "access/xact.h"
 #include "catalog/namespace.h"
+#include "catalog/pg_authid.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_namespace.h"
 #include "catalog/pg_type.h"
+#include "commands/defrem.h"
 #include "executor/spi.h"
 #include "miscadmin.h"
 #include "nodes/parsenodes.h"
@@ -256,6 +259,46 @@ check_default_privileges(AlterDefaultPrivilegesStmt *stmt)
 	}
 }
 
+/*
+ * Redshift refuses an ALTER USER that leaves the user a superuser with its
+ * password disabled, judged on the user's state after the statement: CREATEUSER
+ * for a user without a password, or PASSWORD DISABLE for a superuser, unless the
+ * same statement also gives a password or NOCREATEUSER.
+ */
+static void
+check_superuser_password(AlterRoleStmt *stmt)
+{
+	HeapTuple	tuple;
+	bool		superuser = false;
+	bool		no_password = false;
+	bool		touched = false;
+	ListCell   *lc;
+
+	tuple = get_rolespec_tuple(stmt->role);
+	superuser = ((Form_pg_authid) GETSTRUCT(tuple))->rolsuper;
+	SysCacheGetAttr(AUTHNAME, tuple, Anum_pg_authid_rolpassword, &no_password);
+	ReleaseSysCache(tuple);
+	foreach(lc, stmt->options)
+	{
+		DefElem    *opt = (DefElem *) lfirst(lc);
+
+		if (strcmp(opt->defname, "superuser") == 0)
+		{
+			superuser = defGetBoolean(opt);
+			touched = true;
+		}
+		else if (strcmp(opt->defname, "password") == 0)
+		{
+			no_password = opt->arg == NULL;
+			touched = true;
+		}
+	}
+	if (touched && superuser && no_password)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("Superusers cannot have disabled passwords")));
+}
+
 static void
 oblako_ProcessUtility(PlannedStmt *pstmt, const char *queryString, bool readOnlyTree,
 					  ProcessUtilityContext context, ParamListInfo params,
@@ -267,6 +310,8 @@ oblako_ProcessUtility(PlannedStmt *pstmt, const char *queryString, bool readOnly
 
 	if (IsA(pstmt->utilityStmt, AlterDefaultPrivilegesStmt))
 		check_default_privileges((AlterDefaultPrivilegesStmt *) pstmt->utilityStmt);
+	if (IsA(pstmt->utilityStmt, AlterRoleStmt))
+		check_superuser_password((AlterRoleStmt *) pstmt->utilityStmt);
 	if (IsTransactionState())
 		targets = statement_targets(pstmt->utilityStmt, &privilege);
 	if (targets != NIL)

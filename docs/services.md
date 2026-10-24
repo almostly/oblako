@@ -236,7 +236,11 @@ again, without making its holder a superuser or giving it any data; it's listed 
 list, as on Redshift Serverless, checked 2026-10-13); they're recorded and listed,
 not enforced. As on Redshift, a superuser needs a password: `CREATE USER x
 CREATEUSER PASSWORD DISABLE` is refused with "CREATEUSER and PASSWORD DISABLE are
-incompatible". `USER_IS_MEMBER_OF(user, role)` and
+incompatible", and an `ALTER USER` that would leave a superuser without one (`CREATEUSER`
+for a user whose password is disabled, or `PASSWORD DISABLE` for a superuser) with
+"Superusers cannot have disabled passwords", unless the same statement also gives a
+password or `NOCREATEUSER` (checked on Redshift Serverless 2026-10-24).
+`USER_IS_MEMBER_OF(user, role)` and
 `ROLE_IS_MEMBER_OF(role, role)` answer through grants followed role to role, and,
 as on Redshift, asking about another user takes a superuser or that permission.
 `pg_group` lists only groups however a query names it, with an alias or without

@@ -56,6 +56,7 @@ def _drop(c) -> None:
         "DROP SCHEMA IF EXISTS idt CASCADE",
         "DROP USER IF EXISTS idt_alice",
         "DROP USER IF EXISTS idt_bob",
+        "DROP USER IF EXISTS idt_ann",
         "DROP GROUP IF EXISTS idt_analysts",
         "DROP ROLE IF EXISTS idt_writer FORCE",
         "DROP ROLE IF EXISTS idt_reader FORCE",
@@ -521,3 +522,23 @@ def test_a_superuser_needs_a_password(conn):
     ):
         conn.execute("CREATE USER idt_bob CREATEUSER PASSWORD DISABLE")
     assert _rows(conn, "SELECT 1 FROM pg_user WHERE usename = 'idt_bob'") == []
+
+
+def test_alter_user_cannot_leave_a_superuser_without_a_password(conn):
+    """As on Redshift Serverless, judged on the user's state after the statement."""
+
+    def superuser(name):
+        return _rows(conn, f"SELECT usesuper FROM pg_user WHERE usename = '{name}'")
+
+    refused = "Superusers cannot have disabled passwords"
+    conn.execute("CREATE USER idt_ann PASSWORD DISABLE")
+    with pytest.raises(psycopg.errors.SyntaxError, match=refused):
+        conn.execute("ALTER USER idt_ann CREATEUSER")
+    assert superuser("idt_ann") == [(False,)]
+    conn.execute("ALTER USER idt_ann CREATEUSER PASSWORD 'Probe-pw-1'")
+    assert superuser("idt_ann") == [(True,)]
+    with pytest.raises(psycopg.errors.SyntaxError, match=refused):
+        conn.execute("ALTER USER idt_ann PASSWORD DISABLE")
+    assert superuser("idt_ann") == [(True,)]
+    conn.execute("ALTER USER idt_ann NOCREATEUSER PASSWORD DISABLE")
+    assert superuser("idt_ann") == [(False,)]
