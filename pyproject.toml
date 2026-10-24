@@ -191,6 +191,7 @@ build-backend = "hatchling.build"
 exclude = [
     "/.claude",
     "/docs/_build",
+    "/docs/book",
     "/.tmp",
     "/oblako/dashboard/frontend/node_modules",
 ]
