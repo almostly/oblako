@@ -1,0 +1,4 @@
+before (files, snapshots): (7, 4)
+rewrote 2 files into 1
+deleted 4 unreferenced files
+after (files, snapshots): (6, 1)

@@ -1,0 +1,5 @@
+tests/test_summarise.py::test_orders_are_counted_and_summed PASSED
+tests/test_summarise.py::test_refunds_are_subtracted PASSED
+tests/test_summarise.py::test_no_events_no_rows PASSED
+
+================ 3 passed, 2 deselected in 0.01s =================

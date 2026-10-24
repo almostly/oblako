@@ -1,0 +1,4 @@
+Apply complete! Resources: 6 added, 0 changed, 0 destroyed.
+bucket = "daily-totals-123456789012"
+copy_role_arn = "arn:aws:iam::123456789012:role/daily-totals-copy"
+redshift_host = "localhost"

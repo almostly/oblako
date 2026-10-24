@@ -1,0 +1,9 @@
+[('day', 'DATE'), ('user_id', 'VARCHAR(16)'),
+ ('page', 'VARCHAR(65535)'), ('load_ms', 'INTEGER')]
+('/', 2)
+('/docs', 2)
+('/pricing', 2)
+       day  avg_ms
+2026-09-01    1125
+2026-09-02    1330
+2026-09-03    1340

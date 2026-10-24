@@ -1,0 +1,3 @@
+customers KEY(customer_id) customer_id 2000 1.03
+orders KEY(customer_id) order_date 20000 1.04
+regions ALL None 8 None

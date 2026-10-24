@@ -12,7 +12,9 @@ repos:
     hooks:
       - id: ruff-check        # lint (autofix); covers oblako/, tests/, examples/, notebooks
         args: [--fix]
+        exclude: ^docs/book/  # the book's listings, kept as printed
       - id: ruff-format       # formatter; keeps boxed section-divider comments intact
+        exclude: ^docs/book/
 
   - repo: https://github.com/PyCQA/pydocstyle
     rev: 6.3.0

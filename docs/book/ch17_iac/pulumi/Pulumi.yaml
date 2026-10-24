@@ -1,0 +1,5 @@
+name: daily-totals
+runtime:
+  name: python
+  options:
+    toolchain: uv

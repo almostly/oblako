@@ -1,0 +1,13 @@
+ +  aws:iam:Role copy created (0.04s)
+ +  aws:iam:RolePolicy read-staging created (0.02s)
+ +  aws:s3:Bucket staging created (0.08s)
+ +  aws:redshiftserverless:Namespace namespace created (0.20s)
+ +  aws:ec2:SecurityGroup redshift created (0.28s)
+ +  aws:redshiftserverless:Workgroup workgroup created (0.02s)
+ +  pulumi:pulumi:Stack daily-totals-dev created (0.51s)
+Outputs:
+bucket       : "daily-totals-123456789012"
+copy_role_arn: "arn:aws:iam::123456789012:role/daily-totals-copy"
+redshift_host: "localhost"
+Resources:
+    + 7 created

@@ -1,0 +1,2 @@
+orders KEY(customer_id) 1.04
+orders_by_day KEY(order_date) 1.31

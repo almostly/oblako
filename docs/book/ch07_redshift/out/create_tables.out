@@ -1,0 +1,2 @@
+(['day', 'date'], ['user_id', 'character varying(16)'],
+ ['page', 'character varying(65535)'], ['load_ms', 'integer'])

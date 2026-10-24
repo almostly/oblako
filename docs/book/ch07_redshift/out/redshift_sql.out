@@ -1,0 +1,4 @@
+['u-1', '/, /docs', 1]
+['u-2', '/pricing, /docs', 2]
+['u-3', '/, /pricing', 1]
+([datetime.datetime(2026, 10, 30, 0, 0)],)

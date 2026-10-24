@@ -46,5 +46,5 @@ html_theme_options = {"logo_only": False, "collapse_navigation": False}
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
 
-exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
+exclude_patterns = ["_build", "book", "Thumbs.db", ".DS_Store"]
 source_suffix = {".md": "markdown", ".rst": "restructuredtext"}

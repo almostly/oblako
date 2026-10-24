@@ -1,0 +1,5 @@
+available 2 nodes
+analytics.us-east-1.redshift.localhost
+LEADER 172.28.0.4
+COMPUTE-0 172.28.0.2
+COMPUTE-1 172.28.0.3

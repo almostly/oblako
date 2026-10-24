@@ -1,0 +1,2 @@
+1 web orders
+[{'order_id': 9001, 'total': Decimal('20.00')}]

@@ -1,0 +1,8 @@
+shardId-000000000000 36 records
+  user-2: 4
+  user-3: 7
+  user-4: 10
+  user-5: 9
+  user-6: 6
+shardId-000000000001 4 records
+  user-1: 4

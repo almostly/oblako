@@ -1,0 +1,7 @@
+Key    Bucket
+Value  daily-totals-123456789012
+Key    CopyRoleArn
+Value  arn:aws:iam::123456789012:role/daily-totals-copy
+Key    RedshiftHost
+Value  localhost
+Successfully created/updated stack - daily-totals in None

@@ -1,0 +1,4 @@
+primary sends to: [('streaming', 'async')]
+in recovery: True
+orders: 1000
+refused: cannot execute DELETE in a read-only transaction

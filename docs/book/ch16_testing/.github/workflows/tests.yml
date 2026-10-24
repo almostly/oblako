@@ -1,0 +1,36 @@
+name: tests
+
+on: [push, pull_request]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run pytest -m "not integration"
+
+  integration:
+    runs-on: ubuntu-latest
+    env:
+      AWS_PROFILE: oblako
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Install oblako
+        run: uv tool install oblako==0.7.1
+
+      - name: Start S3 and Redshift
+        run: |
+          oblako up s3
+          oblako up redshift
+          oblako configure
+
+      - name: Trust the Redshift certificate
+        run: |
+          uv sync
+          oblako trust --python .venv/bin/python
+
+      - name: Integration tests
+        run: uv run pytest -m integration

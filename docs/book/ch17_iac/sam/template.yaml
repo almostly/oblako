@@ -1,0 +1,81 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Staging bucket, COPY role and Redshift Serverless
+
+Parameters:
+  AdminPassword:
+    Type: String
+    NoEcho: true
+  AllowedCidr:
+    Type: String
+    Description: The address that may connect to Redshift
+
+Resources:
+  Staging:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "daily-totals-${AWS::AccountId}"
+
+  CopyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: daily-totals-copy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: redshift.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: read-staging
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [s3:GetObject, s3:ListBucket]
+                # the staging bucket and the tests' buckets; the
+                # condition keeps them to this account, as bucket
+                # ARNs carry no account ID
+                Resource:
+                  - "arn:aws:s3:::daily-totals-*"
+                  - "arn:aws:s3:::daily-totals-*/*"
+                Condition:
+                  StringEquals:
+                    aws:ResourceAccount: !Ref AWS::AccountId
+
+  Namespace:
+    Type: AWS::RedshiftServerless::Namespace
+    Properties:
+      NamespaceName: daily-totals
+      AdminUsername: pipeline_admin
+      AdminUserPassword: !Ref AdminPassword
+      DbName: dev
+      IamRoles: [!GetAtt CopyRole.Arn]
+
+  RedshiftAccess:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Redshift from one address
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5439
+          ToPort: 5439
+          CidrIp: !Ref AllowedCidr
+
+  Workgroup:
+    Type: AWS::RedshiftServerless::Workgroup
+    Properties:
+      WorkgroupName: daily-totals
+      NamespaceName: !Ref Namespace
+      BaseCapacity: 8
+      PubliclyAccessible: true
+      SecurityGroupIds: [!GetAtt RedshiftAccess.GroupId]
+
+Outputs:
+  Bucket:
+    Value: !Ref Staging
+  CopyRoleArn:
+    Value: !GetAtt CopyRole.Arn
+  RedshiftHost:
+    Value: !GetAtt Workgroup.Workgroup.Endpoint.Address
