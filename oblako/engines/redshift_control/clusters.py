@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import socket
+import struct
 import threading
 import time
 from pathlib import Path
@@ -241,8 +242,26 @@ def _run_node(client, network, cluster_id: str, record: dict, node: int | None):
     return container
 
 
+# PostgreSQL's SSLRequest; the leader's wire proxy answers b"S" once it serves TLS
+SSL_REQUEST = struct.pack("!II", 8, 80877103)
+
+
+def _accepts_tls(port: int) -> bool:
+    """Return whether the wire proxy on ``port`` answers an SSLRequest.
+
+    A plain connect isn't enough: Docker's port forwarder accepts it before
+    the proxy inside the container listens, then drops the connection.
+    """
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=2) as s:
+            s.sendall(SSL_REQUEST)
+            return s.recv(1) == b"S"
+    except OSError:
+        return False
+
+
 def _wait_ready(cluster_id: str, record: dict, timeout: float = 300.0) -> None:
-    """Wait until the leader has registered every compute node."""
+    """Wait until the leader has registered every compute node and serves TLS."""
     client = _docker()
     leader = client.containers.get(node_name(cluster_id, None))
     query = "SELECT count(*) FROM pg_dist_node WHERE noderole = 'primary'"
@@ -269,11 +288,12 @@ def _wait_ready(cluster_id: str, record: dict, timeout: float = 300.0) -> None:
             environment={"PGPASSWORD": record["password"]},
         )
         registered = probe.output.decode(errors="replace").strip()
-        if probe.exit_code == 0 and registered == str(record["nodes"] + 1):
-            with socket.socket() as s:
-                s.settimeout(1)
-                if s.connect_ex(("127.0.0.1", record["port"])) == 0:
-                    return
+        if (
+            probe.exit_code == 0
+            and registered == str(record["nodes"] + 1)
+            and _accepts_tls(record["port"])
+        ):
+            return
         time.sleep(1)
     raise TimeoutError(f"cluster {cluster_id} did not become ready")
 
