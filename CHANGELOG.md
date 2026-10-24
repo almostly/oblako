@@ -24,6 +24,11 @@ Serverless.
 
 - **Redshift**: an `ALTER USER` that would leave a superuser without a password (`CREATEUSER` for a user whose password is disabled, or `PASSWORD DISABLE` for a superuser) is refused with "Superusers cannot have disabled passwords", unless the same statement also gives a password or `NOCREATEUSER`
 
+### Fixed
+
+- **Redshift**: a data directory from before the ALTER and DROP privileges (oblako 0.3) moves to 127-byte names instead of stopping the engine on start
+- **Redshift**: a multi-node cluster reports `available` only once its endpoint serves connections, so the first connection no longer fails now and then
+
 ## v0.7.0 (2026-10-23)
 
 oblako now needs Python 3.11 or later, and its locked dependencies are past the
