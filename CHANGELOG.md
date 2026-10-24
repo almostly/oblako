@@ -11,6 +11,19 @@ versioned entries below.
 
 ## Unreleased
 
+## v0.7.1 (2026-10-24)
+
+Redshift's rules and views for superuser passwords, as checked on Redshift
+Serverless.
+
+### Added
+
+- **Redshift**: `pg_user_info` and `svv_user_info`, for superusers, with Redshift's columns; `pg_user_info.passwd` is `********` for every user, a disabled password included
+
+### Changed
+
+- **Redshift**: an `ALTER USER` that would leave a superuser without a password (`CREATEUSER` for a user whose password is disabled, or `PASSWORD DISABLE` for a superuser) is refused with "Superusers cannot have disabled passwords", unless the same statement also gives a password or `NOCREATEUSER`
+
 ## v0.7.0 (2026-10-23)
 
 oblako now needs Python 3.11 or later, and its locked dependencies are past the
