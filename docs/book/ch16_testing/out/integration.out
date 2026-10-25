@@ -1,4 +1,4 @@
 tests/test_pipeline.py::test_loads_a_day_from_two_files PASSED
 tests/test_pipeline.py::test_rerunning_a_day_replaces_it PASSED
 
-================ 2 passed, 3 deselected in 2.97s =================
+================ 2 passed, 3 deselected in 1.03s =================
