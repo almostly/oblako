@@ -52,7 +52,7 @@ import ssl
 import struct
 import time
 
-# The COPY/UNLOAD <-> S3 bridge. Optional: if its deps (pydantic/boto3/pyarrow)
+# The COPY/UNLOAD <-> S3 bridge. Optional: if its deps (botocore/pyarrow)
 # aren't present the proxy still runs, just without COPY/UNLOAD rewriting.
 try:
     import copy_unload

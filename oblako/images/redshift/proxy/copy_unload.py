@@ -27,8 +27,9 @@ is decompressed on read (gzip is also auto-detected by magic bytes).
 Self-contained (no ``oblako`` imports) so it can be copied into the redshift image
 next to ``redshift_proxy.py`` and imported both by the proxy (``rewrite_*``,
 parsing) and by the in-engine plpython functions (``do_copy`` / ``do_unload``).
-``pydantic`` is needed to import the module; ``boto3`` / ``pyarrow`` are imported
-lazily, only inside the execution functions.
+Importing it needs only the standard library, so each new connection's first
+COPY or UNLOAD pays little; ``botocore`` / ``pyarrow`` are imported lazily, only
+inside the execution functions.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ import os
 import re
 import urllib.parse
 
-from pydantic import BaseModel, field_validator
+from dataclasses import dataclass, field
 
 # ---------------------------------------------------------------------------
 # SQL detection / parsing (proxy side)
@@ -169,7 +170,8 @@ def _unescape_delim(d: str) -> str:
     return d.encode().decode("unicode_escape") if "\\" in d else d
 
 
-class CopyCommand(BaseModel):
+@dataclass(kw_only=True)
+class CopyCommand:
     """A parsed ``COPY <table> [(cols)] FROM 's3://...' ...`` statement."""
 
     table: str
@@ -185,11 +187,9 @@ class CopyCommand(BaseModel):
     )
     compression: str | None = None  # gzip | bzip2 | zstd
 
-    @field_validator("fmt")
-    @classmethod
-    def _upper(cls, v: str) -> str:
+    def __post_init__(self) -> None:
         """Upper-case the format name."""
-        return v.upper()
+        self.fmt = self.fmt.upper()
 
     def options(self) -> dict:
         """Return the non-parquet read options, as passed to the engine function."""
@@ -203,7 +203,8 @@ class CopyCommand(BaseModel):
         }
 
 
-class UnloadCommand(BaseModel):
+@dataclass(kw_only=True)
+class UnloadCommand:
     """A parsed ``UNLOAD ('query') TO 's3://prefix/' ...`` statement.
 
     Redshift defaults to ``PARALLEL ON`` (one part-file per slice); ``PARALLEL
@@ -225,7 +226,7 @@ class UnloadCommand(BaseModel):
     addquotes: bool = False
     allowoverwrite: bool = False
     cleanpath: bool = False
-    partition_by: list[str] = []
+    partition_by: list[str] = field(default_factory=list)
     include: bool = False
     manifest: bool = False
     verbose: bool = False
@@ -233,11 +234,9 @@ class UnloadCommand(BaseModel):
     compression: str | None = None
     parallel: bool = True
 
-    @field_validator("fmt")
-    @classmethod
-    def _upper(cls, v: str) -> str:
+    def __post_init__(self) -> None:
         """Upper-case the format name."""
-        return v.upper()
+        self.fmt = self.fmt.upper()
 
     def options(self) -> dict:
         """Return the non-parquet write options, as passed to the engine function."""
@@ -397,7 +396,9 @@ def s3_client():
     (S3Proxy can't resolve virtual-host ``bucket.host``) and checksums are only
     sent when required (S3Proxy lacks SDK-v2 flexible checksums).
     """
-    import boto3
+    # a botocore client: boto3 would also import s3transfer, unused here, and
+    # every new connection's first COPY or UNLOAD pays for the imports
+    import botocore.session
     from botocore.config import Config
 
     endpoint = (
@@ -424,7 +425,7 @@ def s3_client():
         # S3Proxy runs with auth disabled; any credentials satisfy botocore.
         kwargs["aws_access_key_id"] = "oblako"
         kwargs["aws_secret_access_key"] = "oblako"
-    return boto3.client("s3", **kwargs)
+    return botocore.session.get_session().create_client("s3", **kwargs)
 
 
 def _from_pg(value, oid: int):
@@ -708,7 +709,9 @@ def _insert_rows(plpy, table: str, columns: list[str], rows) -> int:
     return count
 
 
-# --- JSON COPY (FORMAT JSON 'auto' | 'auto ignorecase' | 'noshred' | jsonpaths) ---
+# ---------------------------------------------------------------------------
+# JSON COPY (FORMAT JSON 'auto' | 'auto ignorecase' | 'noshred' | jsonpaths)
+# ---------------------------------------------------------------------------
 def _decompress(data: bytes, compression: str | None) -> bytes:
     """Decompress a COPY body.
 

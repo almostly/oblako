@@ -54,7 +54,7 @@ ENV PATH=/usr/local/pgsql/bin:$PATH
 RUN ln -sf /usr/share/postgresql/postgresql.conf.sample \
         /usr/local/pgsql/share/postgresql.conf.sample
 
-# boto3 + pyarrow + pydantic power the COPY/UNLOAD <-> S3 bridge: the proxy
+# botocore + pyarrow power the COPY/UNLOAD <-> S3 bridge: the proxy
 # rewrites Redshift COPY/UNLOAD into calls to plpython3u functions that read/write
 # Parquet on S3 (see initdb.d/07_copy_unload.sql, proxy/copy_unload.py). Installed
 # into the SYSTEM python so plpython3u (which links the system libpython) can

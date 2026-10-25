@@ -10,16 +10,21 @@ import gzip
 import importlib.util
 import io
 import pathlib
+import sys
 
 _PATH = (
     pathlib.Path(__file__).parents[2] / "oblako/images/redshift/proxy/copy_unload.py"
 )
 _spec = importlib.util.spec_from_file_location("_copy_unload", _PATH)
 _mod = importlib.util.module_from_spec(_spec)
+# registered before it runs, as an import would: its dataclasses look it up
+sys.modules[_spec.name] = _mod
 _spec.loader.exec_module(_mod)
 
 
-# --- detection + statement splitting ---------------------------------------
+# ---------------------------------------------------------------------------
+# Detection + statement splitting
+# ---------------------------------------------------------------------------
 def test_has_s3_copy_or_unload_gate():
     assert _mod.has_s3_copy_or_unload("COPY t FROM 's3://b/k' FORMAT AS PARQUET")
     assert _mod.has_s3_copy_or_unload("UNLOAD ('SELECT 1') TO 's3://b/k/' PARQUET")
@@ -36,7 +41,9 @@ def test_split_respects_quoted_semicolons():
     assert _mod.split_statements("SELECT 1;;  ; SELECT 2 ;") == ["SELECT 1", "SELECT 2"]
 
 
-# --- parsing into pydantic command models ----------------------------------
+# ---------------------------------------------------------------------------
+# Parsing into command models
+# ---------------------------------------------------------------------------
 def test_parse_copy_feast_shape():
     cmd = _mod.parse_copy(
         "COPY feast_entity_df_ab FROM 's3://b/e.parquet' IAM_ROLE 'arn' FORMAT AS PARQUET"
@@ -75,7 +82,9 @@ def test_parse_unload_query_uri_and_ignored_options():
     assert cmd.fmt == "PARQUET"
 
 
-# --- the rewrite the proxy applies -----------------------------------------
+# ---------------------------------------------------------------------------
+# The rewrite the proxy applies
+# ---------------------------------------------------------------------------
 def test_rewrite_unload_to_function_call():
     out = _mod.rewrite_copy_unload(
         "UNLOAD ('SELECT * FROM t') TO 's3://b/p/' IAM_ROLE 'x' FORMAT AS PARQUET"
@@ -126,7 +135,9 @@ def test_rewrite_noop_without_copy_unload():
     assert _mod.rewrite_copy_unload(sql) == sql
 
 
-# --- CSV / TEXT formats + options ------------------------------------------
+# ---------------------------------------------------------------------------
+# CSV / TEXT formats + options
+# ---------------------------------------------------------------------------
 def test_detect_format():
     assert _mod._detect_format("IAM_ROLE 'x' FORMAT AS PARQUET") == "PARQUET"
     assert _mod._detect_format("IAM_ROLE 'x' CSV") == "CSV"
@@ -139,7 +150,9 @@ def test_detect_format():
     assert _mod._detect_format("IAM_ROLE 'x' DELIMITER 's3://b/x.json'") == "TEXT"
 
 
-# --- JSON COPY: parsing ----------------------------------------------------
+# ---------------------------------------------------------------------------
+# JSON COPY: parsing
+# ---------------------------------------------------------------------------
 def test_parse_copy_json_variants():
     for tail, arg in [
         ("FORMAT AS JSON 'auto'", "auto"),
@@ -207,7 +220,9 @@ def test_rewrite_csv_copy_carries_format_and_options():
     assert '"ignore_header": 1' in out
 
 
-# --- JSON COPY: shredding logic (engine side, no container) ----------------
+# ---------------------------------------------------------------------------
+# JSON COPY: shredding logic (engine side, no container)
+# ---------------------------------------------------------------------------
 class _FakeS3:
     """Minimal S3 stub: get_object returns a Body with .read()."""
 
