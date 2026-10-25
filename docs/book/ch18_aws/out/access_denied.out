@@ -4,8 +4,8 @@ FAILED tests/test_pipeline.py::test_rerunning_a_day_replaces_it
 error:    S3ServiceException: User: arn:aws:sts::111122223333:
           assumed-role/daily-totals-copy/RedshiftIamRoleSession
           is not authorized to perform: s3:ListBucket on
-          resource: "arn:aws:s3:::daily-totals-test-29ae037a"
+          resource: "arn:aws:s3:::daily-totals-test-8efd463f"
           because no identity-based policy allows the s3:ListB
 code:     8001
-context:  Listing bucket=daily-totals-test-29ae037a prefix=
+context:  Listing bucket=daily-totals-test-8efd463f prefix=
           staging/daily_totals/date=2026-10-01/part-0.parquet

@@ -2,7 +2,7 @@
 name = "daily-totals"
 version = "0.1.0"
 requires-python = ">=3.12"
-dependencies = ["boto3", "pyarrow", "redshift-connector"]
+dependencies = ["boto3[crt]", "pyarrow", "redshift-connector"]
 
 [dependency-groups]
 dev = ["pytest"]
