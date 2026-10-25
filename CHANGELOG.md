@@ -11,6 +11,26 @@ versioned entries below.
 
 ## Unreleased
 
+## v0.7.2 (2026-10-25)
+
+A connection's first Redshift `COPY` or `UNLOAD` starts three times faster, and
+two Redshift fixes. The Redshift image keeps its tag, so a machine that already
+has it gets these changes after `docker pull public.ecr.aws/oblako/redshift-local:16`
+and a restart of Redshift.
+
+### Added
+
+- **Docs**: the listings of *A Data Guide to AWS on oblako*, one folder per chapter, in `docs/book`
+
+### Changed
+
+- **Redshift**: a connection's first `COPY` or `UNLOAD` takes about 0.17 s instead of 0.5 s, so a pipeline that connects for each run is no longer slowed by it
+
+### Fixed
+
+- **Redshift**: `pg_user_info.usecatupd` reads `true` for superusers, and `WHERE usecatupd` works instead of failing with a syntax error
+- **Redshift**: a multi-node cluster whose leader has no certificate, as with a Docker daemon that can't see `~/.oblako`, becomes `available` instead of timing out after 300 s
+
 ## v0.7.1 (2026-10-24)
 
 Redshift's rules and views for superuser passwords, as checked on Redshift

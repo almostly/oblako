@@ -49,7 +49,7 @@ export default function ServicesPage() {
         </Container>
         <Container fitHeight>
           <Box variant="awsui-key-label">Version</Box>
-          <Box variant="awsui-value-large">0.7.1</Box>
+          <Box variant="awsui-value-large">0.7.2</Box>
         </Container>
       </div>
 
