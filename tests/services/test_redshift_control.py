@@ -1,11 +1,15 @@
 """Unit tests for the Redshift control proxy's response rewriting (no Docker)."""
 
+import socket
+import threading
+
 from oblako.engines.redshift_control.app import (
     MAX_NODES,
     RedshiftControlProxy,
     region_of,
     rewrite,
 )
+from oblako.engines.redshift_control.clusters import SSL_REQUEST, _proxy_answers
 
 _CLUSTER = (
     "<Cluster><ClusterIdentifier>{id}</ClusterIdentifier>"
@@ -62,3 +66,26 @@ def test_too_many_nodes_is_refused():
 def test_region_from_the_sigv4_scope():
     auth = "AWS4-HMAC-SHA256 Credential=t/20261003/ap-south-1/redshift/aws4_request"
     assert region_of({"authorization": auth}) == "ap-south-1"
+
+
+def _serve_once(reply: bytes) -> int:
+    """Listen on a free port and answer one SSLRequest with ``reply``."""
+    server = socket.create_server(("127.0.0.1", 0))
+
+    def answer() -> None:
+        conn, _ = server.accept()
+        with conn, server:
+            conn.recv(len(SSL_REQUEST))
+            conn.sendall(reply)
+
+    threading.Thread(target=answer, daemon=True).start()
+    return server.getsockname()[1]
+
+
+def test_a_leader_is_ready_with_or_without_tls():
+    assert _proxy_answers(_serve_once(b"S"))
+    assert _proxy_answers(_serve_once(b"N"))
+
+
+def test_a_dropped_connection_is_not_ready():
+    assert not _proxy_answers(_serve_once(b""))

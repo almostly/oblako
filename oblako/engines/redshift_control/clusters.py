@@ -242,11 +242,12 @@ def _run_node(client, network, cluster_id: str, record: dict, node: int | None):
     return container
 
 
-# PostgreSQL's SSLRequest; the leader's wire proxy answers b"S" once it serves TLS
+# PostgreSQL's SSLRequest; the leader's wire proxy answers b"S" when it serves
+# TLS and b"N" when it has no certificate (an empty mount of the cert directory)
 SSL_REQUEST = struct.pack("!II", 8, 80877103)
 
 
-def _accepts_tls(port: int) -> bool:
+def _proxy_answers(port: int) -> bool:
     """Return whether the wire proxy on ``port`` answers an SSLRequest.
 
     A plain connect isn't enough: Docker's port forwarder accepts it before
@@ -255,13 +256,13 @@ def _accepts_tls(port: int) -> bool:
     try:
         with socket.create_connection(("127.0.0.1", port), timeout=2) as s:
             s.sendall(SSL_REQUEST)
-            return s.recv(1) == b"S"
+            return s.recv(1) in (b"S", b"N")
     except OSError:
         return False
 
 
 def _wait_ready(cluster_id: str, record: dict, timeout: float = 300.0) -> None:
-    """Wait until the leader has registered every compute node and serves TLS."""
+    """Wait until the leader has registered every compute node and its proxy answers."""
     client = _docker()
     leader = client.containers.get(node_name(cluster_id, None))
     query = "SELECT count(*) FROM pg_dist_node WHERE noderole = 'primary'"
@@ -291,7 +292,7 @@ def _wait_ready(cluster_id: str, record: dict, timeout: float = 300.0) -> None:
         if (
             probe.exit_code == 0
             and registered == str(record["nodes"] + 1)
-            and _accepts_tls(record["port"])
+            and _proxy_answers(record["port"])
         ):
             return
         time.sleep(1)
