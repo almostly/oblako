@@ -423,7 +423,7 @@ _ACL_TO_STRING = re.compile(
 # Redshift-specific marker so ordinary catalog queries pass through untouched.
 _CATALOG_MARKER = re.compile(
     r"(?i)\b(?:reldiststyle|attencodingtype|attisdistkey|attsortkeyord"
-    r"|usecatupd|svv_external_\w+|pg_get_late_binding_view_cols)\b"
+    r"|svv_external_\w+|pg_get_late_binding_view_cols)\b"
 )
 _EXTERNAL_BRANCH = re.compile(r"(?i)svv_external_\w+|pg_get_late_binding_view_cols")
 _UNION = re.compile(r"(?i)\bunion\b(?!\s+all\b)")
@@ -434,17 +434,21 @@ _CATALOG_REWRITES = [
     (re.compile(r"(?i)\b\w+\.attsortkeyord\b"), "0"),
     # pre-PG12 pg_attrdef.adsrc, referenced unqualified (not <alias>.adsrc).
     (re.compile(r'(?i)(?<![."\w])adsrc\b'), "NULL::text AS adsrc"),
-    # pg_user.usecatupd, a Redshift column PostgreSQL dropped in 9.5, selected
-    # bare from pg_catalog.pg_user. Answer as a neutral literal.
-    (re.compile(r'(?i)(?<![."\w])usecatupd\b'), "false AS usecatupd"),
     # output-column aliases used in WHERE -> the real columns they alias.
     (re.compile(r"(?i)\band\s+schema\s*=\s*('[^']*')"), r"AND n.nspname = \1"),
     (re.compile(r"(?i)\band\s+table_name\s*=\s*('[^']*')"), r"AND c.relname = \1"),
 ]
+# pg_user.usecatupd, a Redshift column PostgreSQL dropped in 9.5, selected bare
+# from pg_catalog.pg_user, is answered as a neutral literal. Only in a query on
+# pg_user: pg_user_info has the column (initdb.d/14_redshift_identities.sql).
+_PG_USER = re.compile(r"(?i)\bpg_user\b")
+_USECATUPD = re.compile(r'(?i)(?<![."\w])usecatupd\b')
 
 
 def _rewrite_catalog(sql: str) -> str:
     """Make Redshift's reflection queries run on PostgreSQL (gated). See above."""
+    if _PG_USER.search(sql):
+        sql = _USECATUPD.sub("false AS usecatupd", sql)
     if not _CATALOG_MARKER.search(sql):
         return sql
     # Drop the always-empty Spectrum / late-binding UNION branches. The first

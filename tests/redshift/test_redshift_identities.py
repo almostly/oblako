@@ -550,6 +550,16 @@ def test_user_info_views_hide_every_password(conn):
                 alice.execute(f"SELECT 1 FROM {view}")
 
 
+def test_user_info_usecatupd_follows_superuser(conn):
+    """pg_user_info.usecatupd is the user's superuser flag, and filters as a column."""
+    conn.execute("CREATE USER idt_ann CREATEUSER PASSWORD 'Probe-pw-1'")
+    assert _rows(
+        conn,
+        "SELECT usename, usecatupd FROM pg_user_info"
+        " WHERE usecatupd AND usename IN ('idt_alice', 'idt_ann')",
+    ) == [("idt_ann", True)]
+
+
 def test_alter_user_cannot_leave_a_superuser_without_a_password(conn):
     """As on Redshift Serverless, judged on the user's state after the statement."""
 

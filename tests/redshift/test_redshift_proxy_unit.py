@@ -234,7 +234,9 @@ def test_server_version_parameter_status_rewritten(monkeypatch):
     )
 
 
-# --- access-management compat (see tests/redshift/test_redshift_access.py) ---
+# ---------------------------------------------------------------------------
+# Access-management compat (see tests/redshift/test_redshift_access.py)
+# ---------------------------------------------------------------------------
 
 
 def test_usecatupd_neutralized():
@@ -255,6 +257,12 @@ def test_usecatupd_qualified_is_untouched():
     """A qualified u.usecatupd is a real join column, not the bare select item."""
     out = rewrite_sql("SELECT u.usecatupd FROM pg_catalog.pg_user u")
     assert "false AS usecatupd" not in out
+
+
+def test_usecatupd_on_pg_user_info_is_untouched():
+    """pg_user_info has its own usecatupd, so a query on it passes through."""
+    q = "SELECT usename FROM pg_user_info WHERE usecatupd"
+    assert rewrite_sql(q) == q
 
 
 def test_createuser_becomes_superuser():
