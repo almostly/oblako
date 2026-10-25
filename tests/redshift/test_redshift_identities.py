@@ -578,3 +578,45 @@ def test_alter_user_cannot_leave_a_superuser_without_a_password(conn):
     assert superuser("idt_ann") == [(True,)]
     conn.execute("ALTER USER idt_ann NOCREATEUSER PASSWORD DISABLE")
     assert superuser("idt_ann") == [(False,)]
+
+
+def test_an_empty_password_counts_as_disabled(conn):
+    """PASSWORD '' clears a password, so a superuser is refused it as PASSWORD DISABLE."""
+    conn.execute("CREATE USER idt_ann CREATEUSER PASSWORD 'Probe-pw-1'")
+    with pytest.raises(
+        psycopg.errors.SyntaxError, match="Superusers cannot have disabled passwords"
+    ):
+        conn.execute("ALTER USER idt_ann PASSWORD ''")
+    assert _rows(
+        conn, "SELECT rolpassword IS NULL FROM pg_authid WHERE rolname = 'idt_ann'"
+    ) == [(False,)]
+
+
+def test_a_non_superuser_learns_nothing_about_passwords(conn):
+    """Without the right to alter a user, the error is the same whether it has a password."""
+    conn.execute("CREATE USER idt_ann PASSWORD DISABLE")
+    conn.execute("CREATE USER idt_bob PASSWORD 'Probe-pw-1'")
+    with psycopg.connect(
+        autocommit=True, **{**RS, "user": "idt_alice", "password": "Abcdef12"}
+    ) as alice:
+        for user in ("idt_ann", "idt_bob"):
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                alice.execute(f"ALTER USER {user} CREATEUSER")
+
+
+def test_only_a_superuser_turns_the_password_check_off(conn):
+    """Off, as when the name migration puts roles back, a superuser may have no password."""
+    with psycopg.connect(
+        autocommit=True, **{**RS, "user": "idt_alice", "password": "Abcdef12"}
+    ) as alice:
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            alice.execute("SET oblako.check_superuser_passwords = off")
+    conn.execute("SET oblako.check_superuser_passwords = off")
+    try:
+        conn.execute("CREATE ROLE idt_bob LOGIN")
+        conn.execute("ALTER ROLE idt_bob WITH SUPERUSER")
+    finally:
+        conn.execute("RESET oblako.check_superuser_passwords")
+    assert _rows(conn, "SELECT usesuper FROM pg_user WHERE usename = 'idt_bob'") == [
+        (True,)
+    ]

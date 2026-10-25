@@ -14,7 +14,9 @@
  *      holds the privilege but doesn't own the object runs as the object's owner;
  *   4. refuses ALTER DEFAULT PRIVILEGES FOR USER x IN SCHEMA s unless x can
  *      CREATE in s, as Redshift does (whoever runs it, superusers included);
- *   5. refuses an ALTER USER that would leave a superuser without a password.
+ *   5. refuses an ALTER USER that would leave a superuser without a password,
+ *      unless oblako.check_superuser_passwords is off (the name migration
+ *      replays pg_dumpall's roles with it off).
  */
 #include "postgres.h"
 #include "fmgr.h"
@@ -51,6 +53,9 @@ static char *guc_store[8];
  * it; PostgreSQL already keeps quoted identifiers' case, so it changes nothing.
  */
 static bool case_sensitive_identifier = false;
+
+/* whether check_superuser_password runs; superusers only may turn it off */
+static bool check_superuser_passwords = true;
 
 static const char *const redshift_gucs[] = {
 	"client_protocol_version",
@@ -263,19 +268,24 @@ check_default_privileges(AlterDefaultPrivilegesStmt *stmt)
  * Redshift refuses an ALTER USER that leaves the user a superuser with its
  * password disabled, judged on the user's state after the statement: CREATEUSER
  * for a user without a password, or PASSWORD DISABLE for a superuser, unless the
- * same statement also gives a password or NOCREATEUSER.
+ * same statement also gives a password or NOCREATEUSER. PASSWORD '' clears the
+ * password, as DISABLE does. Only a superuser can make a superuser or change a
+ * superuser's password, so for anyone else PostgreSQL's own permission error
+ * comes first, and the error does not tell whether a user has a password.
  */
 static void
 check_superuser_password(AlterRoleStmt *stmt)
 {
 	HeapTuple	tuple;
-	bool		superuser = false;
+	bool		rolsuper = false;
 	bool		no_password = false;
 	bool		touched = false;
 	ListCell   *lc;
 
+	if (!check_superuser_passwords || !superuser())
+		return;
 	tuple = get_rolespec_tuple(stmt->role);
-	superuser = ((Form_pg_authid) GETSTRUCT(tuple))->rolsuper;
+	rolsuper = ((Form_pg_authid) GETSTRUCT(tuple))->rolsuper;
 	SysCacheGetAttr(AUTHNAME, tuple, Anum_pg_authid_rolpassword, &no_password);
 	ReleaseSysCache(tuple);
 	foreach(lc, stmt->options)
@@ -284,16 +294,16 @@ check_superuser_password(AlterRoleStmt *stmt)
 
 		if (strcmp(opt->defname, "superuser") == 0)
 		{
-			superuser = defGetBoolean(opt);
+			rolsuper = defGetBoolean(opt);
 			touched = true;
 		}
 		else if (strcmp(opt->defname, "password") == 0)
 		{
-			no_password = opt->arg == NULL;
+			no_password = opt->arg == NULL || strVal(opt->arg)[0] == '\0';
 			touched = true;
 		}
 	}
-	if (touched && superuser && no_password)
+	if (touched && rolsuper && no_password)
 		ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
 				 errmsg("Superusers cannot have disabled passwords")));
@@ -361,6 +371,15 @@ _PG_init(void)
 							 &case_sensitive_identifier,
 							 false,
 							 PGC_USERSET,
+							 0,
+							 NULL, NULL, NULL);
+
+	DefineCustomBoolVariable("oblako.check_superuser_passwords",
+							 "Refuse an ALTER USER that leaves a superuser without a password.",
+							 NULL,
+							 &check_superuser_passwords,
+							 true,
+							 PGC_SUSET,
 							 0,
 							 NULL, NULL, NULL);
 
