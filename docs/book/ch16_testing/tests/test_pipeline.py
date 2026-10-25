@@ -57,11 +57,12 @@ def test_loads_a_day_from_two_files(bucket, schema, connect):
 
 
 def test_rerunning_a_day_replaces_it(bucket, schema, connect):
-    day = "2026-10-02"
+    other, day = "2026-10-02", "2026-10-03"
+    put_events(bucket, other, 0, [event("c2", "order", "4.00")])
     put_events(bucket, day, 0, [event("c1", "order", "3.00")])
-    for _ in range(2):
+    for d in [other, day, day]:
         run(
-            day,
+            d,
             bucket=bucket,
             schema=schema,
             role=ROLE,
@@ -69,4 +70,6 @@ def test_rerunning_a_day_replaces_it(bucket, schema, connect):
         )
     assert totals(connect, schema, day) == [("c1", 1, D("3.00"))]
     # the other day's rows are untouched
-    assert len(totals(connect, schema, "2026-10-01")) == 2
+    assert totals(connect, schema, other) == [
+        ("c2", 1, D("4.00"))
+    ]
