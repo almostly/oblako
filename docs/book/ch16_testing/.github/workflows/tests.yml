@@ -19,7 +19,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
 
       - name: Install oblako
-        run: uv tool install oblako==0.7.1
+        run: uv tool install oblako==0.7.2
 
       - name: Start S3 and Redshift
         run: |
