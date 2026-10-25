@@ -1,28 +1,33 @@
-import json
-
 import boto3
+import pandas as pd
+from pyarrow import fs
 
-s3 = boto3.client("s3")
-policy = {
-    "Version": "2012-10-17",
-    "Statement": [
-        {
-            "Sid": "DenyDelete",
-            "Effect": "Deny",
-            "Principal": "*",
-            "Action": "s3:DeleteObject",
-            "Resource": "arn:aws:s3:::events/*",
-        }
-    ],
-}
-s3.put_bucket_policy(Bucket="events", Policy=json.dumps(policy))
-resp = s3.get_bucket_policy(Bucket="events")
-stored = json.loads(resp["Policy"])
-print(stored["Statement"][0]["Sid"])
+# pandas reads and writes S3 through pyarrow, whose S3 client
+# ignores the profile's endpoints, so it gets the one boto3 uses
+endpoint = boto3.client("s3").meta.endpoint_url
+s3_fs = fs.S3FileSystem(endpoint_override=endpoint)
 
-# On AWS this delete is refused with AccessDenied. oblako stores
-# the policy but does not evaluate it, so the delete goes through.
-s3.delete_object(
-    Bucket="events", Key="raw/2026-09-03/click-0002.json"
+clicks = pd.DataFrame(
+    {
+        "day": [
+            "2026-09-01",
+            "2026-09-01",
+            "2026-09-02",
+            "2026-09-03",
+        ],
+        "user": ["u-1", "u-2", "u-1", "u-3"],
+        "page": ["/", "/pricing", "/docs", "/"],
+    }
 )
-print("deleted")
+clicks.to_parquet(
+    "events/clicks/",
+    partition_cols=["day"],
+    filesystem=s3_fs,
+)
+
+one_day = pd.read_parquet(
+    "events/clicks/",
+    filters=[("day", "=", "2026-09-02")],
+    filesystem=s3_fs,
+)
+print(one_day)

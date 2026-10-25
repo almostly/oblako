@@ -1,33 +1,24 @@
 import boto3
-import pandas as pd
-from pyarrow import fs
 
-# pandas reads and writes S3 through pyarrow, whose S3 client
-# ignores the profile's endpoints, so it gets the one boto3 uses
-endpoint = boto3.client("s3").meta.endpoint_url
-s3_fs = fs.S3FileSystem(endpoint_override=endpoint)
+s3 = boto3.client("s3")
+key = "raw/2026-09-01/signup-0001.json"
 
-clicks = pd.DataFrame(
-    {
-        "day": [
-            "2026-09-01",
-            "2026-09-01",
-            "2026-09-02",
-            "2026-09-03",
-        ],
-        "user": ["u-1", "u-2", "u-1", "u-3"],
-        "page": ["/", "/pricing", "/docs", "/"],
-    }
+s3.put_object_tagging(
+    Bucket="events",
+    Key=key,
+    Tagging={
+        "TagSet": [
+            {"Key": "stage", "Value": "raw"},
+            {"Key": "pii", "Value": "no"},
+        ]
+    },
 )
-clicks.to_parquet(
-    "events/clicks/",
-    partition_cols=["day"],
-    filesystem=s3_fs,
-)
+print(s3.get_object_tagging(Bucket="events", Key=key)["TagSet"])
 
-one_day = pd.read_parquet(
-    "events/clicks/",
-    filters=[("day", "=", "2026-09-02")],
-    filesystem=s3_fs,
+# A second put replaces the whole set; it does not merge.
+s3.put_object_tagging(
+    Bucket="events",
+    Key=key,
+    Tagging={"TagSet": [{"Key": "stage", "Value": "clean"}]},
 )
-print(one_day)
+print(s3.get_object_tagging(Bucket="events", Key=key)["TagSet"])
