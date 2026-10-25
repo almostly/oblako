@@ -90,8 +90,11 @@ dump() {
     # ALTER and DROP grants hold OIDs; keep them by name. A volume from before
     # pg_oblako.object_privileges has none, and a query naming the table would
     # fail to parse there, so look for it first.
+    # (on a line of its own, so that a failed probe stops the move under set -e)
     : >"$WORK/db$i.privileges.sql"
-    if [ -n "$(stock_psql -d "$db" -Atc "SELECT to_regclass('pg_oblako.object_privileges')")" ]; then
+    local found
+    found=$(stock_psql -d "$db" -Atc "SELECT to_regclass('pg_oblako.object_privileges')")
+    if [ -n "$found" ]; then
       stock_psql -d "$db" -Atc "SELECT string_agg(format(
               'SELECT pg_oblako.object_privilege(true, ARRAY[%L], %L, ARRAY[%L], ARRAY[%L]::text[], %L);',
               p.privilege, p.objkind,
@@ -131,7 +134,10 @@ restore() {
     return 0
   fi
   touch "$WORK/restoring"
-  new_psql -d postgres -f "$WORK/globals.sql" >/dev/null 2>&1 || true
+  # the roles as they were, a superuser without a password included: Redshift's
+  # rule against that is for clients, not for putting a volume back
+  PGOPTIONS="$PGOPTIONS -c oblako.check_superuser_passwords=off" \
+    new_psql -d postgres -f "$WORK/globals.sql" >/dev/null 2>&1 || true
   local i=0 db failed=0
   while IFS= read -r db; do
     i=$((i + 1))
