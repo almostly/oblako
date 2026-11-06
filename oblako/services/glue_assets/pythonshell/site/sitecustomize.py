@@ -39,6 +39,7 @@ def _with_endpoint(create_client: Callable[..., Any]) -> Callable[..., Any]:
 
     @functools.wraps(create_client)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
+        """Create the client, with the environment's endpoint when none is given."""
         bound = signature.bind(*args, **kwargs)
         if bound.arguments.get("endpoint_url") is None:
             url = _endpoint(bound.arguments["service_name"])
