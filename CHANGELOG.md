@@ -11,6 +11,22 @@ versioned entries below.
 
 ## Unreleased
 
+## v0.7.3 (2026-11-06)
+
+Glue Python shell jobs run as they do on AWS: plain Python 3.9 with Glue's
+libraries, not in the Spark container. Two Redshift fixes to the superuser
+password rule and the move to 127-byte names. The Redshift image keeps its tag,
+so a machine that already has it gets these after
+`docker pull public.ecr.aws/oblako/redshift-local:16` and a restart of Redshift.
+
+### Changed
+
+- **Glue**: a job with `Command.Name` `pythonshell` runs as Python 3.9 with no Spark, in an image built on first use with Glue's `library-set` (`analytics` pins the versions AWS lists, `none` has botocore only), instead of in `amazon/aws-glue-libs:5` on Python 3.11. `--additional-python-modules` is pip-installed, `--extra-py-files` go on the path, `awsglue.utils.getResolvedOptions` works, boto3, awswrangler and s3fs reach oblako, and redshift_connector trusts oblako's Redshift. `PythonVersion` `3` means 3.9 and `MaxCapacity` defaults to 0.0625, as on Glue
+
+### Fixed
+
+- **Redshift**: the superuser password rule also refuses `PASSWORD ''`, and runs for superusers only, so a non-superuser's error no longer tells whether another user has a password
+- **Redshift**: the move to 127-byte names restores a superuser without a password as a superuser, and stops if it cannot tell whether a database has `ALTER` and `DROP` grants instead of leaving them out
 ## v0.7.2 (2026-10-25)
 
 A connection's first Redshift `COPY` or `UNLOAD` starts three times faster, and
