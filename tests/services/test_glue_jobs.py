@@ -34,9 +34,15 @@ def glue(tmp_path, monkeypatch):
             "stderr": "ValueError: bad input" if failing else "",
         }
 
+    def run_python_shell(self, script, *, args=None, timeout=600, **options):
+        calls.append({"python_shell": options, "args": args, "timeout": timeout})
+        return {"exit_code": 0, "logs": "out", "stdout": "out", "stderr": ""}
+
     from oblako.services.glue import GlueService
 
     monkeypatch.setattr(GlueService, "submit_job", submit_job)
+    monkeypatch.setattr(GlueService, "run_python_shell", run_python_shell)
+    monkeypatch.setattr(jobs, "_read_object", lambda location: location.encode())
     http = TestClient(glue_catalog.create_app())
 
     def call(action, body):
@@ -135,3 +141,59 @@ def test_job_bookmarks_commit_get_and_reset(glue):
     glue("DeleteJob", {"JobName": "etl"})
     _create(glue)
     assert glue("GetJobBookmark", {"JobName": "etl"})[0] == 400
+
+
+def test_python_shell_job_defaults_and_versions(glue):
+    command = {
+        "Name": "pythonshell",
+        "PythonVersion": "3",
+        "ScriptLocation": "s3://b/job.py",
+    }
+    _create(glue, "shell", Command=command)
+    job = glue("GetJob", {"JobName": "shell"})[1]["Job"]
+    assert job["Command"]["PythonVersion"] == "3.9"
+    assert job["MaxCapacity"] == 0.0625 and "GlueVersion" not in job
+    status, body = _create(glue, "old", Command={**command, "PythonVersion": "3.6"})
+    assert status == 400 and body["__type"] == "InvalidInputException"
+
+
+def test_python_shell_run_gets_libraries_modules_and_files(glue):
+    command = {"Name": "pythonshell", "ScriptLocation": "s3://b/job.py"}
+    _create(
+        glue,
+        "shell",
+        Command=command,
+        DefaultArguments={
+            "library-set": "none",
+            "--additional-python-modules": "pyarrow==7.0.0,requests -i https://pypi.org/simple/",
+            "--extra-py-files": "s3://b/lib/helpers.py, s3://b/lib/pkg-1.0-py3-none-any.whl",
+        },
+    )
+    _, body = glue(
+        "StartJobRun", {"JobName": "shell", "Arguments": {"--day": "2026-11-06"}}
+    )
+    run = _wait(glue, "shell", body["JobRunId"])
+    assert run["JobRunState"] == "SUCCEEDED" and run["MaxCapacity"] == 0.0625
+    call = glue.calls[0]
+    assert call["python_shell"] == {
+        "library_set": "none",
+        "python_modules": [
+            "pyarrow==7.0.0",
+            "requests",
+            "-i",
+            "https://pypi.org/simple/",
+        ],
+        "extra_py_files": {
+            "helpers.py": b"s3://b/lib/helpers.py",
+            "pkg-1.0-py3-none-any.whl": b"s3://b/lib/pkg-1.0-py3-none-any.whl",
+        },
+    }
+    assert call["args"][:2] == ["--JOB_NAME", "shell"] and "--day" in call["args"]
+
+
+def test_python_shell_rejects_an_unknown_library_set(glue):
+    command = {"Name": "pythonshell", "ScriptLocation": "s3://b/job.py"}
+    _create(glue, "shell", Command=command, DefaultArguments={"library-set": "full"})
+    _, body = glue("StartJobRun", {"JobName": "shell"})
+    run = _wait(glue, "shell", body["JobRunId"])
+    assert run["JobRunState"] == "FAILED" and "library-set" in run["ErrorMessage"]

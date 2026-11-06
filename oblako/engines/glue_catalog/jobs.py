@@ -2,8 +2,10 @@
 
 A job is a definition: a script in S3 (``Command.ScriptLocation``), default
 arguments, a timeout. ``StartJobRun`` downloads the script from oblako's S3 and
-runs it in the Glue 5 container through :class:`oblako.services.glue.GlueService`,
-in a background thread, as Glue does. The script gets the same arguments Glue
+runs it through :class:`oblako.services.glue.GlueService`, in a background
+thread, as Glue does: a Spark job (``Command.Name`` ``glueetl``) in the Glue 5
+container, a Python shell job (``pythonshell``) as plain Python 3.9 with Glue's
+``library-set``, ``--additional-python-modules`` and ``--extra-py-files``. The script gets the same arguments Glue
 passes (``--JOB_NAME``, ``--JOB_RUN_ID`` and the job's arguments), so
 ``getResolvedOptions`` works unchanged, and its ``s3://`` paths reach oblako's S3
 through the runner's Spark settings, with no endpoint in the script.
@@ -96,20 +98,37 @@ _JOB_FIELDS = (
 )
 
 
+def _check_command(command: dict) -> dict:
+    """Validate a job's Command; a Python shell job's ``3`` means Python 3.9, as on Glue."""
+    if not command.get("ScriptLocation"):
+        raise GlueError("InvalidInputException", "Command.ScriptLocation is required.")
+    if command.get("Name") != "pythonshell":
+        return command
+    version = command.get("PythonVersion", "3.9")
+    if version not in ("3", "3.9"):
+        raise GlueError(
+            "InvalidInputException",
+            f"Python shell jobs support PythonVersion 3.9, not {version}.",
+        )
+    return {**command, "PythonVersion": "3.9"}
+
+
 @_action("AWSGlue.CreateJob")
 def _create_job(body):
     """CreateJob: store a new job definition."""
     name = body["Name"]
-    if not (body.get("Command") or {}).get("ScriptLocation"):
-        raise GlueError("InvalidInputException", "Command.ScriptLocation is required.")
+    command = _check_command(body.get("Command") or {})
     with _lock:
         state = _load()
         if name in state["jobs"]:
             raise GlueError("AlreadyExistsException", f"Job {name} already exists.")
         now = time.time()
         job = {k: body[k] for k in _JOB_FIELDS if k in body}
-        job.update(Name=name, CreatedOn=now, LastModifiedOn=now)
-        job.setdefault("GlueVersion", "5.0")
+        job.update(Name=name, Command=command, CreatedOn=now, LastModifiedOn=now)
+        if command.get("Name") == "pythonshell":
+            job.setdefault("MaxCapacity", 0.0625)  # Glue's default for Python shell
+        else:
+            job.setdefault("GlueVersion", "5.0")
         job.setdefault("Timeout", DEFAULT_TIMEOUT_MINUTES)
         state["jobs"][name] = job
         _save(state)
@@ -142,6 +161,8 @@ def _update_job(body):
         state = _load()
         job = _require_job(state, name)
         update = body.get("JobUpdate") or {}
+        if "Command" in update:
+            update = {**update, "Command": _check_command(update["Command"])}
         job.update({k: update[k] for k in _JOB_FIELDS if k in update})
         job["LastModifiedOn"] = time.time()
         _save(state)
@@ -243,16 +264,18 @@ def _start_job_run(body):
             "JobRunState": "STARTING",
             "Arguments": arguments,
             "Timeout": timeout,
-            "GlueVersion": job.get("GlueVersion", "5.0"),
             "ExecutionTime": 0,
             "LogGroupName": "/aws-glue/jobs",
         }
+        if "GlueVersion" in job:
+            run["GlueVersion"] = job["GlueVersion"]
+        if "MaxCapacity" in job:
+            run["MaxCapacity"] = job["MaxCapacity"]
         state["runs"].setdefault(name, []).insert(0, run)
         _save(state)
-    script_location = job["Command"]["ScriptLocation"]
     threading.Thread(
         target=_execute,
-        args=(name, run_id, script_location, arguments, timeout),
+        args=(name, run_id, job["Command"], arguments, timeout),
         daemon=True,
     ).start()
     return {"JobRunId": run_id}
@@ -293,13 +316,52 @@ def _argv(name: str, run_id: str, arguments: dict) -> list[str]:
     return argv
 
 
-def _read_script(location: str) -> str:
-    """Return the job script's text from oblako's S3."""
+def _read_object(location: str) -> bytes:
+    """Return an object from oblako's S3 by its ``s3://`` URI."""
     from oblako.services.boto import client
 
     bucket, _, key = location.removeprefix("s3://").partition("/")
     s3 = client("s3", f"http://localhost:{ports.S3}")
-    return s3.get_object(Bucket=bucket, Key=key)["Body"].read().decode()
+    return s3.get_object(Bucket=bucket, Key=key)["Body"].read()
+
+
+def _read_script(location: str) -> str:
+    """Return the job script's text from oblako's S3."""
+    return _read_object(location).decode()
+
+
+def _argument(arguments: dict, name: str) -> str:
+    """Return a job argument given as ``--name`` or ``name``, or ``""``."""
+    return str(arguments.get(f"--{name}", arguments.get(name, "")))
+
+
+def _run_python_shell(
+    name: str, run_id: str, script: str, arguments: dict, timeout: int
+) -> dict:
+    """Run a Python shell job with its library set, pip modules and extra files."""
+    import shlex
+
+    from oblako.services.glue import GlueService
+
+    library_set = _argument(arguments, "library-set") or "analytics"
+    if library_set not in ("analytics", "none"):
+        raise ValueError(f"library-set must be analytics or none, not {library_set}")
+    modules = _argument(arguments, "additional-python-modules")
+    python_modules = [arg for spec in modules.split(",") for arg in shlex.split(spec)]
+    extra_py_files = {
+        location.rsplit("/", 1)[-1]: _read_object(location)
+        for location in filter(
+            None, map(str.strip, _argument(arguments, "extra-py-files").split(","))
+        )
+    }
+    return GlueService().run_python_shell(
+        script,
+        args=_argv(name, run_id, arguments),
+        library_set=library_set,
+        python_modules=python_modules,
+        extra_py_files=extra_py_files,
+        timeout=timeout * 60,
+    )
 
 
 def _error_message(logs: str, exit_code: int) -> str:
@@ -337,17 +399,20 @@ def _publish_logs(run_id: str, stdout: str, stderr: str) -> None:
         pass  # moto not running: the log file still has everything
 
 
-def _execute(name: str, run_id: str, location: str, arguments: dict, timeout: int):
-    """Run the job's script in the Glue container and record how the run ended."""
+def _execute(name: str, run_id: str, command: dict, arguments: dict, timeout: int):
+    """Run the job's script in its container and record how the run ended."""
     from oblako.services.glue import GlueService
 
     started = time.time()
     _update_run(name, run_id, JobRunState="RUNNING")
     try:
-        script = _read_script(location)
-        result = GlueService().submit_job(
-            script, args=_argv(name, run_id, arguments), timeout=timeout * 60
-        )
+        script = _read_script(command["ScriptLocation"])
+        if command.get("Name") == "pythonshell":
+            result = _run_python_shell(name, run_id, script, arguments, timeout)
+        else:
+            result = GlueService().submit_job(
+                script, args=_argv(name, run_id, arguments), timeout=timeout * 60
+            )
     except Exception as err:
         state = "TIMEOUT" if "timed out" in str(err).lower() else "FAILED"
         _update_run(

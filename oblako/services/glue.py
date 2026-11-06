@@ -1,4 +1,7 @@
-"""Local AWS Glue: PySpark jobs in the official ``amazon/aws-glue-libs:5`` image.
+"""Local AWS Glue: Spark jobs and Python shell jobs.
+
+PySpark jobs run in the official ``amazon/aws-glue-libs:5`` image, and Python
+shell jobs in a Python 3.9 image with Glue's library sets.
 
 Submit a Glue / PySpark script and the service runs a per-job container that has
 Spark + Glue libs + Iceberg already on the classpath. The container is wired so
@@ -48,6 +51,47 @@ _SPARK_CONFS = (
     # which s3fs-based readers fail on. Delete each marker once files land under it.
     "spark.hadoop.fs.s3a.directory.marker.retention=delete",
 )
+
+
+PYTHON_SHELL_IMAGE = "oblako/glue-pythonshell"
+_PYTHON_SHELL_DIR = Path(__file__).parent / "glue_assets" / "pythonshell"
+
+
+def _container_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    """Return a job container's environment: credentials and oblako's endpoints."""
+    return {
+        "AWS_ACCESS_KEY_ID": "test",
+        "AWS_SECRET_ACCESS_KEY": "test",
+        "AWS_DEFAULT_REGION": config.region(),
+        # S3Proxy doesn't speak the new flexible checksums.
+        "AWS_REQUEST_CHECKSUM_CALCULATION": "when_required",
+        "AWS_RESPONSE_CHECKSUM_VALIDATION": "when_required",
+        # the AWS SDKs in the container (Glue's Java SDK v2 for from_catalog /
+        # getSink catalog updates, boto3 in the script: Secrets Manager, S3,
+        # every service) reach oblako, not AWS
+        **{
+            key: value.replace("localhost", "host.docker.internal")
+            for key, value in ENDPOINTS.items()
+        },
+        **(env or {}),
+    }
+
+
+def _collect(container, timeout: int) -> dict:
+    """Wait for a job container, return its exit code and logs, and remove it."""
+    try:
+        result = container.wait(timeout=timeout)
+        logs = container.logs().decode("utf-8", errors="replace")
+        stdout = container.logs(stdout=True, stderr=False)
+        stderr = container.logs(stdout=False, stderr=True)
+        return {
+            "exit_code": result["StatusCode"],
+            "logs": logs,
+            "stdout": stdout.decode("utf-8", errors="replace"),
+            "stderr": stderr.decode("utf-8", errors="replace"),
+        }
+    finally:
+        container.remove(force=True)
 
 
 class GlueService:
@@ -147,22 +191,7 @@ class GlueService:
         """
         self.ensure_image()
         interceptor_jar = self._ensure_interceptor_jar()
-        full_env = {
-            "AWS_ACCESS_KEY_ID": "test",
-            "AWS_SECRET_ACCESS_KEY": "test",
-            "AWS_DEFAULT_REGION": config.region(),
-            # S3Proxy doesn't speak the new flexible checksums.
-            "AWS_REQUEST_CHECKSUM_CALCULATION": "when_required",
-            "AWS_RESPONSE_CHECKSUM_VALIDATION": "when_required",
-            # the AWS SDKs in the container (Glue's Java SDK v2 for from_catalog /
-            # getSink catalog updates, boto3 in the script: Secrets Manager, S3,
-            # every service) reach oblako, not AWS
-            **{
-                key: value.replace("localhost", "host.docker.internal")
-                for key, value in ENDPOINTS.items()
-            },
-            **(env or {}),
-        }
+        full_env = _container_env(env)
         # on oblako's RDS network, when there is one, so a job reaches an RDS
         # instance at its endpoint (<id>.<region>.rds.localhost), as on AWS
         try:
@@ -199,19 +228,90 @@ class GlueService:
                 extra_hosts={"host.docker.internal": "host-gateway"},
                 **network,
             )
-            try:
-                result = container.wait(timeout=timeout)
-                logs = container.logs().decode("utf-8", errors="replace")
-                stdout = container.logs(stdout=True, stderr=False)
-                stderr = container.logs(stdout=False, stderr=True)
-                return {
-                    "exit_code": result["StatusCode"],
-                    "logs": logs,
-                    "stdout": stdout.decode("utf-8", errors="replace"),
-                    "stderr": stderr.decode("utf-8", errors="replace"),
-                }
-            finally:
-                container.remove(force=True)
+            return _collect(container, timeout)
+
+    def ensure_python_shell_image(self, library_set: str) -> str:
+        """Build the Python shell 3.9 image for a library set, once, and return its tag."""
+        from docker.errors import ImageNotFound
+
+        tag = f"{PYTHON_SHELL_IMAGE}:3.9-{library_set}"
+        try:
+            self.client.images.get(tag)
+        except ImageNotFound:
+            print(f"Building {tag} (Glue's Python shell libraries)...")
+            self.client.images.build(
+                path=str(_PYTHON_SHELL_DIR),
+                tag=tag,
+                buildargs={"LIBRARY_SET": library_set},
+                rm=True,
+            )
+        return tag
+
+    def run_python_shell(
+        self,
+        script: str,
+        *,
+        args: list[str] | None = None,
+        library_set: str = "analytics",
+        python_modules: list[str] | None = None,
+        extra_py_files: dict[str, bytes] | None = None,
+        timeout: int = 1200,
+    ) -> dict:
+        """Run a Glue Python shell script: plain Python 3.9, Glue's libraries, no Spark.
+
+        ``library_set`` is Glue's ``library-set`` (``analytics`` or ``none``).
+        ``python_modules`` are pip arguments (``--additional-python-modules``),
+        installed before the script runs. ``extra_py_files`` are the
+        ``--extra-py-files`` by file name, put on ``PYTHONPATH`` (a ``.whl`` or
+        ``.zip`` itself, a ``.py`` by its directory). Returns what
+        :meth:`submit_job` returns.
+        """
+        import shlex
+
+        image = self.ensure_python_shell_image(library_set)
+        command = f"exec python -u /scripts/job.py {shlex.join(args or [])}"
+        if python_modules:
+            command = f"pip install --quiet --root-user-action=ignore {shlex.join(python_modules)} && {command}"
+        paths = ["/opt/oblako", "/scripts/oblako", "/scripts/lib"]
+        paths += [
+            f"/scripts/lib/{n}"
+            for n in extra_py_files or {}
+            if n.endswith((".whl", ".zip"))
+        ]
+        with tempfile.TemporaryDirectory() as scripts_dir:
+            (Path(scripts_dir) / "job.py").write_text(script)
+            lib = Path(scripts_dir) / "lib"
+            lib.mkdir()
+            for file_name, body in (extra_py_files or {}).items():
+                (lib / file_name).write_bytes(body)
+            # redshift_connector trusts oblako's Redshift, as after `oblako trust`
+            from oblako.services.redshift import RedshiftService, write_trust_keeper
+
+            trust = Path(scripts_dir) / "oblako"
+            trust.mkdir()
+            write_trust_keeper(trust, RedshiftService().server_certs())
+            container = self.client.containers.create(
+                image,
+                command=["sh", "-c", command],
+                volumes={scripts_dir: {"bind": "/scripts", "mode": "ro"}},
+                environment=_container_env({"PYTHONPATH": ":".join(paths)}),
+                extra_hosts={"host.docker.internal": "host-gateway"},
+            )
+            # on oblako's RDS and Redshift networks, when they exist, so a job
+            # reaches an instance or a cluster at its endpoint, as on AWS
+            from oblako.engines.rds_control.instances import NETWORK as RDS_NETWORK
+            from oblako.engines.redshift_control.clusters import (
+                NETWORK as REDSHIFT_NETWORK,
+            )
+            from docker.errors import NotFound
+
+            for name in (RDS_NETWORK, REDSHIFT_NETWORK):
+                try:
+                    self.client.networks.get(name).connect(container)
+                except NotFound:
+                    pass
+            container.start()
+            return _collect(container, timeout)
 
     def run_workflow(self, name: str, steps: list[dict], *, timeout: int = 600) -> dict:
         """Run a Glue workflow: a sequential pipeline of PySpark job steps.
