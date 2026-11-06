@@ -231,10 +231,25 @@ class GlueService:
             return _collect(container, timeout)
 
     def ensure_python_shell_image(self, library_set: str) -> str:
-        """Build the Python shell 3.9 image for a library set, once, and return its tag."""
+        """Build the Python shell 3.9 image for a library set, once, and return its tag.
+
+        The tag carries a hash of the image's sources, so a change to the
+        Dockerfile, the requirements or the site files builds a new image.
+        """
+        import hashlib
+
         from docker.errors import ImageNotFound
 
-        tag = f"{PYTHON_SHELL_IMAGE}:3.9-{library_set}"
+        sources = sorted(
+            f
+            for f in _PYTHON_SHELL_DIR.rglob("*")
+            if f.is_file() and "__pycache__" not in f.parts
+        )
+        digest = hashlib.sha256()
+        for source in sources:
+            digest.update(source.relative_to(_PYTHON_SHELL_DIR).as_posix().encode())
+            digest.update(source.read_bytes())
+        tag = f"{PYTHON_SHELL_IMAGE}:3.9-{library_set}-{digest.hexdigest()[:12]}"
         try:
             self.client.images.get(tag)
         except ImageNotFound:
