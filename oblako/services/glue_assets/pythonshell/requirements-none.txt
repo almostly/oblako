@@ -1,0 +1,2 @@
+# Glue Python shell 3.9, library-set "none": botocore alone (awscli left out)
+botocore==1.24.21
